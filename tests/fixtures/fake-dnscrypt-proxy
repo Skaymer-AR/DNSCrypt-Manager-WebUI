@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+##############################################################################
+# ARCHIVO DE PRUEBA — NO ES dnscrypt-proxy REAL — NO INCLUIR EN EL MODULO
+#
+# tests/fixtures/fake-dnscrypt-proxy
+#
+# Doble de pruebas usado UNICAMENTE por tests/smoke-test-cli.sh para poder
+# ejercitar la CLI dnscrypt-manager sin el binario oficial (que no puede
+# descargarse en este sandbox por falta de red).
+#
+# Implementa lo minimo que la CLI necesita de la interfaz real de
+# dnscrypt-proxy: -version | -config F -check | -config F -resolve NAME |
+# modo daemon (bindea sockets UDP+TCP reales en listen_addresses y responde
+# consultas DNS minimas con A 93.184.216.34).
+#
+# tools/build-module.sh EXCLUYE explicitamente todo tests/ del ZIP final.
+# Si este archivo aparece en bin/arm64/dnscrypt-proxy o en un ZIP de
+# distribucion, es un error de empaquetado.
+##############################################################################
+import sys, socket, struct, threading, time, random, tomllib
+
+ANSWER_IP = "93.184.216.34"
+
+def load(cfg):
+    with open(cfg, "rb") as f:
+        return tomllib.load(f)
+
+def check(cfg):
+    try:
+        d = load(cfg)
+    except Exception as e:
+        print(f"[FATAL] config invalida: {e}", file=sys.stderr); return 1
+    if "listen_addresses" not in d or not d["listen_addresses"]:
+        print("[FATAL] falta listen_addresses", file=sys.stderr); return 1
+    print("Configuration successfully checked (fake)"); return 0
+
+def split_addr(a):
+    host, port = a.rsplit(":", 1)
+    return host.strip("[]"), int(port)
+
+def dns_answer(q):
+    i = 12
+    while q[i] != 0: i += 1 + q[i]
+    qend = i + 1 + 4
+    return (q[0:2] + b"\x81\x80" + q[4:6] + b"\x00\x01\x00\x00\x00\x00"
+            + q[12:qend] + b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04"
+            + socket.inet_aton(ANSWER_IP))
+
+def serve(cfg):
+    d = load(cfg)
+    def udp(host, port, fam):
+        try:
+            s = socket.socket(fam, socket.SOCK_DGRAM); s.bind((host, port))
+        except OSError as e:
+            print(f"[NOTICE] UDP {host}:{port} no disponible en este sandbox ({e}); omitido", flush=True)
+            return
+        print(f"[NOTICE] fake listening UDP {host}:{port}", flush=True)
+        while True:
+            q, peer = s.recvfrom(4096)
+            try: s.sendto(dns_answer(q), peer)
+            except Exception: pass
+    def tcp(host, port, fam):
+        try:
+            s = socket.socket(fam, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port)); s.listen(4)
+        except OSError as e:
+            print(f"[NOTICE] TCP {host}:{port} no disponible en este sandbox ({e}); omitido", flush=True)
+            return
+        print(f"[NOTICE] fake listening TCP {host}:{port}", flush=True)
+        while True:
+            c, _ = s.accept()
+            try:
+                ln = struct.unpack("!H", c.recv(2))[0]
+                a = dns_answer(c.recv(ln))
+                c.sendall(struct.pack("!H", len(a)) + a)
+            except Exception: pass
+            finally: c.close()
+    for a in d["listen_addresses"]:
+        host, port = split_addr(a)
+        fam = socket.AF_INET6 if ":" in host else socket.AF_INET
+        threading.Thread(target=udp, args=(host, port, fam), daemon=True).start()
+        threading.Thread(target=tcp, args=(host, port, fam), daemon=True).start()
+    while True: time.sleep(3600)
+
+def resolve(cfg, name):
+    d = load(cfg)
+    host, port = split_addr(d["listen_addresses"][0])
+    qid = struct.pack("!H", random.randint(0, 65535))
+    qname = b"".join(bytes([len(p)]) + p.encode() for p in name.split(".")) + b"\x00"
+    q = qid + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + qname + b"\x00\x01\x00\x01"
+    s = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(3)
+    s.sendto(q, (host, port))
+    r = s.recv(4096)
+    ip = socket.inet_ntoa(r[-4:])
+    print(f"Resolved {name} to {ip} via {host}:{port} (fake)")
+    return 0
+
+args = sys.argv[1:]
+if args and args[0] == "-version":
+    print("2.1.99-fake (doble de pruebas; no usar en produccion)"); sys.exit(0)
+cfg = None
+if "-config" in args: cfg = args[args.index("-config") + 1]
+if "-check" in args:   sys.exit(check(cfg))
+if "-resolve" in args: sys.exit(resolve(cfg, args[args.index("-resolve") + 1]))
+serve(cfg)

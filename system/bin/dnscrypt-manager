@@ -1,0 +1,1144 @@
+#!/system/bin/sh
+##############################################################################
+# DNSCrypt Manager - CLI principal (dnscrypt-manager)
+# Creado por Skaymer AR
+#
+# Unico "cerebro" del modulo: lo llaman los scripts de arranque, los wrappers
+# de scripts/ y la WebUI. Toda validacion/sanitizacion vive aca.
+#
+# SEGURIDAD:
+#   - Ningun input del usuario llega a 'eval' ni se interpola en comandos.
+#   - Contenido arbitrario (editor TOML) viaja en base64 (sin metacaracteres).
+#   - Todo valor se valida (scripts/common.sh) antes de escribirse o aplicarse.
+##############################################################################
+
+# En modo test, SIEMPRE resolvemos common.sh relativo a este mismo script
+# (nunca la ruta de produccion), para que no importe si quedo una copia
+# vieja en /data/adb de una corrida de produccion anterior.
+if [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ]; then
+  COMMON="${0%/*}/../../scripts/common.sh"
+else
+  COMMON="/data/adb/modules/dnscrypt_manager/scripts/common.sh"
+  [ -f "$COMMON" ] || COMMON="${0%/*}/../../scripts/common.sh"
+fi
+if [ ! -f "$COMMON" ]; then
+  echo "ERROR: no se encuentra common.sh" >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+. "$COMMON"
+
+# validate-binary.sh: funciones compartidas de validacion ELF/firma (sin
+# efectos secundarios), usadas por fetch-binary. Se resuelve relativo al
+# mismo directorio que common.sh.
+VALIDATE_BIN_LIB="${COMMON%/*}/validate-binary.sh"
+if [ -f "$VALIDATE_BIN_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$VALIDATE_BIN_LIB"
+fi
+
+##############################################################################
+# TOML helpers
+##############################################################################
+
+toml_backup() {
+  [ -f "$TOML" ] || return 0
+  _bk="$BACKUP_DIR/dnscrypt-proxy.toml.$(date '+%Y%m%d-%H%M%S').bak"
+  cp -f "$TOML" "$_bk" 2>/dev/null
+  ls -1t "$BACKUP_DIR"/dnscrypt-proxy.toml.*.bak 2>/dev/null | tail -n +11 | while read -r _old; do
+    rm -f "$_old" 2>/dev/null
+  done
+  echo "$_bk"
+}
+
+set_managed_block() {
+  _name="$1"
+  _begin="# >>> DCM:$_name BEGIN"
+  _end="# <<< DCM:$_name END"
+  _content=$(cat)
+  _tmp="$TOML.tmp.$$"
+  if [ -f "$TOML" ]; then
+    awk -v b="$_begin" -v e="$_end" '
+      $0==b {skip=1; next}
+      $0==e {skip=0; next}
+      skip==0 {print}
+    ' "$TOML" > "$_tmp"
+  else
+    : > "$_tmp"
+  fi
+  {
+    echo "$_begin"
+    printf '%s\n' "$_content"
+    echo "$_end"
+  } >> "$_tmp"
+  mv -f "$_tmp" "$TOML"
+  chmod 0600 "$TOML" 2>/dev/null
+}
+
+toml_set_server_names() {
+  _name="$1"
+  _tmp="$TOML.tmp.$$"
+  if grep -Eq '^[[:space:]]*server_names[[:space:]]*=' "$TOML" 2>/dev/null; then
+    sed "s|^[[:space:]]*server_names[[:space:]]*=.*|server_names = ['$_name']|" "$TOML" > "$_tmp"
+  else
+    { echo "server_names = ['$_name']"; cat "$TOML"; } > "$_tmp"
+  fi
+  mv -f "$_tmp" "$TOML"
+  chmod 0600 "$TOML" 2>/dev/null
+}
+
+##############################################################################
+# NextDNS -> DNS stamp DoH (spec: dnscrypt.info/stamps-specifications)
+# Layout DoH: 0x02 | props LE64 | LP(addr) | VLP(hashes) | LP(host) | LP(path)
+# Emitimos: props=0x01 (DNSSEC), addr vacio, hashes vacio,
+#           host "dns.nextdns.io", path "/<id>".
+# Verificado contra un decodificador de referencia en la bateria de pruebas.
+##############################################################################
+nextdns_build_stamp() {
+  _id="$1"
+  # 0x02 + props (8 bytes little-endian: 01 00 00 00 00 00 00 00) = 9 bytes.
+  _hdr='\002\001\000\000\000\000\000\000\000'
+  # addr len=0, hashes len=0.
+  _mid='\000\000'
+  # host: len 14 + "dns.nextdns.io" en octal.
+  _host='\016\144\156\163\056\156\145\170\164\144\156\163\056\151\157'
+  # path: len = 1 + len(id), luego '/' (\057) y cada caracter del id.
+  _idlen=$(( ${#_id} + 1 ))
+  _path="$(printf '\\%03o' "$_idlen")\057"
+  _i=0
+  while [ "$_i" -lt "${#_id}" ]; do
+    _c=$(printf '%s' "$_id" | cut -c $((_i+1)))
+    _ord=$(printf '%d' "'$_c" 2>/dev/null)
+    _path="$_path$(printf '\\%03o' "$_ord")"
+    _i=$((_i+1))
+  done
+  _bin="$_hdr$_mid$_host$_path"
+  _b64=$(printf "$_bin" | b64e | tr '+/' '-_' | tr -d '=')
+  echo "sdns://$_b64"
+}
+
+cmd_nextdns() {
+  _id="$1"
+  if ! valid_nextdns_id "$_id"; then
+    echo "ERROR: NextDNS ID invalido. Hexadecimal de 4-12 caracteres (ej: abcdef)." >&2
+    return 1
+  fi
+  # Normalizar a minusculas (los IDs de NextDNS son hex en minuscula).
+  _id=$(printf '%s' "$_id" | tr 'A-F' 'a-f')
+  _stamp=$(nextdns_build_stamp "$_id")
+  if ! valid_stamp "$_stamp"; then
+    echo "ERROR: no se pudo generar un stamp valido para NextDNS." >&2
+    return 1
+  fi
+  toml_backup >/dev/null
+  printf "[static.'nextdns-%s']\n  stamp = '%s'\n" "$_id" "$_stamp" | set_managed_block "nextdns"
+  toml_set_server_names "nextdns-$_id"
+  echo "OK: NextDNS configurado (perfil $_id)."
+  echo "Stamp: $_stamp"
+  echo "Aplica con: dnscrypt-manager restart"
+}
+
+##############################################################################
+# Proceso / servicio
+##############################################################################
+
+cmd_is_running() { read_pid >/dev/null 2>&1; }
+
+# is-listening ESTRICTO:
+#   1) Debe existir nuestro PID valido (pidfile + cmdline dnscrypt).
+#   2) Algun socket local en el/los puerto(s) configurados debe PERTENECER
+#      a ese PID (correlacion inode de /proc/net/* con /proc/PID/fd).
+# Asi, otro proceso escuchando en el mismo puerto NO cuenta como "nuestro".
+# Fallback: si /proc/PID/fd no es legible (raro siendo root), degradamos a
+# puerto-abierto + PID vivo y lo avisamos por stderr.
+cmd_is_listening() {
+  _pid=$(read_pid 2>/dev/null) || return 1
+  _found=1
+  _fd_readable=0
+  [ -d "/proc/$_pid/fd" ] && _fd_readable=1
+  for _addr in $(get_listen_all); do
+    _port="${_addr##*:}"
+    valid_port "$_port" || continue
+    _inos=$(port_inodes "$_port")
+    [ -n "$_inos" ] || continue
+    if [ "$_fd_readable" -eq 1 ]; then
+      for _ino in $_inos; do
+        if pid_has_inode "$_pid" "$_ino"; then _found=0; break; fi
+      done
+    else
+      echo "AVISO: /proc/$_pid/fd ilegible; verificacion degradada a puerto+PID." >&2
+      _found=0
+    fi
+    [ "$_found" -eq 0 ] && break
+  done
+  return $_found
+}
+
+##############################################################################
+# probe_listener_query: consulta REAL al listener local, compartida entre
+# cmd_start (espera de arranque) y cmd_test_dns (etapa 3). Devuelve 0 si
+# alguna consulta respondio, 1 si no. No imprime nada (silenciosa; el
+# llamador decide que mostrar).
+##############################################################################
+probe_listener_query() {
+  _plq_bin=$(resolve_bin 2>/dev/null) || return 1
+  _plq_port=$(get_listen_port)
+  if [ -n "$BUSYBOX" ]; then
+    if $BUSYBOX nslookup example.com "$(get_listen_host):$_plq_port" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  _plq_out=$("$_plq_bin" -config "$TOML" -resolve example.com 2>&1)
+  if [ $? -eq 0 ] && printf '%s' "$_plq_out" | grep -Eq '([0-9]{1,3}\.){3}[0-9]{1,3}'; then
+    return 0
+  fi
+  return 1
+}
+
+cmd_start() {
+  if [ -f "$DISABLE_FLAG" ]; then
+    echo "ERROR: modulo DESHABILITADO (flag disable). Usa: dnscrypt-manager enable" >&2
+    return 1
+  fi
+  BIN=$(resolve_bin) || {
+    echo "ERROR: binario dnscrypt-proxy no encontrado." >&2
+    echo "  Instalalo con: dnscrypt-manager fetch-binary   (ver ayuda)." >&2
+    log_msg "start: binario ausente"
+    return 1
+  }
+  fix_selinux_bin "$BIN"
+  chmod 0755 "$BIN" 2>/dev/null
+
+  if [ ! -f "$TOML" ]; then
+    echo "ERROR: no existe $TOML" >&2
+    log_msg "start: TOML ausente"
+    return 1
+  fi
+
+  if ! "$BIN" -config "$TOML" -check >/dev/null 2>>"$DAEMON_LOG"; then
+    echo "ERROR: la configuracion TOML no valida (-check). Mira: dnscrypt-manager logs" >&2
+    log_msg "start: -check fallo"
+    return 1
+  fi
+
+  if cmd_is_running && cmd_is_listening >/dev/null 2>&1 && probe_listener_query; then
+    echo "Ya esta corriendo (PID $(read_pid)) y respondiendo."
+    return 0
+  fi
+  if cmd_is_running; then
+    # PID vivo pero no sano (no escucha o no responde de verdad): lo
+    # detenemos limpio antes de reintentar un arranque fresco, en vez de
+    # informar "ya esta corriendo" sobre un proceso a medio morir.
+    _stale=$(read_pid 2>/dev/null)
+    [ -n "$_stale" ] && kill -9 "$_stale" 2>/dev/null
+    rm -f "$PIDFILE" 2>/dev/null
+    log_msg "start: PID previo vivo pero no sano (sin listener/respuesta); se elimino antes de reintentar"
+  fi
+
+  rotate_if_big "$DAEMON_LOG"
+  # El daemon debe independizarse a su PROPIO grupo de procesos, no solo
+  # ignorar SIGHUP: 'nohup' por si solo NO crea un grupo nuevo (queda en
+  # el mismo grupo que lo lanzo). Si algo mas adelante (un wrapper de
+  # timeout, un 'kill' de grupo tras una señal) actua sobre el grupo que
+  # invoco 'start', un daemon que siga en ESE grupo moriria con el,
+  # aunque haya arrancado bien y deba seguir vivo. 'setsid' (disponible
+  # via toybox/busybox en Android; si no esta, se cae a nohup solo) lo
+  # vuelve lider de un grupo propio, totalmente independiente.
+  if have setsid; then
+    ( cd "$CONF_DIR" && exec setsid nohup "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1 ) &
+  else
+    ( cd "$CONF_DIR" && exec nohup "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1 ) &
+  fi
+  echo $! > "$PIDFILE"
+
+  # Esperar, con timeout acotado (hasta ~15s, en pasos de 1s por
+  # portabilidad: 'sleep' fraccionario no esta garantizado en
+  # BusyBox/Toybox), a que TODO lo siguiente sea cierto en SIMULTANEO:
+  #   - el PID sigue vivo Y su cmdline sigue siendo dnscrypt-proxy
+  #     (re-chequeado en CADA vuelta, no una sola vez al principio);
+  #   - el socket configurado pertenece a ESE PID (correlacion de inode);
+  #   - una consulta real al listener responde.
+  # 'Iniciado' NUNCA se informa solo porque el PID sigue vivo: es
+  # exactamente la carrera que mostraba la WebUI como "iniciado" sin
+  # listener real. Si el timeout se cumple sin exito: se mata SOLO ese
+  # PID, se borra el pidfile, se registra el fallo, y se devuelve error.
+  # Esperar, acotado por TIEMPO REAL transcurrido (no por cantidad fija de
+  # intentos: probe_listener_query puede tardar varios segundos por vuelta
+  # si la consulta no responde, asi que un conteo fijo de intentos con
+  # 'sleep 1' NO acota el tiempo total real en el caso de fallo). Hasta
+  # ~15s de reloj, se re-chequea en cada vuelta que TODO sea cierto en
+  # SIMULTANEO:
+  #   - el PID sigue vivo Y su cmdline sigue siendo dnscrypt-proxy
+  #     (re-chequeado en CADA vuelta, no una sola vez al principio);
+  #   - el socket configurado pertenece a ESE PID (correlacion de inode);
+  #   - una consulta real al listener responde.
+  # 'Iniciado' NUNCA se informa solo porque el PID sigue vivo: es
+  # exactamente la carrera que mostraba la WebUI como "iniciado" sin
+  # listener real. Si el plazo se cumple sin exito: se mata SOLO ese PID,
+  # se borra el pidfile, se registra el fallo, y se devuelve error.
+  _start_deadline=$(( $(date +%s) + 15 ))
+  _ready=1
+  while [ "$(date +%s)" -lt "$_start_deadline" ]; do
+    if cmd_is_running && cmd_is_listening >/dev/null 2>&1 && probe_listener_query; then
+      _ready=0
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$_ready" -eq 0 ]; then
+    echo "Iniciado (PID $(read_pid)) en $(get_listen)."
+    log_msg "start: OK pid $(read_pid), listener+respuesta confirmados"
+    return 0
+  else
+    _p=$(read_pid 2>/dev/null)
+    [ -n "$_p" ] && kill -9 "$_p" 2>/dev/null
+    rm -f "$PIDFILE" 2>/dev/null
+    echo "ERROR: el servicio no confirmo PID+listener+respuesta dentro de ~15s. Revisa: dnscrypt-manager logs" >&2
+    log_msg "start: timeout (~15s de reloj) esperando PID+listener+respuesta; PID eliminado, pidfile borrado"
+    return 1
+  fi
+}
+
+cmd_stop() {
+  # Mata UNICAMENTE el PID que ya validamos via el pidfile (read_pid
+  # confirma PID vivo + cmdline dnscrypt). Sin fallback por pgrep/pkill:
+  # una busqueda por patron puede coincidir con procesos no relacionados
+  # (o, en un shell mal invocado, con el propio proceso que la ejecuta).
+  # Si el pidfile no tiene un PID valido, no hay nada seguro que matar.
+  _pid=$(read_pid 2>/dev/null)
+  if [ -n "$_pid" ]; then
+    kill "$_pid" 2>/dev/null
+    _i=0
+    while [ "$_i" -lt 5 ] && kill -0 "$_pid" 2>/dev/null; do sleep 1; _i=$((_i+1)); done
+    kill -0 "$_pid" 2>/dev/null && kill -9 "$_pid" 2>/dev/null
+  fi
+  rm -f "$PIDFILE" 2>/dev/null
+  echo "Detenido."
+  log_msg "stop: OK"
+}
+
+cmd_restart() { cmd_stop; sleep 1; cmd_start; }
+
+##############################################################################
+# Redireccion DNS
+#
+# ESTRATEGIA ANTI-BUCLE (documentada, sin exclusiones por UID):
+#
+#   En Android moderno las consultas DNS del sistema salen del DnsResolver
+#   dentro de netd, que corre como root. Excluir UID 0 de la redireccion
+#   dejaria TODO el DNS del sistema sin proteger, asi que NO se hace.
+#
+#   El bucle clasico ocurre cuando dnscrypt-proxy necesita el puerto 53 para
+#   alcanzar su upstream (resolver el hostname del servidor DoH via
+#   bootstrap). La solucion es de DISEÑO, no de firewall:
+#
+#     1. La configuracion por defecto usa servidores [static] cuyos stamps
+#        llevan la IP EMBEBIDA: el trafico upstream del proxy va por 443
+#        (DoH/DNSCrypt), nunca por 53, asi que la redireccion no lo captura.
+#     2. ignore_system_dns = true: el proxy jamas consulta al resolver del
+#        sistema (que tras el redirect seria... el mismo).
+#     3. Las consultas bootstrap residuales (p. ej. refresco de fuentes) si
+#        caen en el redirect vuelven al propio proxy YA CONECTADO, que las
+#        resuelve por el canal cifrado: no es un bucle, es el camino feliz.
+#
+#   Caso limite documentado: un servidor personalizado SOLO por hostname
+#   (sin IP en el stamp) con cache de certificados fria puede no arrancar
+#   bajo redireccion. Cobertura: la secuencia de arranque aplica el redirect
+#   DESPUES de confirmar que el proxy escucha, y test-dns hace rollback
+#   automatico si algo falla. El telefono nunca queda sin DNS.
+#
+# BACKENDS:
+#   - iptables/ip6tables: cadenas propias en nat (DNSCRYPT_OUTPUT,
+#     DNSCRYPT_REDIRECT) y en FILTER para el modo block v6 (DNSCRYPT_FILTER6).
+#     Nunca DROP dentro de nat: nat solo ve el primer paquete de cada flujo.
+#   - nftables nativo (solo si no hay iptables): tabla propia
+#     'inet dnscrypt_manager' con chains nat/filter propias.
+#   - Ninguno disponible: ERROR claro, sin marcar rules.applied.
+##############################################################################
+
+ipt_hook_add() {
+  # Engancha cadena a un hook de forma idempotente. $1=cmd $2=tabla $3=hook $4=cadena
+  "$1" -t "$2" -C "$3" -j "$4" 2>/dev/null || "$1" -t "$2" -A "$3" -j "$4"
+}
+
+ipt_hook_del_all() {
+  # Quita TODOS los enganches (por si quedaron duplicados). $1=cmd $2=tabla $3=hook $4=cadena
+  _n=0
+  while "$1" -t "$2" -C "$3" -j "$4" 2>/dev/null && [ "$_n" -lt 10 ]; do
+    "$1" -t "$2" -D "$3" -j "$4" 2>/dev/null
+    _n=$((_n+1))
+  done
+}
+
+redirect_apply_iptables() {
+  _port="$1"
+
+  # ---- IPv4: nat/OUTPUT -> DNSCRYPT_OUTPUT ----
+  iptables -t nat -N "$CHAIN_OUTPUT" 2>/dev/null
+  iptables -t nat -F "$CHAIN_OUTPUT" 2>/dev/null
+  # Guarda anti-loop local: lo que ya va a loopback no se toca.
+  iptables -t nat -A "$CHAIN_OUTPUT" -d 127.0.0.1/32 -j RETURN
+  iptables -t nat -A "$CHAIN_OUTPUT" -p udp --dport 53 -j REDIRECT --to-ports "$_port"
+  iptables -t nat -A "$CHAIN_OUTPUT" -p tcp --dport 53 -j REDIRECT --to-ports "$_port"
+  ipt_hook_add iptables nat OUTPUT "$CHAIN_OUTPUT"
+
+  # ---- IPv6 ----
+  if have ip6tables; then
+    if [ "$(get_flag ipv6_mode)" = "block" ]; then
+      # BLOQUEO v6: en tabla FILTER (nunca DROP en nat).
+      ip6tables -N "$CHAIN_FILTER6" 2>/dev/null
+      ip6tables -F "$CHAIN_FILTER6" 2>/dev/null
+      ip6tables -A "$CHAIN_FILTER6" -o lo -j RETURN
+      ip6tables -A "$CHAIN_FILTER6" -p udp --dport 53 -j DROP
+      ip6tables -A "$CHAIN_FILTER6" -p tcp --dport 53 -j DROP
+      ipt_hook_add ip6tables filter OUTPUT "$CHAIN_FILTER6"
+    else
+      # REDIRECT v6 (el proxy escucha tambien en [::1]).
+      ip6tables -t nat -N "$CHAIN_OUTPUT" 2>/dev/null
+      ip6tables -t nat -F "$CHAIN_OUTPUT" 2>/dev/null
+      ip6tables -t nat -A "$CHAIN_OUTPUT" -d ::1/128 -j RETURN 2>/dev/null
+      ip6tables -t nat -A "$CHAIN_OUTPUT" -p udp --dport 53 -j REDIRECT --to-ports "$_port" 2>/dev/null
+      ip6tables -t nat -A "$CHAIN_OUTPUT" -p tcp --dport 53 -j REDIRECT --to-ports "$_port" 2>/dev/null
+      ipt_hook_add ip6tables nat OUTPUT "$CHAIN_OUTPUT" 2>/dev/null
+    fi
+  fi
+
+  # ---- Hotspot/tethering (PREROUTING), solo IPv4 y solo si se pidio ----
+  if [ "$(get_flag prerouting)" = "1" ]; then
+    iptables -t nat -N "$CHAIN_REDIRECT" 2>/dev/null
+    iptables -t nat -F "$CHAIN_REDIRECT" 2>/dev/null
+    iptables -t nat -A "$CHAIN_REDIRECT" -p udp --dport 53 -j REDIRECT --to-ports "$_port"
+    iptables -t nat -A "$CHAIN_REDIRECT" -p tcp --dport 53 -j REDIRECT --to-ports "$_port"
+    ipt_hook_add iptables nat PREROUTING "$CHAIN_REDIRECT"
+  fi
+}
+
+redirect_remove_iptables() {
+  # nat IPv4/IPv6
+  for _ipt in iptables ip6tables; do
+    have "$_ipt" || continue
+    ipt_hook_del_all "$_ipt" nat OUTPUT "$CHAIN_OUTPUT"
+    ipt_hook_del_all "$_ipt" nat PREROUTING "$CHAIN_REDIRECT"
+    "$_ipt" -t nat -F "$CHAIN_OUTPUT" 2>/dev/null
+    "$_ipt" -t nat -X "$CHAIN_OUTPUT" 2>/dev/null
+    "$_ipt" -t nat -F "$CHAIN_REDIRECT" 2>/dev/null
+    "$_ipt" -t nat -X "$CHAIN_REDIRECT" 2>/dev/null
+  done
+  # FILTER IPv6 (modo block)
+  if have ip6tables; then
+    ipt_hook_del_all ip6tables filter OUTPUT "$CHAIN_FILTER6"
+    ip6tables -F "$CHAIN_FILTER6" 2>/dev/null
+    ip6tables -X "$CHAIN_FILTER6" 2>/dev/null
+  fi
+}
+
+redirect_apply_nft() {
+  _port="$1"
+  # Tabla fresca e idempotente: borrar la nuestra (si existia) y recrear.
+  nft delete table inet "$NFT_TABLE" 2>/dev/null
+  nft add table inet "$NFT_TABLE" || return 1
+  nft add chain inet "$NFT_TABLE" dcm_nat_out \
+    "{ type nat hook output priority -105 ; policy accept ; }" || return 1
+  nft add rule inet "$NFT_TABLE" dcm_nat_out ip daddr 127.0.0.1 return
+  nft add rule inet "$NFT_TABLE" dcm_nat_out ip6 daddr ::1 return
+  if [ "$(get_flag ipv6_mode)" = "block" ]; then
+    # Redirigir solo v4; bloquear v6:53 en chain de FILTRO propia.
+    nft add rule inet "$NFT_TABLE" dcm_nat_out meta nfproto ipv4 udp dport 53 redirect to :"$_port"
+    nft add rule inet "$NFT_TABLE" dcm_nat_out meta nfproto ipv4 tcp dport 53 redirect to :"$_port"
+    nft add chain inet "$NFT_TABLE" dcm_filter_out \
+      "{ type filter hook output priority 0 ; policy accept ; }" || return 1
+    nft add rule inet "$NFT_TABLE" dcm_filter_out oif lo return
+    nft add rule inet "$NFT_TABLE" dcm_filter_out meta nfproto ipv6 udp dport 53 drop
+    nft add rule inet "$NFT_TABLE" dcm_filter_out meta nfproto ipv6 tcp dport 53 drop
+  else
+    nft add rule inet "$NFT_TABLE" dcm_nat_out udp dport 53 redirect to :"$_port"
+    nft add rule inet "$NFT_TABLE" dcm_nat_out tcp dport 53 redirect to :"$_port"
+  fi
+  if [ "$(get_flag prerouting)" = "1" ]; then
+    nft add chain inet "$NFT_TABLE" dcm_nat_pre \
+      "{ type nat hook prerouting priority -105 ; policy accept ; }"
+    nft add rule inet "$NFT_TABLE" dcm_nat_pre meta nfproto ipv4 udp dport 53 redirect to :"$_port"
+    nft add rule inet "$NFT_TABLE" dcm_nat_pre meta nfproto ipv4 tcp dport 53 redirect to :"$_port"
+  fi
+  return 0
+}
+
+redirect_remove_nft() {
+  have nft || return 0
+  nft delete table inet "$NFT_TABLE" 2>/dev/null
+  return 0
+}
+
+redirect_is_active() {
+  # 0 = activa (en cualquiera de los backends)
+  if have iptables && iptables -t nat -C OUTPUT -j "$CHAIN_OUTPUT" 2>/dev/null; then
+    return 0
+  fi
+  if have nft && nft list table inet "$NFT_TABLE" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+cmd_redirect() {
+  _sub="$1"; shift 2>/dev/null
+  _port=$(get_listen_port)
+  valid_port "$_port" || _port=5354
+
+  case "$_sub" in
+    apply)
+      if [ -f "$NOREDIR_FLAG" ]; then
+        echo "ERROR: redireccion bloqueada por el flag no-redirect. Usa: dnscrypt-manager no-redirect off" >&2
+        return 1
+      fi
+      _fw=$(detect_firewall)
+      case "$_fw" in
+        iptables) redirect_apply_iptables "$_port" ;;
+        nft)      redirect_apply_nft "$_port" ;;
+        none)
+          echo "ERROR: ni iptables ni nft disponibles. No se puede redirigir." >&2
+          log_msg "redirect apply: sin backend"
+          return 1 ;;
+      esac
+      # VERIFICACION: no informar exito si las reglas no quedaron colocadas.
+      if redirect_is_active; then
+        touch "$RULES_TAG_FILE" 2>/dev/null
+        echo "Redireccion aplicada via $_fw (puerto $_port)."
+        log_msg "redirect apply OK ($_fw) puerto $_port"
+        return 0
+      else
+        # Limpiar lo que haya quedado a medias.
+        redirect_remove_iptables
+        redirect_remove_nft
+        rm -f "$RULES_TAG_FILE" 2>/dev/null
+        echo "ERROR: las reglas no quedaron activas (backend $_fw). Nada quedo aplicado." >&2
+        log_msg "redirect apply FALLO ($_fw)"
+        return 1
+      fi
+      ;;
+    remove)
+      redirect_remove_iptables
+      redirect_remove_nft
+      rm -f "$RULES_TAG_FILE" 2>/dev/null
+      echo "Redireccion retirada."
+      log_msg "redirect remove"
+      ;;
+    status)
+      if redirect_is_active; then
+        [ "$1" = "--quiet" ] || echo "activa"
+        return 0
+      else
+        [ "$1" = "--quiet" ] || echo "inactiva"
+        return 1
+      fi
+      ;;
+    *)
+      echo "Uso: dnscrypt-manager redirect {apply|remove|status}" >&2
+      return 1
+      ;;
+  esac
+}
+
+##############################################################################
+# test-dns: prueba REAL por etapas, con rollback automatico
+#
+#   Etapa 1  Proceso: PID valido y cmdline de dnscrypt-proxy.
+#   Etapa 2  Listener: socket del puerto configurado PERTENECE a ese PID
+#            (correlacion de inodes; no alcanza con "algo escucha ahi").
+#   Etapa 3  Consulta directa al listener local (metodos disponibles:
+#            busybox nslookup host:port, o el propio binario -resolve).
+#   Etapa 4  Solo si la redireccion esta activa: consulta "normal" del
+#            sistema (ping/curl resuelven via netd -> redirect -> proxy).
+#
+#   Si CUALQUIER etapa falla y hay redireccion activa: se retiran las reglas
+#   de inmediato y se restaura la red. Ese es el contrato.
+##############################################################################
+
+_tdns_fail() {
+  # $1 = mensaje. Hace rollback si corresponde y retorna 1.
+  [ "$TDNS_QUIET" -eq 1 ] || echo "FALLO: $1" >&2
+  if redirect_is_active; then
+    [ "$TDNS_QUIET" -eq 1 ] || echo "  -> Retirando redireccion y restaurando la red del sistema..." >&2
+    cmd_redirect remove >/dev/null 2>&1
+    log_msg "test-dns: fallo ($1); rollback de redireccion ejecutado"
+  else
+    log_msg "test-dns: fallo ($1); sin redireccion activa, nada que revertir"
+  fi
+  return 1
+}
+
+cmd_test_dns() {
+  TDNS_QUIET=0; [ "$1" = "--quiet" ] && TDNS_QUIET=1
+  _say() { [ "$TDNS_QUIET" -eq 1 ] || echo "$@"; }
+
+  BIN=$(resolve_bin 2>/dev/null) || { _tdns_fail "binario dnscrypt-proxy ausente"; return 1; }
+  [ -f "$TOML" ] || { _tdns_fail "configuracion TOML ausente"; return 1; }
+  _listen=$(get_listen); _port="${_listen##*:}"
+
+  # -- Etapa 1: proceso ------------------------------------------------------
+  _pid=$(read_pid 2>/dev/null) || { _tdns_fail "etapa 1: dnscrypt-proxy no esta corriendo (PID invalido)"; return 1; }
+  _say "[1/4] Proceso OK (PID $_pid, cmdline dnscrypt-proxy)."
+
+  # -- Etapa 2: listener nuestro --------------------------------------------
+  if cmd_is_listening; then
+    _say "[2/4] Listener OK: el socket de $_listen pertenece al PID $_pid."
+  else
+    _tdns_fail "etapa 2: nada escucha en $_listen que pertenezca al PID $_pid"
+    return 1
+  fi
+
+  # -- Etapa 3: consulta directa al listener local ---------------------------
+  if probe_listener_query; then
+    _say "[3/4] Consulta local OK."
+  else
+    _tdns_fail "etapa 3: el listener local no respondio una consulta DNS"
+    return 1
+  fi
+
+  # -- Etapa 4: consulta del sistema (solo con redireccion activa) -----------
+  if redirect_is_active; then
+    _s_ok=1; _s_method=""
+    if have ping; then
+      if ping -c 1 -W 3 example.com >/dev/null 2>&1; then _s_ok=0; _s_method="ping (resolver del sistema)"; fi
+    fi
+    if [ "$_s_ok" -ne 0 ] && have curl; then
+      if curl -sI --max-time 5 https://example.com >/dev/null 2>&1; then _s_ok=0; _s_method="curl (resolver del sistema)"; fi
+    fi
+    if [ "$_s_ok" -eq 0 ]; then
+      _say "[4/4] Consulta del sistema bajo redireccion OK ($_s_method)."
+    elif ! have ping && ! have curl; then
+      _say "[4/4] OMITIDA: sin ping ni curl para probar el camino del sistema."
+      log_msg "test-dns: etapa 4 omitida (sin herramientas)"
+    else
+      _tdns_fail "etapa 4: el sistema no resuelve con la redireccion activa"
+      return 1
+    fi
+  else
+    _say "[4/4] OMITIDA: redireccion inactiva (solo se probo el proxy local)."
+  fi
+
+  _say "RESULTADO: DNS OK."
+  log_msg "test-dns: OK"
+  return 0
+}
+
+##############################################################################
+# Diagnostico
+##############################################################################
+
+cmd_diag() {
+  echo "===== DIAGNOSTICO DNSCrypt Manager ====="
+  echo
+  echo "--- Servicio ---"
+  if cmd_is_running; then echo "Estado: CORRIENDO (PID $(read_pid))"; else echo "Estado: DETENIDO"; fi
+  if cmd_is_listening 2>/dev/null; then echo "Listener: propio, en $(get_listen)"; else echo "Listener: sin socket propio en $(get_listen)"; fi
+  BIN=$(resolve_bin 2>/dev/null) && echo "Binario: $BIN" || echo "Binario: NO ENCONTRADO"
+  [ -n "$BIN" ] && echo "Version: $("$BIN" -version 2>/dev/null | head -n1)"
+  echo "Servidor(es): $(cmd_get server 2>/dev/null)"
+  echo
+  echo "--- Redireccion ---"
+  echo "Backend: $(detect_firewall)"
+  if redirect_is_active; then echo "Estado: ACTIVA"; else echo "Estado: inactiva"; fi
+  if have iptables; then
+    echo -n "  nat v4 OUTPUT: "; iptables -t nat -C OUTPUT -j "$CHAIN_OUTPUT" 2>/dev/null && echo "enganchada" || echo "no"
+  fi
+  if have ip6tables; then
+    echo -n "  nat v6 OUTPUT: "; ip6tables -t nat -C OUTPUT -j "$CHAIN_OUTPUT" 2>/dev/null && echo "enganchada" || echo "no"
+    echo -n "  filter v6 (block): "; ip6tables -C OUTPUT -j "$CHAIN_FILTER6" 2>/dev/null && echo "enganchada" || echo "no"
+  fi
+  if have nft; then
+    echo -n "  nft tabla propia: "; nft list table inet "$NFT_TABLE" >/dev/null 2>&1 && echo "presente" || echo "no"
+  fi
+  echo
+  echo "--- Private DNS de Android ---"
+  cmd_privatedns
+  echo
+  echo "--- Prueba de resolucion (por etapas) ---"
+  cmd_test_dns
+  echo
+  echo "--- Herramientas disponibles ---"
+  for t in iptables ip6tables nft curl wget ping nslookup getprop busybox; do
+    if have "$t"; then echo "  $t: OK"; else echo "  $t: no"; fi
+  done
+  echo "========================================"
+}
+
+cmd_privatedns() {
+  _mode=""; _host=""
+  if have settings; then
+    _mode=$(settings get global private_dns_mode 2>/dev/null)
+    _host=$(settings get global private_dns_specifier 2>/dev/null)
+    [ "$_host" = "null" ] && _host=""
+  fi
+  [ -z "$_mode" ] && _mode=$(getprop persist.sys.private_dns_specifier_mode 2>/dev/null)
+  case "$_mode" in
+    off) echo "Private DNS: desactivado (sin conflicto con dnscrypt-proxy)." ;;
+    opportunistic|automatic|"") echo "Private DNS: automatico o sin fijar. Suele coexistir; ante dudas, poner en 'Desactivado'." ;;
+    hostname|strict)
+      echo "Private DNS: hostname especifico ($_host)."
+      echo "  ATENCION: en este modo Android cifra el DNS por su cuenta (DoT) y"
+      echo "  puede puentear la redireccion. Recomendado: Automatico u Off."
+      echo "  Este modulo NO lo cambia solo; hacelo vos desde Ajustes." ;;
+    *) echo "Private DNS: estado '$_mode' (no reconocido)." ;;
+  esac
+}
+
+##############################################################################
+# Lecturas simples
+##############################################################################
+cmd_get() {
+  case "$1" in
+    listen)  get_listen ;;
+    listen-all) get_listen_all ;;
+    port)    get_listen_port ;;
+    host)    get_listen_host ;;
+    version) BIN=$(resolve_bin 2>/dev/null) && "$BIN" -version 2>/dev/null | head -n1 || echo "desconocida" ;;
+    server)
+      _s=$(grep -E '^[[:space:]]*server_names[[:space:]]*=' "$TOML" 2>/dev/null | head -n1 \
+           | sed "s/.*=[[:space:]]*//; s/[][']//g; s/^ *//; s/ *$//")
+      [ -n "$_s" ] && echo "$_s" || echo "(automatico)" ;;
+    *) echo "Uso: dnscrypt-manager get {listen|listen-all|port|host|version|server}" >&2; return 1 ;;
+  esac
+}
+
+cmd_get_flag() { get_flag "$1"; }
+
+##############################################################################
+# Estado (humano y --json)
+##############################################################################
+cmd_status() {
+  if [ "$1" = "--json" ]; then
+    _running=false; cmd_is_running && _running=true
+    _listening=false; cmd_is_listening 2>/dev/null && _listening=true
+    _pid=$(read_pid 2>/dev/null); [ -z "$_pid" ] && _pid=0
+    _listen=$(get_listen)
+    _ver="desconocida"; BIN=$(resolve_bin 2>/dev/null) && _ver=$("$BIN" -version 2>/dev/null | head -n1)
+    _server=$(cmd_get server 2>/dev/null)
+    _redir=inactiva; redirect_is_active && _redir=activa
+    _backend=$(detect_firewall)
+    _binpresent=false; [ -n "$BIN" ] && _binpresent=true
+    _disabled=false; [ -f "$DISABLE_FLAG" ] && _disabled=true
+    _noredir=false; [ -f "$NOREDIR_FLAG" ] && _noredir=true
+    _bootredir=$(get_flag boot_redirect); [ -z "$_bootredir" ] && _bootredir=0
+    _v6mode=$(get_flag ipv6_mode); [ -z "$_v6mode" ] && _v6mode=redirect
+    printf '{'
+    printf '"running":%s,' "$_running"
+    printf '"listening":%s,' "$_listening"
+    printf '"pid":%s,' "$_pid"
+    printf '%s,' "$(json_kv listen "$_listen")"
+    printf '%s,' "$(json_kv version "$_ver")"
+    printf '%s,' "$(json_kv server "$_server")"
+    printf '%s,' "$(json_kv redirect "$_redir")"
+    printf '%s,' "$(json_kv backend "$_backend")"
+    printf '%s,' "$(json_kv ipv6_mode "$_v6mode")"
+    printf '"boot_redirect":%s,' "$_bootredir"
+    printf '"no_redirect_flag":%s,' "$_noredir"
+    printf '"binary_present":%s,' "$_binpresent"
+    printf '"disabled":%s' "$_disabled"
+    printf '}\n'
+    return 0
+  fi
+
+  echo "DNSCrypt Manager - estado"
+  echo "-------------------------"
+  if cmd_is_running; then echo "Servicio     : CORRIENDO (PID $(read_pid))"; else echo "Servicio     : detenido"; fi
+  if cmd_is_listening 2>/dev/null; then echo "Listener     : propio ($(get_listen))"; else echo "Listener     : no"; fi
+  echo "Servidor     : $(cmd_get server 2>/dev/null)"
+  BIN=$(resolve_bin 2>/dev/null) && echo "Version      : $("$BIN" -version 2>/dev/null | head -n1)" || echo "Version      : binario ausente"
+  echo "Backend fw   : $(detect_firewall)"
+  if redirect_is_active; then echo "Redireccion  : ACTIVA"; else echo "Redireccion  : inactiva"; fi
+  [ -f "$NOREDIR_FLAG" ] && echo "!! Redireccion bloqueada por flag no-redirect"
+  [ -f "$DISABLE_FLAG" ] && echo "!! MODULO DESHABILITADO (flag disable)"
+  return 0
+}
+
+##############################################################################
+# Configuracion (editor / import / reset / proveedores)
+##############################################################################
+
+cmd_config_import_b64() {
+  _b64="$1"
+  [ -n "$_b64" ] || { echo "ERROR: falta contenido base64" >&2; return 1; }
+  _tmp="$RUN_DIR/import.toml.$$"
+  printf '%s' "$_b64" | b64d > "$_tmp" 2>/dev/null || { echo "ERROR: base64 invalido" >&2; rm -f "$_tmp"; return 1; }
+  if [ ! -s "$_tmp" ]; then echo "ERROR: la configuracion esta vacia; no se guarda." >&2; rm -f "$_tmp"; return 1; fi
+  BIN=$(resolve_bin 2>/dev/null)
+  if [ -n "$BIN" ]; then
+    if ! "$BIN" -config "$_tmp" -check >/dev/null 2>&1; then
+      echo "ERROR: la configuracion no valida (-check). No se guarda." >&2
+      rm -f "$_tmp"; return 1
+    fi
+  else
+    grep -q 'listen_addresses' "$_tmp" || { echo "ERROR: falta listen_addresses." >&2; rm -f "$_tmp"; return 1; }
+  fi
+  toml_backup >/dev/null
+  mv -f "$_tmp" "$TOML"
+  chmod 0600 "$TOML" 2>/dev/null
+  echo "OK: configuracion guardada. Reinicia el servicio para aplicar."
+  log_msg "config import"
+}
+
+cmd_config_export_b64() {
+  [ -f "$TOML" ] || { echo ""; return 0; }
+  b64e < "$TOML"
+}
+
+cmd_config_validate() {
+  _f="${1:-$TOML}"
+  BIN=$(resolve_bin 2>/dev/null) || { echo "No se puede validar: binario ausente."; return 1; }
+  if "$BIN" -config "$_f" -check 2>&1; then echo "Configuracion VALIDA."; return 0
+  else echo "Configuracion INVALIDA."; return 1; fi
+}
+
+cmd_config_reset() {
+  if [ -f "$CONF_DIR/defaults/dnscrypt-proxy.toml" ]; then
+    toml_backup >/dev/null
+    cp -f "$CONF_DIR/defaults/dnscrypt-proxy.toml" "$TOML"
+    chmod 0600 "$TOML" 2>/dev/null
+    echo "OK: configuracion restaurada a valores de fabrica."
+    log_msg "config reset"
+  else
+    echo "ERROR: no hay copia de fabrica disponible." >&2
+    return 1
+  fi
+}
+
+cmd_config_restore_backup() {
+  _last=$(ls -1t "$BACKUP_DIR"/dnscrypt-proxy.toml.*.bak 2>/dev/null | head -n1)
+  if [ -n "$_last" ]; then
+    cp -f "$_last" "$TOML"
+    chmod 0600 "$TOML" 2>/dev/null
+    echo "OK: restaurada la copia anterior: $(basename "$_last")"
+    log_msg "config restore-backup $_last"
+  else
+    echo "No hay copias de seguridad para restaurar." >&2
+    return 1
+  fi
+}
+
+cmd_provider() {
+  _name="$1"
+  case "$_name" in
+    cloudflare|quad9|adguard|mullvad)
+      toml_backup >/dev/null
+      toml_set_server_names "$_name"
+      echo "OK: proveedor '$_name' seleccionado. Aplica con: dnscrypt-manager restart" ;;
+    *)
+      echo "Proveedores predefinidos: cloudflare | quad9 | adguard | mullvad" >&2
+      echo "Para NextDNS: dnscrypt-manager nextdns <id>" >&2
+      return 1 ;;
+  esac
+}
+
+##############################################################################
+# Backups
+##############################################################################
+cmd_backup() {
+  _ts=$(date '+%Y%m%d-%H%M%S')
+  if have tar; then
+    _out="$BACKUP_DIR/full-backup-$_ts.tar.gz"
+    ( cd "$CONF_DIR" && tar -czf "$_out" . 2>/dev/null )
+    echo "OK: backup creado en $_out"
+  else
+    cp -f "$TOML" "$BACKUP_DIR/dnscrypt-proxy.toml.$_ts.bak"
+    echo "OK: copia del TOML creada (tar no disponible)."
+  fi
+}
+
+cmd_restore() {
+  _f="$1"
+  [ -f "$_f" ] || { echo "ERROR: archivo no encontrado: $_f" >&2; return 1; }
+  case "$_f" in
+    *.tar.gz)
+      have tar || { echo "ERROR: tar no disponible" >&2; return 1; }
+      toml_backup >/dev/null
+      ( cd "$CONF_DIR" && tar -xzf "$_f" 2>/dev/null )
+      echo "OK: backup restaurado. Reinicia: dnscrypt-manager restart" ;;
+    *.toml|*.bak)
+      toml_backup >/dev/null
+      cp -f "$_f" "$TOML"; chmod 0600 "$TOML" 2>/dev/null
+      cmd_config_validate >/dev/null 2>&1 || echo "Aviso: el archivo restaurado no valida con -check."
+      echo "OK: TOML restaurado." ;;
+    *) echo "ERROR: formato no reconocido (.tar.gz o .toml)" >&2; return 1 ;;
+  esac
+}
+
+cmd_list_backups() {
+  echo "Backups en $BACKUP_DIR:"
+  ls -1t "$BACKUP_DIR" 2>/dev/null || echo "  (ninguno)"
+}
+
+##############################################################################
+# Logs
+##############################################################################
+cmd_logs() {
+  case "$1" in
+    --clear) : > "$DAEMON_LOG"; : > "$CLI_LOG"; echo "Logs vaciados." ;;
+    --tail)
+      _n="${2:-100}"
+      case "$_n" in ''|*[!0-9]*) _n=100 ;; esac
+      echo "===== dnscrypt-proxy.log (ultimas $_n) ====="
+      tail -n "$_n" "$DAEMON_LOG" 2>/dev/null
+      echo "===== manager.log (ultimas $_n) ====="
+      tail -n "$_n" "$CLI_LOG" 2>/dev/null ;;
+    *)
+      echo "===== dnscrypt-proxy.log (ultimas 60) ====="
+      tail -n 60 "$DAEMON_LOG" 2>/dev/null
+      echo "===== manager.log (ultimas 40) ====="
+      tail -n 40 "$CLI_LOG" 2>/dev/null ;;
+  esac
+}
+
+##############################################################################
+# Emergencia / recuperacion
+##############################################################################
+
+cmd_panic() {
+  echo "!! PANIC: retirando redireccion, deteniendo proxy y restaurando red..."
+  cmd_redirect remove 2>/dev/null
+  cmd_stop 2>/dev/null
+  touch "$DISABLE_FLAG" 2>/dev/null
+  echo "OK: modulo DESHABILITADO. Tu DNS volvio al del sistema."
+  echo "Para reactivarlo: dnscrypt-manager enable"
+  log_msg "PANIC ejecutado"
+}
+
+cmd_restore_network() {
+  cmd_redirect remove >/dev/null 2>&1
+  echo "Red restaurada: sin reglas nuestras, el DNS vuelve al del sistema."
+  log_msg "restore-network"
+}
+
+cmd_disable() {
+  cmd_redirect remove >/dev/null 2>&1
+  cmd_stop >/dev/null 2>&1
+  touch "$DISABLE_FLAG" 2>/dev/null
+  echo "Modulo deshabilitado. No arrancara en el proximo boot."
+  log_msg "disable"
+}
+
+cmd_enable() {
+  rm -f "$DISABLE_FLAG" 2>/dev/null
+  echo "Modulo habilitado. Arrancara en el proximo boot (o: dnscrypt-manager start)."
+  log_msg "enable"
+}
+
+cmd_no_redirect() {
+  case "$1" in
+    on)  cmd_redirect remove >/dev/null 2>&1; touch "$NOREDIR_FLAG"
+         echo "Redireccion BLOQUEADA. El proxy puede correr, pero no se redirige el sistema." ;;
+    off) rm -f "$NOREDIR_FLAG"
+         echo "Redireccion desbloqueada. Aplicala con: dnscrypt-manager redirect apply" ;;
+    *)   echo "Uso: dnscrypt-manager no-redirect {on|off}" >&2; return 1 ;;
+  esac
+}
+
+##############################################################################
+# Mantenimiento
+##############################################################################
+
+cmd_fetch_binary() {
+  _arch="arm64"; case "$(uname -m 2>/dev/null)" in armv7*|armv8l|arm) _arch="arm" ;; esac
+  if [ -z "$1" ]; then
+    echo "Descarga MANUAL del binario oficial (nunca automatica ni en el boot)."
+    echo
+    echo "  1) Abri: https://github.com/DNSCrypt/dnscrypt-proxy/releases/latest"
+    echo "  2) Descarga: dnscrypt-proxy-android_$_arch-<version>.zip"
+    echo "  3) Anota el SHA-256 publicado y verificalo."
+    echo "  4) Del zip extrae el binario 'dnscrypt-proxy' y copialo a:"
+    echo "       $PERSIST_BIN_DIR/dnscrypt-proxy"
+    echo "  5) Ejecuta: dnscrypt-manager fix-perms"
+    echo
+    echo "O directo con URL y hash (requiere curl/wget + red):"
+    echo "  dnscrypt-manager fetch-binary <URL-https> <SHA256>"
+    return 0
+  fi
+  if ! command -v validate_dnscrypt_binary >/dev/null 2>&1; then
+    echo "ERROR: falta scripts/validate-binary.sh (funciones de validacion no disponibles)." >&2
+    return 1
+  fi
+  _url="$1"; _sha="$2"
+  case "$_url" in https://*) : ;; *) echo "ERROR: la URL debe ser https://" >&2; return 1 ;; esac
+  [ -n "$_sha" ] || { echo "ERROR: falta el SHA-256 esperado (obligatorio)." >&2; return 1; }
+
+  _tmp="$RUN_DIR/dnscrypt.dl.$$"
+  echo "Descargando..."
+  if have curl; then curl -fsSL "$_url" -o "$_tmp"
+  elif have wget; then wget -qO "$_tmp" "$_url"
+  else echo "ERROR: ni curl ni wget disponibles" >&2; return 1; fi
+  [ -s "$_tmp" ] || { echo "ERROR: descarga vacia/fallida" >&2; rm -f "$_tmp"; return 1; }
+
+  _got=""
+  if have sha256sum; then _got=$(sha256sum "$_tmp" | awk '{print $1}')
+  elif [ -n "$BUSYBOX" ]; then _got=$($BUSYBOX sha256sum "$_tmp" | awk '{print $1}'); fi
+  if [ -z "$_got" ]; then echo "ERROR: no hay sha256sum para verificar. Abortando." >&2; rm -f "$_tmp"; return 1; fi
+  if [ "$_got" != "$_sha" ]; then
+    echo "ERROR: SHA-256 NO coincide." >&2
+    echo "  esperado: $_sha" >&2
+    echo "  obtenido: $_got" >&2
+    rm -f "$_tmp"; return 1
+  fi
+
+  _extdir="$RUN_DIR/dl-ext.$$"
+  case "$_url" in
+    *.zip)
+      if ! safe_extract_archive "$_tmp" zip "$_extdir"; then
+        echo "ERROR: extraccion rechazada (path traversal o formato invalido)." >&2
+        rm -rf "$_tmp" "$_extdir"; return 1
+      fi ;;
+    *.tar.gz)
+      if ! safe_extract_archive "$_tmp" targz "$_extdir"; then
+        echo "ERROR: extraccion rechazada (path traversal o formato invalido)." >&2
+        rm -rf "$_tmp" "$_extdir"; return 1
+      fi ;;
+    *)
+      mkdir -p "$_extdir"; cp -f "$_tmp" "$_extdir/dnscrypt-proxy" ;;
+  esac
+
+  _b=$(find "$_extdir" -name dnscrypt-proxy -type f 2>/dev/null | head -n1)
+  if [ -z "$_b" ]; then
+    echo "ERROR: el paquete no contiene 'dnscrypt-proxy'." >&2
+    rm -rf "$_tmp" "$_extdir"; return 1
+  fi
+
+  # Validacion completa (ELF64 + EM_AARCH64 + firma estatica) ANTES de
+  # instalar, con la MISMA funcion que usa tools/inject-binary.sh.
+  _vb_err="$RUN_DIR/.fetch-validate-err.$$"
+  if ! validate_dnscrypt_binary "$_b" >"$_vb_err" 2>&1; then
+    echo "ERROR: el archivo extraido no valida como dnscrypt-proxy:" >&2
+    cat "$_vb_err" >&2 2>/dev/null
+    rm -rf "$_tmp" "$_extdir" "$_vb_err"; return 1
+  fi
+  rm -f "$_vb_err"
+
+  # Mejor esfuerzo: version real por ejecucion (la arquitectura del host
+  # que corre esta CLI, en un dispositivo real, es la misma del binario;
+  # en desarrollo cross-arquitectura puede no ser posible y se omite).
+  chmod +x "$_b" 2>/dev/null
+  _ver=$("$_b" -version 2>&1 | head -n1)
+
+  mv -f "$_b" "$PERSIST_BIN_DIR/dnscrypt-proxy"
+  rm -rf "$_tmp" "$_extdir" 2>/dev/null
+  cmd_fix_perms
+  rm -f "$DATA_DIR/.binary_missing" 2>/dev/null
+  echo "OK: binario instalado y verificado (ELF64/AArch64/firma/SHA-256) en $PERSIST_BIN_DIR/dnscrypt-proxy"
+  echo "Version: ${_ver:-no confirmada por ejecucion}"
+}
+
+cmd_fix_perms() {
+  [ -f "$PERSIST_BIN_DIR/dnscrypt-proxy" ] && chmod 0755 "$PERSIST_BIN_DIR/dnscrypt-proxy" 2>/dev/null
+  fix_selinux_bin "$PERSIST_BIN_DIR/dnscrypt-proxy"
+  [ -f "$TOML" ] && chmod 0600 "$TOML" 2>/dev/null
+  chmod 0700 "$DATA_DIR" 2>/dev/null
+  chmod 0755 "$LOG_DIR" 2>/dev/null
+  echo "Permisos aplicados."
+}
+
+cmd_set_flag() {
+  case "$1" in
+    boot_redirect|ipv6_mode|prerouting) : ;;
+    *) echo "ERROR: flag no reconocido: $1" >&2
+       echo "Flags: boot_redirect {0|1} | ipv6_mode {redirect|block} | prerouting {0|1}" >&2
+       return 1 ;;
+  esac
+  set_flag "$1" "$2"
+  echo "OK: $1 = $(get_flag "$1")"
+}
+
+##############################################################################
+# Ayuda / router
+##############################################################################
+cmd_help() {
+  cat <<'EOF'
+DNSCrypt Manager - comandos
+
+  Servicio:
+    start | stop | restart
+    status [--json]
+    is-running | is-listening
+
+  Redireccion DNS:
+    redirect apply | redirect remove | redirect status [--quiet]
+
+  Configuracion:
+    get {listen|listen-all|port|host|version|server}
+    provider <cloudflare|quad9|adguard|mullvad>
+    nextdns <id>
+    config validate [archivo]
+    config reset
+    config restore-backup
+    config export-b64 | config import-b64 <base64>   (uso interno WebUI)
+
+  Pruebas / diagnostico:
+    test-dns [--quiet]     (4 etapas; rollback automatico si falla)
+    diag
+    privatedns
+    logs [--tail N] [--clear]
+
+  Backups:
+    backup | restore <archivo> | list-backups
+
+  EMERGENCIA:
+    panic                  todo abajo + red restaurada + modulo off
+    disable | enable
+    no-redirect {on|off}
+    restore-network
+    reset-config
+
+  Mantenimiento:
+    fetch-binary [URL SHA256]
+    fix-perms
+    set-flag {boot_redirect|ipv6_mode|prerouting} <valor>
+    get-flag <clave>
+    version | help
+EOF
+}
+
+main() {
+  _cmd="$1"; shift 2>/dev/null
+  case "$_cmd" in
+    start)            cmd_start "$@" ;;
+    stop)             cmd_stop "$@" ;;
+    restart)          cmd_restart "$@" ;;
+    status)           cmd_status "$@" ;;
+    is-running)       cmd_is_running ;;
+    is-listening)     cmd_is_listening ;;
+    redirect)         cmd_redirect "$@" ;;
+    test-dns)         cmd_test_dns "$@" ;;
+    diag)             cmd_diag "$@" ;;
+    privatedns)       cmd_privatedns "$@" ;;
+    get)              cmd_get "$@" ;;
+    get-flag)         cmd_get_flag "$@" ;;
+    set-flag)         cmd_set_flag "$@" ;;
+    provider)         cmd_provider "$@" ;;
+    nextdns)          cmd_nextdns "$@" ;;
+    logs)             cmd_logs "$@" ;;
+    backup)           cmd_backup "$@" ;;
+    restore)          cmd_restore "$@" ;;
+    list-backups)     cmd_list_backups "$@" ;;
+    panic)            cmd_panic "$@" ;;
+    disable)          cmd_disable "$@" ;;
+    enable)           cmd_enable "$@" ;;
+    no-redirect)      cmd_no_redirect "$@" ;;
+    restore-network)  cmd_restore_network "$@" ;;
+    reset-config)     cmd_config_reset "$@" ;;
+    fetch-binary)     cmd_fetch_binary "$@" ;;
+    fix-perms)        cmd_fix_perms "$@" ;;
+    version)          cmd_get version ;;
+    config)
+      _sub="$1"; shift 2>/dev/null
+      case "$_sub" in
+        validate)        cmd_config_validate "$@" ;;
+        reset)           cmd_config_reset "$@" ;;
+        restore-backup)  cmd_config_restore_backup "$@" ;;
+        export-b64)      cmd_config_export_b64 "$@" ;;
+        import-b64)      cmd_config_import_b64 "$@" ;;
+        *) echo "Uso: dnscrypt-manager config {validate|reset|restore-backup|export-b64|import-b64}" >&2; exit 1 ;;
+      esac ;;
+    help|-h|--help|"") cmd_help ;;
+    *) echo "Comando desconocido: $_cmd" >&2; echo "Usa: dnscrypt-manager help" >&2; exit 1 ;;
+  esac
+}
+
+main "$@"

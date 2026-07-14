@@ -1,0 +1,6 @@
+id=dnscrypt_manager
+name=DNSCrypt Manager
+version=v0.1.0
+versionCode=100
+author=Skaymer AR
+description=Ejecuta dnscrypt-proxy como servicio de sistema (DNSCrypt / DoH / NextDNS) con redirección DNS opcional, WebUI de control, modo seguro anti-bootloop y recuperación por ADB. Compatible con KernelSU / KernelSU Next / APatch / Magisk.
