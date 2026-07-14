@@ -25,14 +25,14 @@ La primera versión fue probada con éxito en un **Motorola Edge 40 Pro con Andr
 
 ## Descargar
 
-El módulo instalable verificado es:
+El módulo instalable se publica en la sección **Releases** del repositorio:
 
 ```text
 DNSCrypt-Manager-release.zip
-SHA-256: 99120e355023871523f432621cfdc2b52b7f1303b5c68cceeccf1d2af4d39ba9
+DNSCrypt-Manager-release.zip.sha256
 ```
 
-El ZIP instalable se publica en la sección **Releases** del repositorio. El checksum también está versionado en `dist/DNSCrypt-Manager-release.zip.sha256`.
+Verificá siempre el ZIP con el archivo `.sha256` que acompaña a la misma release. El workflow de publicación reconstruye el módulo desde el código fuente, descarga y valida el binario oficial ARM64 de `dnscrypt-proxy` y genera un checksum nuevo para ese build exacto.
 
 ## Requisitos
 
@@ -43,7 +43,7 @@ El ZIP instalable se publica en la sección **Releases** del repositorio. El che
 
 ## Instalación
 
-1. Descargá `DNSCrypt-Manager-release.zip`.
+1. Descargá `DNSCrypt-Manager-release.zip` desde **Releases**.
 2. Instalalo desde KernelSU, APatch o Magisk.
 3. Reiniciá el dispositivo.
 4. Abrí la WebUI y ejecutá **Probar DNS**.
@@ -92,6 +92,7 @@ bash tests/smoke-test-webui.sh
 
 - `BINARY_INFO.md`: procedencia y validación del binario.
 - `AUDIT_REPORT.md`: pruebas, riesgos y limitaciones.
+- `CHANGELOG.md`: historial de versiones públicas.
 
 ## Agradecimientos
 
