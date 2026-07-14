@@ -1,0 +1,154 @@
+name: Bootstrap source and publish release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bootstrap-and-release.yml'
+      - 'bootstrap/DNSCrypt-Manager-source-bootstrap.zip'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dnscrypt-manager-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DNSCRYPT_VERSION: '2.1.17'
+      DNSCRYPT_ASSET_SHA256: '85601b3398c7013ca0d102c075d0f46ccb9c5b6b84001be6f15992019560f572'
+      SOURCE_SHA256: 'bccaf6a35a5408ad84556ef47f600b5fb468c2cb5bae80ceae884fb799b57f8b'
+      RELEASE_TAG: 'v0.1.0'
+
+    steps:
+      - name: Checkout bootstrap repository
+        uses: actions/checkout@v4
+
+      - name: Verify and extract source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_ZIP='bootstrap/DNSCrypt-Manager-source-bootstrap.zip'
+          echo "$SOURCE_SHA256  $SOURCE_ZIP" | sha256sum -c -
+          unzip -tq "$SOURCE_ZIP"
+          rm -rf /tmp/dcm-source
+          mkdir -p /tmp/dcm-source
+          unzip -q "$SOURCE_ZIP" -d /tmp/dcm-source
+          test -s /tmp/dcm-source/module.prop
+          test -s /tmp/dcm-source/tools/build-module.sh
+          rsync -a /tmp/dcm-source/ ./ --exclude='.git/' --exclude='.github/'
+          rm -rf bootstrap
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            zip unzip binutils file iproute2 nodejs python3 curl ca-certificates
+
+      - name: Download and verify official dnscrypt-proxy ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://github.com/DNSCrypt/dnscrypt-proxy/releases/download/${DNSCRYPT_VERSION}/dnscrypt-proxy-android_arm64-${DNSCRYPT_VERSION}.zip"
+          curl --fail --location --retry 3 --output /tmp/dnscrypt-proxy.zip "$URL"
+          echo "$DNSCRYPT_ASSET_SHA256  /tmp/dnscrypt-proxy.zip" | sha256sum -c -
+          rm -rf /tmp/dnscrypt-proxy
+          mkdir -p /tmp/dnscrypt-proxy
+          unzip -q /tmp/dnscrypt-proxy.zip -d /tmp/dnscrypt-proxy
+          BIN="$(find /tmp/dnscrypt-proxy -type f -name dnscrypt-proxy -print -quit)"
+          test -n "$BIN"
+          test -s "$BIN"
+          bash tools/inject-binary.sh "$BIN"
+
+      - name: Run syntax and functional tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/run-syntax-checks.sh
+          bash tests/smoke-test-cli.sh
+          bash tests/smoke-test-webui.sh
+
+      - name: Build installable module
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          sudo mkdir -p /home/claude
+          sudo chown "$USER:$USER" /home/claude
+          bash tools/build-module.sh
+          test -s /home/claude/DNSCrypt-Manager-release.zip
+
+      - name: Verify release layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP='/home/claude/DNSCrypt-Manager-release.zip'
+          unzip -tq "$ZIP"
+          unzip -Z1 "$ZIP" | grep -qx 'module.prop'
+          if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|fixtures|bootstrap)/'; then
+            echo 'Development files leaked into release ZIP' >&2
+            exit 1
+          fi
+          unzip -p "$ZIP" module.prop | grep -qx 'author=Skaymer AR'
+          sha256sum "$ZIP"
+
+      - name: Prepare distributable files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp /home/claude/DNSCrypt-Manager-release.zip dist/
+          (
+            cd dist
+            sha256sum DNSCrypt-Manager-release.zip > DNSCrypt-Manager-release.zip.sha256
+          )
+          cat > dist/README.md <<'EOF'
+          # Release instalable
+
+          Instalá `DNSCrypt-Manager-release.zip` desde KernelSU, KernelSU Next,
+          APatch o Magisk. El archivo `.sha256` permite verificar la integridad.
+
+          La redirección DNS global viene desactivada por defecto.
+          EOF
+
+      - name: Commit expanded source and release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'Nothing to commit'
+          else
+            git commit -m 'Publish DNSCrypt Manager v0.1.0 [skip ci]'
+            git push
+          fi
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              dist/DNSCrypt-Manager-release.zip \
+              dist/DNSCrypt-Manager-release.zip.sha256 \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              dist/DNSCrypt-Manager-release.zip \
+              dist/DNSCrypt-Manager-release.zip.sha256 \
+              --target main \
+              --title 'DNSCrypt Manager v0.1.0' \
+              --notes 'Primera versión funcional, creada por Skaymer AR. Probada en Moto Edge 40 Pro con Android 16. La redirección global permanece desactivada por defecto.'
+          fi
