@@ -3,10 +3,6 @@ name: Publish GitHub Release
 on:
   push:
     branches: [main]
-    paths:
-      - 'dist/DNSCrypt-Manager-release.zip'
-      - 'dist/DNSCrypt-Manager-release.zip.sha256'
-      - '.github/workflows/publish-release.yml'
   workflow_dispatch:
 
 permissions:
