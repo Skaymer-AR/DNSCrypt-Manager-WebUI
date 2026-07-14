@@ -1,0 +1,70 @@
+name: Publish GitHub Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dist/DNSCrypt-Manager-release.zip'
+      - 'dist/DNSCrypt-Manager-release.zip.sha256'
+      - '.github/workflows/publish-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c DNSCrypt-Manager-release.zip.sha256
+          unzip -tq DNSCrypt-Manager-release.zip
+          unzip -Z1 DNSCrypt-Manager-release.zip | grep -qx 'module.prop'
+          unzip -p DNSCrypt-Manager-release.zip module.prop | grep -qx 'author=Skaymer AR'
+
+      - name: Create or update v0.1.0 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG='v0.1.0'
+          NOTES=$(cat <<'EOF'
+          Primera versión funcional de **DNSCrypt Manager**, creada por **Skaymer AR**.
+
+          - WebUI para KernelSU, KernelSU Next y APatch.
+          - CLI y botón de Acción para Magisk.
+          - dnscrypt-proxy oficial ARM64 2.1.17.
+          - Cloudflare, Quad9, AdGuard, Mullvad y NextDNS.
+          - Redirección DNS opcional mediante iptables/nftables.
+          - Watchdog, rollback automático y modo PANIC.
+          - Probado correctamente en Moto Edge 40 Pro con Android 16, sin pérdida de Wi-Fi, datos móviles ni conectividad.
+
+          **Seguridad:** la redirección global permanece desactivada por defecto.
+          EOF
+          )
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              dist/DNSCrypt-Manager-release.zip \
+              dist/DNSCrypt-Manager-release.zip.sha256 \
+              --clobber
+            gh release edit "$TAG" \
+              --title 'DNSCrypt Manager v0.1.0' \
+              --notes "$NOTES"
+          else
+            gh release create "$TAG" \
+              dist/DNSCrypt-Manager-release.zip \
+              dist/DNSCrypt-Manager-release.zip.sha256 \
+              --target main \
+              --title 'DNSCrypt Manager v0.1.0' \
+              --notes "$NOTES"
+          fi
