@@ -20,22 +20,44 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify release files
+      - name: Check release files exist
         shell: bash
         run: |
           set -euxo pipefail
           test -s dist/DNSCrypt-Manager-release.zip
           test -s dist/DNSCrypt-Manager-release.zip.sha256
           ls -lh dist/
-          cat dist/DNSCrypt-Manager-release.zip.sha256
+
+      - name: Verify release checksum
+        shell: bash
+        run: |
+          set -euxo pipefail
           ACTUAL_SHA="$(sha256sum dist/DNSCrypt-Manager-release.zip | awk '{print $1}')"
           EXPECTED_SHA="$(awk '{print $1}' dist/DNSCrypt-Manager-release.zip.sha256 | tr -d '\r')"
+          echo "actual=$ACTUAL_SHA"
+          echo "expected=$EXPECTED_SHA"
           test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+
+      - name: Verify ZIP integrity
+        shell: bash
+        run: |
+          set -euxo pipefail
           unzip -tq dist/DNSCrypt-Manager-release.zip
-          unzip -Z1 dist/DNSCrypt-Manager-release.zip | sed 's#^\./##' | grep -qx 'module.prop'
-          unzip -p dist/DNSCrypt-Manager-release.zip module.prop \
-            | tr -d '\r' \
-            | grep -qx 'author=Skaymer AR'
+
+      - name: Verify module layout
+        shell: bash
+        run: |
+          set -euxo pipefail
+          unzip -Z1 dist/DNSCrypt-Manager-release.zip | sed 's#^\./##' > /tmp/zip-entries.txt
+          head -50 /tmp/zip-entries.txt
+          grep -qx 'module.prop' /tmp/zip-entries.txt
+
+      - name: Verify module author
+        shell: bash
+        run: |
+          set -euxo pipefail
+          unzip -p dist/DNSCrypt-Manager-release.zip module.prop | tr -d '\r' | tee /tmp/module.prop
+          grep -qx 'author=Skaymer AR' /tmp/module.prop
 
       - name: Create or update v0.1.0 release
         env:
