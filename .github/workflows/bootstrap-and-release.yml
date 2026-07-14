@@ -1,35 +1,35 @@
-# Bootstrap trigger: 2026-07-14
-name: Bootstrap source and publish release
+name: Expand source, test and build release
 
 on:
-  workflow_dispatch:
-  push:
+  pull_request:
     branches: [main]
     paths:
       - '.github/workflows/bootstrap-and-release.yml'
-      - 'bootstrap/DNSCrypt-Manager-source-bootstrap.zip'
+      - 'bootstrap/**'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: dnscrypt-manager-bootstrap
+  group: dnscrypt-manager-publish
   cancel-in-progress: false
 
 jobs:
-  bootstrap:
-    if: github.actor != 'github-actions[bot]'
+  publish-source:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       DNSCRYPT_VERSION: '2.1.17'
       DNSCRYPT_ASSET_SHA256: '85601b3398c7013ca0d102c075d0f46ccb9c5b6b84001be6f15992019560f572'
       SOURCE_SHA256: 'bccaf6a35a5408ad84556ef47f600b5fb468c2cb5bae80ceae884fb799b57f8b'
-      RELEASE_TAG: 'v0.1.0'
 
     steps:
-      - name: Checkout bootstrap repository
+      - name: Checkout PR branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
 
       - name: Verify and extract source snapshot
         shell: bash
@@ -99,6 +99,7 @@ jobs:
             exit 1
           fi
           unzip -p "$ZIP" module.prop | grep -qx 'author=Skaymer AR'
+          file bin/arm64/dnscrypt-proxy | grep -q 'ARM aarch64'
           sha256sum "$ZIP"
 
       - name: Prepare distributable files
@@ -120,36 +121,13 @@ jobs:
           La redirección DNS global viene desactivada por defecto.
           EOF
 
-      - name: Commit expanded source and release files
+      - name: Commit expanded source and distributable
         shell: bash
         run: |
           set -euo pipefail
+          BRANCH="${{ github.event.pull_request.head.ref || github.ref_name }}"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          if git diff --cached --quiet; then
-            echo 'Nothing to commit'
-          else
-            git commit -m 'Publish DNSCrypt Manager v0.1.0 [skip ci]'
-            git push
-          fi
-
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" \
-              dist/DNSCrypt-Manager-release.zip \
-              dist/DNSCrypt-Manager-release.zip.sha256 \
-              --clobber
-          else
-            gh release create "$RELEASE_TAG" \
-              dist/DNSCrypt-Manager-release.zip \
-              dist/DNSCrypt-Manager-release.zip.sha256 \
-              --target main \
-              --title 'DNSCrypt Manager v0.1.0' \
-              --notes 'Primera versión funcional, creada por Skaymer AR. Probada en Moto Edge 40 Pro con Android 16. La redirección global permanece desactivada por defecto.'
-          fi
+          git commit -m 'Publish complete source and release v0.1.0 [skip ci]'
+          git push origin "HEAD:$BRANCH"
