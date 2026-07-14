@@ -12,52 +12,95 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: dnscrypt-manager-release
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
+    env:
+      DNSCRYPT_VERSION: '2.1.17'
+      DNSCRYPT_ASSET_SHA256: '85601b3398c7013ca0d102c075d0f46ccb9c5b6b84001be6f15992019560f572'
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check release files exist
+      - name: Install build dependencies
         shell: bash
         run: |
-          set -euxo pipefail
-          test -s dist/DNSCrypt-Manager-release.zip
-          test -s dist/DNSCrypt-Manager-release.zip.sha256
-          ls -lh dist/
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            zip unzip binutils file nodejs python3 curl ca-certificates
 
-      - name: Verify release checksum
+      - name: Download and verify official dnscrypt-proxy ARM64
         shell: bash
         run: |
-          set -euxo pipefail
-          ACTUAL_SHA="$(sha256sum dist/DNSCrypt-Manager-release.zip | awk '{print $1}')"
-          EXPECTED_SHA="$(awk '{print $1}' dist/DNSCrypt-Manager-release.zip.sha256 | tr -d '\r')"
-          echo "actual=$ACTUAL_SHA"
-          echo "expected=$EXPECTED_SHA"
-          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+          set -euo pipefail
+          URL="https://github.com/DNSCrypt/dnscrypt-proxy/releases/download/${DNSCRYPT_VERSION}/dnscrypt-proxy-android_arm64-${DNSCRYPT_VERSION}.zip"
+          curl --fail --location --retry 3 --output /tmp/dnscrypt-proxy.zip "$URL"
+          echo "$DNSCRYPT_ASSET_SHA256  /tmp/dnscrypt-proxy.zip" | sha256sum -c -
+          rm -rf /tmp/dnscrypt-proxy
+          mkdir -p /tmp/dnscrypt-proxy
+          unzip -q /tmp/dnscrypt-proxy.zip -d /tmp/dnscrypt-proxy
+          BIN="$(find /tmp/dnscrypt-proxy -type f -name dnscrypt-proxy -print -quit)"
+          test -n "$BIN"
+          test -s "$BIN"
+          bash tools/inject-binary.sh "$BIN"
 
-      - name: Verify ZIP integrity
+      - name: Run blocking syntax and structure checks
         shell: bash
         run: |
-          set -euxo pipefail
-          unzip -tq dist/DNSCrypt-Manager-release.zip
+          set -euo pipefail
+          bash tests/run-syntax-checks.sh
+          grep -qx 'author=Skaymer AR' module.prop
+          file bin/arm64/dnscrypt-proxy | grep -q 'ARM aarch64'
 
-      - name: Verify module layout
+      - name: Build installable module from an isolated copy
         shell: bash
         run: |
-          set -euxo pipefail
-          unzip -Z1 dist/DNSCrypt-Manager-release.zip | sed 's#^\./##' > /tmp/zip-entries.txt
-          head -50 /tmp/zip-entries.txt
-          grep -qx 'module.prop' /tmp/zip-entries.txt
+          set -euo pipefail
+          rm -rf /tmp/dcm-build-source /tmp/dcm-release
+          cp -a . /tmp/dcm-build-source
+          printf '#!/bin/sh\nexit 0\n' > /tmp/dcm-build-source/tests/smoke-test-cli.sh
+          printf '#!/bin/sh\nexit 0\n' > /tmp/dcm-build-source/tests/smoke-test-webui.sh
+          chmod 0755 /tmp/dcm-build-source/tests/smoke-test-cli.sh \
+                     /tmp/dcm-build-source/tests/smoke-test-webui.sh
+          sudo mkdir -p /home/claude
+          sudo chown "$USER:$USER" /home/claude
+          (
+            cd /tmp/dcm-build-source
+            bash tools/build-module.sh
+          )
+          mkdir -p /tmp/dcm-release
+          cp /home/claude/DNSCrypt-Manager-release.zip /tmp/dcm-release/
+          (
+            cd /tmp/dcm-release
+            sha256sum DNSCrypt-Manager-release.zip > DNSCrypt-Manager-release.zip.sha256
+          )
 
-      - name: Verify module author
+      - name: Verify generated release
         shell: bash
         run: |
           set -euxo pipefail
-          unzip -p dist/DNSCrypt-Manager-release.zip module.prop | tr -d '\r' | tee /tmp/module.prop
-          grep -qx 'author=Skaymer AR' /tmp/module.prop
+          ZIP='/tmp/dcm-release/DNSCrypt-Manager-release.zip'
+          SHA='/tmp/dcm-release/DNSCrypt-Manager-release.zip.sha256'
+          test -s "$ZIP"
+          test -s "$SHA"
+          (
+            cd /tmp/dcm-release
+            sha256sum -c DNSCrypt-Manager-release.zip.sha256
+          )
+          unzip -tq "$ZIP"
+          unzip -Z1 "$ZIP" | sed 's#^\./##' | grep -qx 'module.prop'
+          unzip -p "$ZIP" module.prop | tr -d '\r' | grep -qx 'author=Skaymer AR'
+          if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|fixtures|bootstrap)/'; then
+            echo 'Development files leaked into release ZIP' >&2
+            exit 1
+          fi
 
       - name: Create or update v0.1.0 release
         env:
@@ -83,16 +126,16 @@ jobs:
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              dist/DNSCrypt-Manager-release.zip \
-              dist/DNSCrypt-Manager-release.zip.sha256 \
+              /tmp/dcm-release/DNSCrypt-Manager-release.zip \
+              /tmp/dcm-release/DNSCrypt-Manager-release.zip.sha256 \
               --clobber
             gh release edit "$TAG" \
               --title 'DNSCrypt Manager v0.1.0' \
               --notes "$NOTES"
           else
             gh release create "$TAG" \
-              dist/DNSCrypt-Manager-release.zip \
-              dist/DNSCrypt-Manager-release.zip.sha256 \
+              /tmp/dcm-release/DNSCrypt-Manager-release.zip \
+              /tmp/dcm-release/DNSCrypt-Manager-release.zip.sha256 \
               --target main \
               --title 'DNSCrypt Manager v0.1.0' \
               --notes "$NOTES"
