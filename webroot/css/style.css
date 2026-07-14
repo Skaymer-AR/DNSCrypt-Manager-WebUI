@@ -1,0 +1,262 @@
+/* DNSCrypt Manager - style.css
+ * Autocontenido: sin CDN, sin fuentes externas, funciona sin Internet.
+ * Fuentes del propio sistema operativo.
+ */
+
+:root {
+  --bg:        #0a0f14;
+  --bg-elev:   #121a22;
+  --card:      #16202a;
+  --card-brd:  #223140;
+  --text:      #e7eef4;
+  --text-dim:  #8ba0b2;
+  --text-faint:#5c7286;
+
+  --accent:    #35c2b3;
+  --accent-dim:#1f6e66;
+
+  --green:     #3ecf8e;
+  --amber:     #e8a33d;
+  --red:       #e5484d;
+
+  --radius:    14px;
+  --radius-sm: 9px;
+  --gap:       14px;
+
+  --font-ui:   -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  padding: 16px 14px 90px;
+  max-width: 720px;
+  margin: 0 auto;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.hidden { display: none !important; }
+
+/* ------------------------------ cabecera -------------------------------- */
+.app-header {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 18px;
+}
+.app-header .glyph {
+  width: 42px; height: 42px; flex: none;
+  border-radius: 12px;
+  background: linear-gradient(155deg, var(--accent), var(--accent-dim));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 700; color: #06201d;
+}
+.app-header h1 {
+  font-size: 18px; margin: 0; letter-spacing: 0.2px;
+}
+.app-header .sub {
+  margin: 2px 0 0; font-size: 12.5px; color: var(--text-dim);
+}
+
+/* -------------------------------- banners -------------------------------- */
+.banner {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--gap);
+  font-size: 13.5px;
+  border: 1px solid transparent;
+}
+.banner-warn { background: rgba(232,163,61,0.12); border-color: rgba(232,163,61,0.35); color: #f2c47a; }
+.banner-danger { background: rgba(229,72,77,0.12); border-color: rgba(229,72,77,0.35); color: #f29a9d; }
+
+/* --------------------------------- tarjetas -------------------------------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-brd);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: var(--gap);
+}
+.card.danger { border-color: rgba(229,72,77,0.4); }
+
+.card h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+
+/* ------------------------------ panel principal ---------------------------- */
+.status-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+.dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 4px transparent;
+  transition: background-color .25s ease, box-shadow .25s ease;
+}
+.dot-green { background: var(--green); box-shadow: 0 0 0 4px rgba(62,207,142,0.18); }
+.dot-amber { background: var(--amber); box-shadow: 0 0 0 4px rgba(232,163,61,0.18); }
+.dot-red   { background: var(--red);   box-shadow: 0 0 0 4px rgba(229,72,77,0.18); }
+
+.status-row .headline { font-size: 17px; font-weight: 600; }
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+.kv-grid .kv { min-width: 0; }
+.kv .k { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.kv .v { font-family: var(--font-mono); font-size: 13.5px; color: var(--text); overflow-wrap: anywhere; }
+
+/* --------------------------------- botones --------------------------------- */
+.btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
+
+button {
+  font-family: var(--font-ui);
+  font-size: 14.5px; font-weight: 600;
+  border: 1px solid var(--card-brd);
+  background: var(--bg-elev);
+  color: var(--text);
+  padding: 12px 16px;
+  min-height: 46px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: transform .08s ease, opacity .15s ease, background-color .15s ease;
+  -webkit-user-select: none; user-select: none;
+}
+button:active { transform: scale(0.97); }
+button:disabled { opacity: 0.45; cursor: default; }
+
+button.primary { background: var(--accent); border-color: var(--accent); color: #06201d; }
+button.ghost   { background: transparent; }
+button.danger  { background: var(--red); border-color: var(--red); color: #290608; }
+button.small   { min-height: 38px; padding: 8px 12px; font-size: 13px; }
+button.wide    { flex: 1 1 100%; }
+
+/* --------------------------------- campos ---------------------------------- */
+.field { margin-bottom: 12px; }
+.field label {
+  display: block; font-size: 12.5px; color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.field input[type="text"], .field select {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 14.5px;
+  color: var(--text);
+  background: var(--bg-elev);
+  border: 1px solid var(--card-brd);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  min-height: 44px;
+}
+.field input[type="text"]:focus, .field select:focus {
+  outline: none; border-color: var(--accent);
+}
+.field input.field-invalid { border-color: var(--red); }
+.field .err { min-height: 16px; font-size: 12px; color: var(--red); margin-top: 4px; }
+
+.field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-dim); }
+.switch input { width: 20px; height: 20px; accent-color: var(--accent); }
+
+.hint { font-size: 12.5px; color: var(--text-faint); margin: 8px 0 0; }
+
+/* --------------------------------- salidas mono ----------------------------- */
+pre.output, #testDnsOutput, #logsOutput {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-elev);
+  border: 1px solid var(--card-brd);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0 0 10px;
+  color: var(--text-dim);
+}
+.diag-line { padding: 1px 0; }
+.diag-ok   { color: var(--green); }
+.diag-warn { color: var(--amber); }
+.diag-fail { color: var(--red); font-weight: 600; }
+
+/* --------------------------------- detalles --------------------------------- */
+details.card summary {
+  cursor: pointer;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-dim);
+  font-weight: 600;
+  list-style: none;
+}
+details.card summary::-webkit-details-marker { display: none; }
+details.card[open] summary { margin-bottom: 12px; }
+
+/* ----------------------------------- toast ----------------------------------- */
+.toast {
+  position: fixed; left: 14px; right: 14px; bottom: 18px;
+  background: var(--card);
+  border: 1px solid var(--card-brd);
+  color: var(--text);
+  padding: 13px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  opacity: 0; transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+  max-width: 720px; margin: 0 auto;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-ok    { border-color: rgba(62,207,142,0.4); }
+.toast-error { border-color: rgba(229,72,77,0.45); }
+
+/* ------------------------------ acerca de ----------------------------------- */
+.about-card {
+  text-align: center;
+  padding: 20px 16px;
+}
+.about-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+.about-author {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+.about-author strong {
+  color: var(--accent);
+}
+
+/* ----------------------------------- footer ----------------------------------- */
+footer {
+  text-align: center; color: var(--text-faint);
+  font-size: 11.5px; margin-top: 8px;
+}
+
+/* --------------------------------- responsive -------------------------------- */
+@media (max-width: 380px) {
+  .kv-grid { grid-template-columns: 1fr; }
+  button.wide { flex-basis: auto; }
+}

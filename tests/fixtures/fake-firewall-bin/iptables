@@ -1,0 +1,96 @@
+#!/bin/bash
+##############################################################################
+# ARCHIVO DE PRUEBA — NO ES iptables/ip6tables REAL — NO INCLUIR EN EL MODULO
+#
+# tests/fixtures/fake-firewall-bin/iptables (ip6tables es un symlink a este)
+#
+# Este sandbox no tiene iptables/ip6tables instalados (verificado). Sin este
+# doble, la CLI dnscrypt-manager nunca podria probarse mas alla de la rama
+# "sin backend disponible": el codigo real de creacion/enganche/limpieza de
+# cadenas quedaria sin ejercitar. Este fake mantiene estado PERSISTENTE en
+# disco (via $FAKE_FW_STATE) para poder simular fielmente la semantica de
+# -C (existe?) / -A (agregar) / -D (borrar) / -F (vaciar) / -X (eliminar
+# cadena), separando tabla (nat por defecto = filter) y binario invocado
+# (iptables vs ip6tables tienen namespaces de estado separados).
+#
+# No manipula netfilter real (ni podria, sin CAP_NET_ADMIN completo ni
+# kernel real detras). Es un simulador de SINTAXIS Y SECUENCIA de llamadas,
+# no de comportamiento de kernel. Ver AUDIT_REPORT.md para el alcance real
+# de esta verificacion.
+##############################################################################
+set -u
+
+STATE_DIR="${FAKE_FW_STATE:-/tmp/fake-fw-state}"
+SELF="$(basename "$0")"                 # iptables | ip6tables
+LOG="$STATE_DIR/$SELF.invocations.log"
+mkdir -p "$STATE_DIR"
+
+echo "$SELF $*" >> "$LOG"
+
+# --- parseo de argumentos ----------------------------------------------------
+TABLE="filter"
+VERB=""
+CHAIN=""
+REST=()
+i=1
+args=("$@")
+n=${#args[@]}
+while [ "$i" -le "$n" ]; do
+  a="${args[$((i-1))]}"
+  case "$a" in
+    -t)
+      i=$((i+1)); TABLE="${args[$((i-1))]}" ;;
+    -N|-F|-A|-C|-D|-X)
+      VERB="$a"
+      i=$((i+1))
+      if [ "$i" -le "$n" ]; then CHAIN="${args[$((i-1))]}"; fi ;;
+    *)
+      REST+=("$a") ;;
+  esac
+  i=$((i+1))
+done
+
+[ -z "$VERB" ] && { echo "fake-$SELF: no reconozco los argumentos: $*" >&2; exit 2; }
+
+# Namespace de estado: SELF (iptables/ip6tables) + tabla + cadena.
+KEY_FILE="$STATE_DIR/$SELF.$TABLE.$CHAIN.rules"
+CHAIN_MARK="$STATE_DIR/$SELF.$TABLE.$CHAIN.exists"
+RULESPEC="${REST[*]:-}"
+
+case "$VERB" in
+  -N)
+    touch "$CHAIN_MARK"
+    : > "$KEY_FILE" 2>/dev/null || true
+    exit 0
+    ;;
+  -F)
+    : > "$KEY_FILE"
+    exit 0
+    ;;
+  -X)
+    rm -f "$KEY_FILE" "$CHAIN_MARK"
+    exit 0
+    ;;
+  -A)
+    echo "$RULESPEC" >> "$KEY_FILE"
+    exit 0
+    ;;
+  -C)
+    [ -f "$KEY_FILE" ] && grep -qxF -- "$RULESPEC" "$KEY_FILE" && exit 0
+    exit 1
+    ;;
+  -D)
+    if [ -f "$KEY_FILE" ] && grep -qxF -- "$RULESPEC" "$KEY_FILE"; then
+      _tmp="$KEY_FILE.tmp.$$"
+      grep -vxF -- "$RULESPEC" "$KEY_FILE" > "$_tmp" || true
+      # Solo borra la PRIMER coincidencia (semantica real de -D); como es
+      # infrecuente tener duplicados exactos en nuestro uso, esta
+      # simplificacion (borrar todas las coincidencias exactas) es
+      # aceptable para lo que este modulo ejercita.
+      mv -f "$_tmp" "$KEY_FILE"
+      exit 0
+    fi
+    exit 1
+    ;;
+esac
+exit 2

@@ -1,0 +1,86 @@
+#!/bin/bash
+##############################################################################
+# ARCHIVO DE PRUEBA — NO ES nft REAL — NO INCLUIR EN EL MODULO
+#
+# tests/fixtures/fake-firewall-bin/nft
+#
+# Simula lo minimo de la sintaxis `nft` que usa dnscrypt-manager:
+#   add table inet NAME
+#   delete table inet NAME
+#   list table inet NAME
+#   add chain inet NAME CHAIN '{ ... }'
+#   add rule inet NAME CHAIN <tokens...>
+#
+# A diferencia del fake de iptables, este SI aplica una regla de integridad
+# real: 'add rule' en una cadena que no fue creada antes con 'add chain'
+# falla (exit 1), igual que el nft real. Esto sirve para detectar un bug de
+# orden (agregar una regla antes de crear su cadena) si llegara a existir.
+##############################################################################
+set -u
+
+STATE_DIR="${FAKE_FW_STATE:-/tmp/fake-fw-state}"
+LOG="$STATE_DIR/nft.invocations.log"
+mkdir -p "$STATE_DIR"
+echo "nft $*" >> "$LOG"
+
+args=("$@")
+
+case "${args[0]:-}" in
+  add)
+    case "${args[1]:-}" in
+      table)
+        # add table inet NAME
+        name="${args[3]:-}"
+        touch "$STATE_DIR/nft.table.$name"
+        exit 0
+        ;;
+      chain)
+        # add chain inet TABLE CHAIN 'SPEC'
+        table="${args[3]:-}"; chain="${args[4]:-}"
+        if [ ! -f "$STATE_DIR/nft.table.$table" ]; then
+          echo "fake-nft: la tabla '$table' no existe" >&2; exit 1
+        fi
+        touch "$STATE_DIR/nft.chain.$table.$chain"
+        : > "$STATE_DIR/nft.rules.$table.$chain" 2>/dev/null || true
+        exit 0
+        ;;
+      rule)
+        # add rule inet TABLE CHAIN <tokens...>
+        table="${args[3]:-}"; chain="${args[4]:-}"
+        if [ ! -f "$STATE_DIR/nft.chain.$table.$chain" ]; then
+          echo "fake-nft: ERROR de orden: regla agregada antes de crear la cadena '$chain' en tabla '$table'" >&2
+          exit 1
+        fi
+        shift 5 2>/dev/null || true
+        echo "$*" >> "$STATE_DIR/nft.rules.$table.$chain"
+        exit 0
+        ;;
+      *)
+        echo "fake-nft: 'add ${args[1]:-}' no soportado por este fake" >&2; exit 2 ;;
+    esac
+    ;;
+  delete)
+    case "${args[1]:-}" in
+      table)
+        name="${args[3]:-}"
+        if [ ! -f "$STATE_DIR/nft.table.$name" ]; then exit 1; fi
+        rm -f "$STATE_DIR/nft.table.$name"
+        rm -f "$STATE_DIR"/nft.chain."$name".* "$STATE_DIR"/nft.rules."$name".* 2>/dev/null
+        exit 0
+        ;;
+      *) echo "fake-nft: 'delete ${args[1]:-}' no soportado por este fake" >&2; exit 2 ;;
+    esac
+    ;;
+  list)
+    case "${args[1]:-}" in
+      table)
+        name="${args[3]:-}"
+        [ -f "$STATE_DIR/nft.table.$name" ] && { echo "table inet $name { }"; exit 0; }
+        exit 1
+        ;;
+      *) echo "fake-nft: 'list ${args[1]:-}' no soportado por este fake" >&2; exit 2 ;;
+    esac
+    ;;
+  *)
+    echo "fake-nft: comando no soportado: $*" >&2; exit 2 ;;
+esac

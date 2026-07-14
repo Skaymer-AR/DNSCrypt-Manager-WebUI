@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>DNSCrypt Manager</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="glyph">D</div>
+    <div>
+      <h1>DNSCrypt Manager</h1>
+      <p class="sub">dnscrypt-proxy como servicio del sistema</p>
+    </div>
+  </header>
+
+  <div id="ksuBanner" class="banner banner-warn hidden"></div>
+
+  <div id="disabledBanner" class="banner banner-danger hidden">
+    <span id="disabledBannerText"></span>
+    <div style="margin-top:8px;">
+      <button id="btnEnable" class="small">Habilitar</button>
+    </div>
+  </div>
+
+  <div id="binMissingBanner" class="banner banner-warn hidden">
+    No se encontro el binario de dnscrypt-proxy. Instalalo con
+    <code>su -c dnscrypt-manager fetch-binary</code> (ver README) y luego
+    reinicia el servicio.
+  </div>
+
+  <!-- ============================ PANEL PRINCIPAL ============================ -->
+  <section class="card">
+    <h2>Panel principal</h2>
+
+    <div class="status-row">
+      <span id="statusDot" class="dot dot-red"></span>
+      <span id="statusHeadline" class="headline">Detenido</span>
+    </div>
+
+    <div class="kv-grid">
+      <div class="kv"><div class="k">PID</div><div class="v" id="pidText">—</div></div>
+      <div class="kv"><div class="k">Escucha</div><div class="v" id="listeningText">—</div></div>
+      <div class="kv"><div class="k">Direccion local</div><div class="v" id="listenText">—</div></div>
+      <div class="kv"><div class="k">Version</div><div class="v" id="versionText">—</div></div>
+      <div class="kv"><div class="k">Servidor activo</div><div class="v" id="serverText">—</div></div>
+      <div class="kv"><div class="k">Backend firewall</div><div class="v" id="backendText">—</div></div>
+    </div>
+
+    <div class="btn-row">
+      <button id="btnStart" class="primary">Iniciar</button>
+      <button id="btnStop">Detener</button>
+      <button id="btnRestart" class="ghost">Reiniciar</button>
+      <button id="btnTestDns" class="wide">Probar DNS</button>
+    </div>
+
+    <div id="testDnsOutput" class="hint" style="margin-top:12px;"></div>
+  </section>
+
+  <!-- ============================== SERVIDORES ================================ -->
+  <section class="card">
+    <h2>Servidores</h2>
+
+    <p class="hint" style="margin:0 0 10px;">Proveedores preestablecidos (stamp con IP embebida):</p>
+    <div class="btn-row" style="margin-bottom:16px;">
+      <button data-provider="cloudflare">Cloudflare</button>
+      <button data-provider="quad9">Quad9</button>
+      <button data-provider="adguard">AdGuard</button>
+      <button data-provider="mullvad">Mullvad</button>
+    </div>
+
+    <div class="field">
+      <label for="nextdnsId">NextDNS — Configuration ID</label>
+      <input type="text" id="nextdnsId" placeholder="ej: abcdef" maxlength="12" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="err" id="nextdnsError"></div>
+    </div>
+    <button id="btnNextdnsApply" class="wide">Aplicar NextDNS</button>
+    <p class="hint">Cambiar de servidor requiere reiniciar el servicio para tomar efecto.</p>
+  </section>
+
+  <!-- ============================== REDIRECCION ================================ -->
+  <section class="card">
+    <h2>Redireccion DNS</h2>
+
+    <div class="status-row">
+      <span id="redirectDot" class="dot dot-amber"></span>
+      <span id="redirectText">Inactiva</span>
+    </div>
+
+    <div class="btn-row" style="margin-bottom:16px;">
+      <button id="btnRedirectApply" class="primary">Aplicar redireccion</button>
+      <button id="btnRedirectRemove">Quitar redireccion</button>
+    </div>
+
+    <div class="field-row">
+      <span class="switch">
+        <input type="checkbox" id="bootRedirectToggle">
+        Redirigir automaticamente al iniciar Android
+      </span>
+    </div>
+
+    <div class="field">
+      <label for="ipv6ModeSelect">IPv6 al redirigir</label>
+      <select id="ipv6ModeSelect">
+        <option value="redirect">Redirigir tambien IPv6 al proxy</option>
+        <option value="block">Bloquear DNS por IPv6 (evita fugas)</option>
+      </select>
+    </div>
+    <p class="hint">
+      "Redirigir" usa el mismo proxy para IPv4 e IPv6. "Bloquear" corta las
+      consultas DNS por IPv6 para que no se escapen sin cifrar; el resto del
+      trafico IPv6 no se toca.
+    </p>
+  </section>
+
+  <!-- ============================== DIAGNOSTICO ================================ -->
+  <details class="card">
+    <summary>Diagnostico — Private DNS de Android</summary>
+    <button id="btnPrivateDns" class="small" style="margin-bottom:10px;">Verificar Private DNS</button>
+    <div id="privateDnsText" class="hint">Toca el boton para consultar.</div>
+  </details>
+
+  <!-- ================================== LOGS ==================================== -->
+  <details class="card">
+    <summary>Logs</summary>
+    <div class="btn-row" style="margin-bottom:12px;">
+      <button id="btnLogs" class="small">Ver logs recientes</button>
+      <button id="btnLogsClear" class="small danger">Borrar logs</button>
+    </div>
+    <div id="logsOutput" class="hint"></div>
+  </details>
+
+  <!-- ================================ EMERGENCIA ================================= -->
+  <section class="card danger">
+    <h2>Emergencia</h2>
+    <p class="hint" style="margin-top:0;">
+      Detiene todo, quita cualquier redireccion, restaura el DNS normal del
+      sistema y deshabilita el modulo hasta que lo reactives.
+    </p>
+    <button id="btnPanic" class="danger wide">PANIC — Restaurar red y deshabilitar</button>
+  </section>
+
+  <!-- ================================ ACERCA DE ================================= -->
+  <section class="card about-card">
+    <div class="about-title">DNSCrypt Manager</div>
+    <div class="about-author">Creado por <strong>Skaymer AR</strong></div>
+    <div class="hint" style="margin-top:6px;">
+      dnscrypt-proxy como servicio de sistema · KernelSU / KernelSU Next / APatch / Magisk
+    </div>
+  </section>
+
+  <footer>
+    DNSCrypt Manager · Creado por Skaymer AR
+  </footer>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/validation.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
