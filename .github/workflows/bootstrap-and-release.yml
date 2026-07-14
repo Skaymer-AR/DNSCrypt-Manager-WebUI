@@ -22,7 +22,7 @@ jobs:
     env:
       DNSCRYPT_VERSION: '2.1.17'
       DNSCRYPT_ASSET_SHA256: '85601b3398c7013ca0d102c075d0f46ccb9c5b6b84001be6f15992019560f572'
-      SOURCE_SHA256: 'bccaf6a35a5408ad84556ef47f600b5fb468c2cb5bae80ceae884fb799b57f8b'
+      SOURCE_TAR_XZ_SHA256: '2a2bdc6aa9a86d619606dd16738259b15f6779764aeedd6b0e281818c3de37bb'
 
     steps:
       - name: Checkout PR branch
@@ -31,16 +31,17 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
 
-      - name: Verify and extract source snapshot
+      - name: Reconstruct, verify and extract source snapshot
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE_ZIP='bootstrap/DNSCrypt-Manager-source-bootstrap.zip'
-          echo "$SOURCE_SHA256  $SOURCE_ZIP" | sha256sum -c -
-          unzip -tq "$SOURCE_ZIP"
+          SNAPSHOT='/tmp/DNSCrypt-Manager-source.tar.xz'
+          cat bootstrap/source.tar.xz.b64.part-* | tr -d '\r\n' | base64 --decode > "$SNAPSHOT"
+          echo "$SOURCE_TAR_XZ_SHA256  $SNAPSHOT" | sha256sum -c -
+          tar -tJf "$SNAPSHOT" >/dev/null
           rm -rf /tmp/dcm-source
           mkdir -p /tmp/dcm-source
-          unzip -q "$SOURCE_ZIP" -d /tmp/dcm-source
+          tar -xJf "$SNAPSHOT" -C /tmp/dcm-source
           test -s /tmp/dcm-source/module.prop
           test -s /tmp/dcm-source/tools/build-module.sh
           rsync -a /tmp/dcm-source/ ./ --exclude='.git/' --exclude='.github/'
@@ -52,7 +53,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            zip unzip binutils file iproute2 nodejs python3 curl ca-certificates
+            zip unzip binutils file iproute2 nodejs python3 curl ca-certificates xz-utils
 
       - name: Download and verify official dnscrypt-proxy ARM64
         shell: bash
