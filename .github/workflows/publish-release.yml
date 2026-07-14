@@ -23,12 +23,19 @@ jobs:
       - name: Verify release files
         shell: bash
         run: |
-          set -euo pipefail
-          cd dist
-          sha256sum -c DNSCrypt-Manager-release.zip.sha256
-          unzip -tq DNSCrypt-Manager-release.zip
-          unzip -Z1 DNSCrypt-Manager-release.zip | grep -qx 'module.prop'
-          unzip -p DNSCrypt-Manager-release.zip module.prop | grep -qx 'author=Skaymer AR'
+          set -euxo pipefail
+          test -s dist/DNSCrypt-Manager-release.zip
+          test -s dist/DNSCrypt-Manager-release.zip.sha256
+          ls -lh dist/
+          cat dist/DNSCrypt-Manager-release.zip.sha256
+          ACTUAL_SHA="$(sha256sum dist/DNSCrypt-Manager-release.zip | awk '{print $1}')"
+          EXPECTED_SHA="$(awk '{print $1}' dist/DNSCrypt-Manager-release.zip.sha256 | tr -d '\r')"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+          unzip -tq dist/DNSCrypt-Manager-release.zip
+          unzip -Z1 dist/DNSCrypt-Manager-release.zip | sed 's#^\./##' | grep -qx 'module.prop'
+          unzip -p dist/DNSCrypt-Manager-release.zip module.prop \
+            | tr -d '\r' \
+            | grep -qx 'author=Skaymer AR'
 
       - name: Create or update v0.1.0 release
         env:
