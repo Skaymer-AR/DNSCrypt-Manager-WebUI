@@ -10,18 +10,24 @@ Compatible con **KernelSU**, **KernelSU Next**, **APatch** (WebUI completa) y **
 
 ## Estado del proyecto
 
-Esta es la **versión mínima funcional**. Cubre:
+**v0.2.0** agrega una capa de protección de navegación sobre la base de v0.1.0.
+Cubre:
 
 - Servicio `dnscrypt-proxy` gestionado por una única CLI (`dnscrypt-manager`).
 - Redirección DNS real vía `iptables`/`ip6tables` o `nftables`, con cadenas propias e idempotentes.
 - Cloudflare, Quad9, AdGuard, Mullvad y NextDNS por Configuration ID.
+- **Blocklists por categoría** (malware/phishing/estafas/rastreadores/publicidad/criptominería) con actualización verificada y **rollback automático**.
+- **Allowlist**, **desbloqueo temporal** (sin cron) y **perfiles de seguridad** (equilibrado/estricto/privacidad).
+- **Modo fail-closed opcional** (opt-in, cadenas propias, idempotente), **detector de fugas DNS** y panel **“por qué fue bloqueado”** con historial local limitado.
 - Watchdog de arranque con rollback automático si el DNS deja de responder.
-- WebUI para KernelSU/KernelSU Next/APatch.
-- CLI y botón Acción para Magisk.
-- Comandos de emergencia (`panic`, `disable`, `restore-network`).
-- Pruebas aisladas de sintaxis, CLI y WebUI.
+- WebUI para KernelSU/KernelSU Next/APatch; CLI y botón Acción para Magisk.
+- Comandos de emergencia (`panic`, `disable`, `restore-network`) — **PANIC siempre restaura la red**.
+- Pruebas aisladas de sintaxis, CLI, WebUI y **seguridad**.
 
-La primera versión fue probada con éxito en un **Motorola Edge 40 Pro con Android 16**, sin pérdida de Wi‑Fi, red móvil ni conectividad durante las pruebas iniciales.
+Por defecto la **redirección global** y el **fail-closed** vienen **DESACTIVADOS**;
+la protección de malware/phishing/estafas se activa **después de que las listas se
+validen**. Probado con éxito en un **Motorola Edge 40 Pro con Android 16**, sin
+pérdida de Wi‑Fi, red móvil ni conectividad.
 
 ## Descargar
 
@@ -90,6 +96,11 @@ bash tests/smoke-test-webui.sh
 
 ## Documentación
 
+- `SECURITY_FEATURES.md`: capa de seguridad v0.2.0 (blocklists, allowlist, excepciones, perfiles, fail-closed, fugas, eventos) con comandos.
+- `BLOCKLIST_SOURCES.md`: fuentes públicas de las listas, licencias y metadatos.
+- `PRIVACY.md`: qué se guarda, dónde, cuánto y cómo borrarlo (sin telemetría).
+- `MIGRATION_v0.1.0_to_v0.2.0.md`: cómo se migra sin perder configuración.
+- `ANDROID_TEST_PLAN_v0.2.0.md`: 29 pruebas manuales en dispositivo real.
 - `BINARY_INFO.md`: procedencia y validación del binario.
 - `AUDIT_REPORT.md`: pruebas, riesgos y limitaciones.
 - `CHANGELOG.md`: historial de versiones públicas.

@@ -1,6 +1,71 @@
 # AUDIT_REPORT.md — DNSCrypt Manager
 
 **DNSCrypt Manager — Creado por Skaymer AR**
+Fecha de esta revisión: 2026-07-15 (Ronda 4).
+
+## Ronda 4 — capa de seguridad v0.2.0
+
+Se agregó `scripts/security.sh` y la contraparte en CLI/WebUI (blocklists,
+allowlist, excepciones temporales, perfiles, fail-closed, detector de fugas,
+eventos, migración). Principios: la CLI es la autoridad final y revalida todo;
+sin `eval`; sin `pgrep`/`pkill`/`killall`; sin `chmod 777`; sin *flush* de reglas
+ajenas; sin tocar SELinux; escrituras atómicas (tmp+`mv`); archivos `0600`;
+cadenas/tabla propias para fail-closed.
+
+### Decisiones de diseño auditables
+
+- **Fail-closed opt-in y aislado**: cadena `DNSCRYPT_FC` (tabla filter) y tabla
+  nft `dnscrypt_manager_fc`, **separada** de la de redirección (cuyo *remove*
+  borra su tabla entera). Nunca bloquea `lo`, `127.0.0.0/8` ni `::1`; el tráfico
+  upstream del proxy es DoH/443, no puerto 53. Idempotente (chequeo `-C` antes de
+  insertar). **PANIC fuerza `failclosed=0` + `fc_release`** además de restaurar.
+- **Actualización de listas con rollback real**: la lista candidata se prueba con
+  `dnscrypt-proxy -check` sobre un TOML candidato **antes** de reemplazar; backup
+  `.prev` + `mv` atómico; si la prueba DNS posterior falla, se restaura la versión
+  anterior. Sin binario, la lista **no** se activa (no se asume compatibilidad).
+- **Excepciones sin cron**: barrido perezoso en cada operación + en boot +
+  *sleeper* desacoplado; el estado se guarda con `boot_id` para invalidar las de
+  “hasta reiniciar” de arranques anteriores, y se descartan las “creadas en el
+  futuro” (protección ante cambio de reloj).
+- **Migración aditiva**: nunca pisa flags/config; ante fallo, deja
+  `migration-failed` que hace que `service.sh` **omita la redirección** ese boot
+  y mantiene `failclosed=0`.
+- **Detector de fugas honesto**: DoH de navegador siempre `no_verificable` con el
+  mensaje textual del contrato; no se afirma lo que no puede comprobarse; no se
+  bloquea 443 global ni se hace MITM.
+- **WebUI**: comandos de lista blanca fija; los valores variables (dominios) se
+  validan del lado cliente con la **misma clase** que la CLI y viajan citados
+  (patrón `runNextdns`), nunca por `eval`. Render con `textContent`, botones
+  bloqueados durante cada operación, errores concretos (comando + rc + mensaje).
+
+### Resultados (verificados EXTERNAMENTE con `ps`/`/proc`/sockets, 3 corridas)
+
+- `tests/smoke-test-security.sh`: **61 OK, 0 FAIL, 0 TIMEOUT**, determinista en 3
+  corridas consecutivas. Cubre casos B–H del contrato (pipeline de blocklists con
+  lista válida/hosts/binaria/enorme/líneas largas/duplicados/inválidos/CRLF/hash
+  incorrecto/rollback; allowlist con duplicados/mayúsculas/shell-injection/path
+  traversal/import inválido; excepciones con expiración vía sweep/revocación/
+  duración inválida/reloj cambiado/boot; perfiles atómicos + fail-closed OFF por
+  defecto + strict pide confirmación; fugas con JSON válido; eventos/allowlist/
+  status como JSON válido). Aislamiento verificado: sin procesos huérfanos, sin
+  sockets residuales, `/data/adb` intacto, sin `TEST_ROOT` residual.
+- Regresiones sin cambios: `smoke-test-cli.sh` **48 OK/0**, `smoke-test-webui.sh`
+  **23 OK/0** (se extendió el *mock* del harness para modelar `[data-profile]`
+  igual que `[data-provider]`; en un navegador real el selector ya está acotado),
+  `run-syntax-checks.sh` **todo verde** (incluye `scripts/security.sh`).
+- El binario `bin/arm64/dnscrypt-proxy` permanece intacto (SHA-256
+  `940b650911cfa55cbc0544a9025ceb866101590a88031a90a7e1ca05f5781cbc`).
+
+### Limitaciones de esta ronda (requieren Android real)
+
+Netfilter real del fail-closed (REJECT en puerto 53 sin dañar loopback), SELinux
+enforcing, IPv6/VPN/hotspot/Private DNS reales, y el binario oficial corriendo:
+todo se valida con el plan manual `ANDROID_TEST_PLAN_v0.2.0.md`. Las descargas de
+listas usan `file://` en los tests (solo permitido bajo `DNSCRYPT_TEST_MODE=1`);
+en producción son `https://` a las fuentes de `BLOCKLIST_SOURCES.md`.
+
+---
+
 Fecha de esta revisión: 2026-07-14 (Ronda 3).
 
 ## Ronda 3 — gestión de procesos endurecida
