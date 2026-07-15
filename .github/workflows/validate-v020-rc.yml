@@ -31,9 +31,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
+          sudo apt-get update >/tmp/apt-update.log
           sudo apt-get install -y --no-install-recommends \
-            zip unzip binutils file iproute2 nodejs python3 curl ca-certificates
+            zip unzip binutils file iproute2 nodejs python3 curl ca-certificates \
+            >/tmp/apt-install.log
 
       - name: Download and verify official dnscrypt-proxy ARM64
         shell: bash
@@ -75,11 +76,26 @@ jobs:
             bash tests/smoke-test-security.sh
 
       - name: WebUI smoke tests
+        id: webui
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
           timeout --signal=TERM --kill-after=5s 180s \
-            bash tests/smoke-test-webui.sh
+            bash tests/smoke-test-webui.sh > /tmp/webui-smoke.log 2>&1
+          rc=$?
+          cat /tmp/webui-smoke.log
+          echo "webui_rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Upload WebUI diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-smoke-diagnostic
+          path: /tmp/webui-smoke.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Build clean RC package
         shell: bash
@@ -116,3 +132,11 @@ jobs:
             /tmp/DNSCrypt-Manager-v0.2.0-RC1.zip.sha256
           if-no-files-found: error
           retention-days: 30
+
+      - name: Fail when the WebUI suite failed
+        if: steps.webui.outcome != 'success'
+        shell: bash
+        run: |
+          echo "WebUI smoke test failed with rc=${{ steps.webui.outputs.webui_rc }}." >&2
+          echo 'The diagnostic log was uploaded as webui-smoke-diagnostic.' >&2
+          exit 1
