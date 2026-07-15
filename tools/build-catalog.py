@@ -27,6 +27,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JSON_OUT = os.path.join(ROOT, "config", "catalog", "blocklists.json")
 TSV_OUT = os.path.join(ROOT, "config", "catalog", "blocklists.index.tsv")
+SVC_JSON_OUT = os.path.join(ROOT, "config", "catalog", "service-controls.json")
+SVC_TSV_OUT = os.path.join(ROOT, "config", "catalog", "service-controls.index.tsv")
 
 SCHEMA_VERSION = 1  # version del schema del catalogo (no confundir con module)
 CATALOG_DATE = "2026-07-15"
@@ -594,6 +596,83 @@ ENTRIES += [
 ]
 
 
+
+# ===========================================================================
+# CONTROLES DE PRIVACIDAD POR SERVICIO (motor separado de las blocklists)
+# Solo se incluyen controles COMPROBADOS. El motor es extensible.
+# ===========================================================================
+YT_TEXT = ("Control experimental de mejor esfuerzo. DNSCrypt Manager no puede "
+           "garantizar que YouTube no utilice otros dominios o endpoints para "
+           "registrar actividad.")
+
+SVC_FIELDS = [
+    "id", "service", "name", "description_es", "block_domains", "allow_domains",
+    "side_effects", "confidence", "source_reference", "last_verified",
+    "mutually_exclusive_with", "duration_support",
+]
+SVC_LIST_FIELDS = {"block_domains", "allow_domains", "side_effects",
+                   "mutually_exclusive_with", "duration_support"}
+SVC_TSV_FIELDS = ["id", "service", "name", "block_domains", "confidence",
+                  "duration_support", "last_verified", "description_es"]
+
+SERVICE_CONTROLS = [
+    {
+        "id": "youtube_no_history",
+        "service": "youtube",
+        "name": "YouTube - No registrar reproducciones",
+        "description_es": (
+            "Bloquea s.youtube.com para intentar que YouTube no guarde el "
+            "historial de reproducciones. " + YT_TEXT),
+        "block_domains": ["s.youtube.com"],
+        "allow_domains": [],
+        "side_effects": ["historial", "recomendaciones", "algoritmo",
+                          "progreso", "sincronizacion"],
+        "confidence": "best_effort",
+        "source_reference": "Comportamiento observado de la app de YouTube "
+                            "(s.youtube.com registra reproducciones).",
+        "last_verified": CATALOG_DATE,
+        "mutually_exclusive_with": [],
+        "duration_support": ["normal", "15m", "1h", "boot", "perm"],
+    },
+]
+
+
+def validate_svc(controls):
+    ids = set()
+    errs = []
+    for c in controls:
+        if c["id"] in ids:
+            errs.append(f"control duplicado: {c['id']}")
+        ids.add(c["id"])
+        for d in c["block_domains"] + c["allow_domains"]:
+            if " " in d or "\t" in d:
+                errs.append(f"{c['id']}: dominio invalido '{d}'")
+        if c["confidence"] not in ("best_effort", "reliable"):
+            errs.append(f"{c['id']}: confidence invalida")
+    return errs
+
+
+def svc_tsv_value(c, f):
+    v = c[f]
+    if f in SVC_LIST_FIELDS:
+        return ",".join(v)
+    return str(v).replace("\t", " ").replace("\n", " ")
+
+
+def render_svc_tsv(controls):
+    lines = ["#" + "\t".join(SVC_TSV_FIELDS)]
+    for c in sorted(controls, key=lambda x: x["id"]):
+        lines.append("\t".join(svc_tsv_value(c, f) for f in SVC_TSV_FIELDS))
+    return "\n".join(lines) + "\n"
+
+
+def render_svc_json(controls):
+    doc = {"schema_version": SCHEMA_VERSION, "generated": CATALOG_DATE,
+           "generator": "tools/build-catalog.py", "count": len(controls),
+           "controls": sorted(controls, key=lambda x: x["id"])}
+    return json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
+
+
 def validate(entries):
     ids = set()
     errs = []
@@ -660,7 +739,7 @@ def render_json(entries):
 
 def main():
     check = "--check" in sys.argv
-    errs = validate(ENTRIES)
+    errs = validate(ENTRIES) + validate_svc(SERVICE_CONTROLS)
     if errs:
         print("CATALOGO INVALIDO:", file=sys.stderr)
         for e in errs:
@@ -668,10 +747,13 @@ def main():
         sys.exit(2)
     js = render_json(ENTRIES)
     tsv = render_tsv(ENTRIES)
+    svc_js = render_svc_json(SERVICE_CONTROLS)
+    svc_tsv = render_svc_tsv(SERVICE_CONTROLS)
     os.makedirs(os.path.dirname(JSON_OUT), exist_ok=True)
     if check:
         bad = False
-        for path, content in ((JSON_OUT, js), (TSV_OUT, tsv)):
+        for path, content in ((JSON_OUT, js), (TSV_OUT, tsv),
+                              (SVC_JSON_OUT, svc_js), (SVC_TSV_OUT, svc_tsv)):
             cur = open(path, encoding="utf-8").read() if os.path.exists(path) else None
             if cur != content:
                 print(f"DESINCRONIZADO: {path} difiere de lo generado.", file=sys.stderr)
@@ -679,7 +761,9 @@ def main():
         sys.exit(1 if bad else 0)
     open(JSON_OUT, "w", encoding="utf-8").write(js)
     open(TSV_OUT, "w", encoding="utf-8").write(tsv)
-    print(f"OK: {len(ENTRIES)} entradas -> {os.path.relpath(JSON_OUT, ROOT)} + {os.path.relpath(TSV_OUT, ROOT)}")
+    open(SVC_JSON_OUT, "w", encoding="utf-8").write(svc_js)
+    open(SVC_TSV_OUT, "w", encoding="utf-8").write(svc_tsv)
+    print(f"OK: {len(ENTRIES)} entradas + {len(SERVICE_CONTROLS)} controles de servicio")
 
 
 if __name__ == "__main__":

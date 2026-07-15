@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "generated": "2026-07-15",
+  "generator": "tools/build-catalog.py",
+  "count": 1,
+  "controls": [
+    {
+      "id": "youtube_no_history",
+      "service": "youtube",
+      "name": "YouTube - No registrar reproducciones",
+      "description_es": "Bloquea s.youtube.com para intentar que YouTube no guarde el historial de reproducciones. Control experimental de mejor esfuerzo. DNSCrypt Manager no puede garantizar que YouTube no utilice otros dominios o endpoints para registrar actividad.",
+      "block_domains": [
+        "s.youtube.com"
+      ],
+      "allow_domains": [],
+      "side_effects": [
+        "historial",
+        "recomendaciones",
+        "algoritmo",
+        "progreso",
+        "sincronizacion"
+      ],
+      "confidence": "best_effort",
+      "source_reference": "Comportamiento observado de la app de YouTube (s.youtube.com registra reproducciones).",
+      "last_verified": "2026-07-15",
+      "mutually_exclusive_with": [],
+      "duration_support": [
+        "normal",
+        "15m",
+        "1h",
+        "boot",
+        "perm"
+      ]
+    }
+  ]
+}

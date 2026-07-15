@@ -1154,6 +1154,7 @@ DNSCrypt Manager - comandos
     catalog conflicts [id1 id2] | metrics <id> | test <id>
     catalog custom {add <url> [--name N][--category C][--format F]|remove <id>|list|export}
     import-bindhosts <directorio> [--dry-run|--confirmed]
+    service {list [--json]|info <id>|set <id> <normal|15m|1h|boot|perm>|conflicts}
 
     set-flag {boot_redirect|ipv6_mode|prerouting|hist_mode|hist_days|hist_max} <valor>
     get-flag <clave>
@@ -1216,6 +1217,7 @@ main() {
     catalog)          require_catlib; cmd_catalog "$@" ;;
     import-bindhosts) require_catlib; cmd_import_bindhosts "$@" ;;
     bindhosts)        require_catlib; cmd_bindhosts "$@" ;;
+    service)          require_catlib; cmd_service "$@" ;;
     version)          cmd_get version ;;
     config)
       _sub="$1"; shift 2>/dev/null

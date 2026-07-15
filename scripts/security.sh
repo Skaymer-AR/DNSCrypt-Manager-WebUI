@@ -1549,6 +1549,7 @@ sec_migrate() {
   fi
   # RC2 (aditivo): copiar el index del catalogo al dispositivo (sin descargar).
   command -v cat_sync_index >/dev/null 2>&1 && cat_sync_index
+  command -v svc_sync_index >/dev/null 2>&1 && svc_sync_index
   echo 2 > "$SCHEMA_FILE"
   log_msg "migracion v0.1.0 -> v0.2.0: OK (schema 2)"
   echo "OK: migracion a schema 2 completada. Proveedor, NextDNS, IPv6, redireccion,"
