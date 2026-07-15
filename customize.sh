@@ -179,6 +179,23 @@ if command -v chcon >/dev/null 2>&1 && [ -f "$PERSIST_BIN_DIR/dnscrypt-proxy" ];
 fi
 
 # ---------------------------------------------------------------------------
+# 8b. Migracion versionada v0.1.0 -> v0.2.0 (best-effort; no rompe la install)
+#     La CLI resuelve common.sh/security.sh de forma relativa a $MODPATH, y en
+#     modo produccion escribe en /data/adb/dnscrypt-manager (persistente). Si
+#     algo falla aca, el primer boot vuelve a intentarlo desde service.sh.
+# ---------------------------------------------------------------------------
+if [ -x "$MODPATH/system/bin/dnscrypt-manager" ]; then
+  if [ ! -f "$DATA_DIR/schema_version" ] || [ "$(cat "$DATA_DIR/schema_version" 2>/dev/null)" != "2" ]; then
+    ui_print "- Migrando datos a esquema v0.2.0..."
+    if sh "$MODPATH/system/bin/dnscrypt-manager" migrate >/dev/null 2>&1; then
+      ui_print "  · Migracion OK (ajustes previos conservados)."
+    else
+      ui_print "  · Migracion se reintentara en el primer arranque."
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 9. Cierre
 # ---------------------------------------------------------------------------
 ui_print ""

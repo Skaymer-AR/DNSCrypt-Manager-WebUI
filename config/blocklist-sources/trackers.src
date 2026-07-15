@@ -1,0 +1,12 @@
+# DNSCrypt Manager - fuente de blocklist: rastreadores (trackers)
+# DESACTIVADA por defecto: puede afectar analitica embebida en apps/paginas.
+name=Firebog - EasyPrivacy (trackers)
+category=trackers
+url=https://v.firebog.net/hosts/Easyprivacy.txt
+format=domains
+license=GPL-3.0
+min_bytes=1024
+max_bytes=26214400
+min_domains=100
+homepage=https://firebog.net/
+notes=Rastreadores de EasyPrivacy, curada por The Firebog. Un dominio por linea.

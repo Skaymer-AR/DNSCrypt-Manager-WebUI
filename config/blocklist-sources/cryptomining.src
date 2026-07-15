@@ -1,0 +1,12 @@
+# DNSCrypt Manager - fuente de blocklist: criptomineria (cryptomining)
+# DESACTIVADA por defecto.
+name=ZeroDot1 CoinBlockerLists
+category=cryptomining
+url=https://raw.githubusercontent.com/ZeroDot1/CoinBlockerLists/master/list.txt
+format=domains
+license=GPL-3.0
+min_bytes=512
+max_bytes=26214400
+min_domains=50
+homepage=https://gitlab.com/ZeroDot1/CoinBlockerLists
+notes=Dominios de mineria de criptomonedas en el navegador. Un dominio por linea.

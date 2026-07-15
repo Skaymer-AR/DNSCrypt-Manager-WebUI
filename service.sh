@@ -65,6 +65,16 @@ fi
   done
   log "red disponible tras ${i}s"
 
+  # 2b. Migracion versionada v0.1.0 -> v0.2.0 (idempotente; solo actua una vez).
+  if [ ! -f "$DATA_DIR/schema_version" ] || [ "$(cat "$DATA_DIR/schema_version" 2>/dev/null)" != "2" ]; then
+    log "ejecutando migracion de esquema"
+    run_cli migrate >> "$LOG" 2>&1 || log "migracion reporto error (se continua con cuidado)"
+  fi
+
+  # 2c. Barrer excepciones temporales caducas (o de boots anteriores) antes de
+  #     regenerar/arrancar. No depende de cron.
+  run_cli temporary-allow sweep >> "$LOG" 2>&1
+
   # 3. Arrancar el daemon (la CLI maneja binario faltante / config invalida)
   log "arrancando dnscrypt-proxy"
   run_cli start >> "$LOG" 2>&1
@@ -78,12 +88,18 @@ fi
 
   if ! run_cli is-listening >/dev/null 2>&1; then
     log "dnscrypt-proxy NO escucha tras 15s. Se aborta redireccion por seguridad."
+    # Si el usuario activo fail-closed, aplicarlo ahora (bloquea DNS externo).
+    # Es un no-op si el flag esta en 0 (valor por defecto).
+    run_cli failclosed engage-if-set >> "$LOG" 2>&1
     exit 0
   fi
   log "dnscrypt-proxy escuchando"
 
   # 5. Aplicar redireccion SOLO si el usuario la dejo activada para el boot
-  if [ "$(run_cli get-flag boot_redirect 2>/dev/null)" = "1" ] && \
+  #    Y la migracion no quedo en estado fallido (recuperacion segura).
+  if [ -f "$DATA_DIR/migration-failed" ]; then
+    log "migracion fallida pendiente: se OMITE la redireccion este boot (recuperacion segura)"
+  elif [ "$(run_cli get-flag boot_redirect 2>/dev/null)" = "1" ] && \
      [ ! -f "$DATA_DIR/no-redirect" ]; then
     log "aplicando redireccion DNS"
     run_cli redirect apply >> "$LOG" 2>&1
