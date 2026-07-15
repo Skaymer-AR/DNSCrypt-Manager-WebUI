@@ -29,7 +29,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat bootstrap-v020/chunk-*.b64 | base64 --decode > /tmp/feature-security-v0.2.0.bundle
+          cat bootstrap-v020/chunk-00-part-*.b64 \
+              bootstrap-v020/chunk-0[1-8].b64 \
+            | base64 --decode > /tmp/feature-security-v0.2.0.bundle
           echo '987f516d07c40bd1aac91b78d9db769e205dfb0acc7892185958bec20b1469de  /tmp/feature-security-v0.2.0.bundle' | sha256sum -c -
           git bundle verify /tmp/feature-security-v0.2.0.bundle
           git bundle list-heads /tmp/feature-security-v0.2.0.bundle
