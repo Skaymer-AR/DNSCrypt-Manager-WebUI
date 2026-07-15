@@ -614,3 +614,265 @@ cmd_catalog() {
       return 1 ;;
   esac
 }
+
+##############################################################################
+# IMPORTADOR BINDHOSTS
+# Archivos: sources.txt / blacklist.txt / whitelist.txt / custom.txt
+# Por defecto ANALIZA (dry-run) y muestra un resumen; aplica solo con --confirmed.
+##############################################################################
+
+# Normaliza una entrada a dominio: quita esquema/rutas de una URL, minusculas,
+# recorta espacios. Devuelve "" si no es convertible a un dominio simple.
+cat_url_to_domain() {
+  _v=$(printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr 'A-Z' 'a-z')
+  case "$_v" in
+    http://*|https://*)
+      _v=$(printf '%s' "$_v" | sed -E 's#^https?://##; s#/.*$##; s#:[0-9]+$##') ;;
+  esac
+  printf '%s' "$_v"
+}
+
+# Clasifica un token de dominio: echo "ok"|"example"|"suspicious"|"invalid"
+cat_domain_class() {
+  _d="$1"
+  # Sospechoso (envuelto): un dominio real seguido de un placeholder, p.ej.
+  # s.youtube.com.domain.name. Se marca y NUNCA se importa automaticamente.
+  case "$_d" in
+    *.domain.name|*.domain.invalid|*.example.example) echo suspicious; return ;;
+  esac
+  # Entrada de ejemplo: TLDs reservados (RFC 2606/6761). No son dominios reales;
+  # se detectan como "entrada de ejemplo" y no se importan.
+  case "$_d" in
+    *.example|*.example.com|*.example.org|*.example.net|example.com|example.org|example.net|*.test|*.invalid|*.localhost|*.local|localhost)
+      echo example; return ;;
+  esac
+  if command -v sec_valid_domain >/dev/null 2>&1 && sec_valid_domain "$_d"; then
+    echo ok
+  else
+    echo invalid
+  fi
+}
+
+# Analiza un set BindHosts. Escribe planes a $CAT_BH_WORK/*.plan y cuenta.
+cat_bindhosts_scan() {
+  _dir="$1"
+  CAT_BH_WORK="$RUN_DIR/bh.$$"; mkdir -p "$CAT_BH_WORK"
+  : > "$CAT_BH_WORK/sources.match"; : > "$CAT_BH_WORK/sources.custom"
+  : > "$CAT_BH_WORK/sources.broken"; : > "$CAT_BH_WORK/sources.archived"
+  : > "$CAT_BH_WORK/black.ok"; : > "$CAT_BH_WORK/allow.ok"
+  : > "$CAT_BH_WORK/suspicious"; : > "$CAT_BH_WORK/example"; : > "$CAT_BH_WORK/invalid"; : > "$CAT_BH_WORK/ignored"
+  : > "$CAT_BH_WORK/dups"; : > "$CAT_BH_WORK/sources.dups"
+
+  # --- sources.txt: URLs de blocklists ---
+  if [ -f "$_dir/sources.txt" ]; then
+    while IFS= read -r _line; do
+      _l=$(printf '%s' "$_line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      [ -n "$_l" ] || continue
+      case "$_l" in \#*|!*) continue ;; esac
+      case "$_l" in
+        https://*) : ;;
+        http://*) printf '%s\n' "$_l" >> "$CAT_BH_WORK/sources.broken"; continue ;;
+        *) printf '%s\n' "$_l" >> "$CAT_BH_WORK/sources.broken"; continue ;;
+      esac
+      # match contra el catalogo por primary_url
+      _mid=$(awk -F'\t' -v u="$_l" '!/^#/ && $8==u {print $1; exit}' "$CAT_INDEX" 2>/dev/null)
+      if [ -n "$_mid" ]; then
+        _arch=$(cat_field "$_mid" 13)
+        if [ "$_arch" = "1" ]; then printf '%s\t%s\n' "$_mid" "$_l" >> "$CAT_BH_WORK/sources.archived"
+        else printf '%s\t%s\n' "$_mid" "$_l" >> "$CAT_BH_WORK/sources.match"; fi
+      else
+        printf '%s\n' "$_l" >> "$CAT_BH_WORK/sources.custom"
+      fi
+    done < "$_dir/sources.txt"
+    # Detectar fuentes duplicadas (misma id o misma URL). StevenBlack repetido, etc.
+    if [ -s "$CAT_BH_WORK/sources.match" ]; then
+      _mb=$(wc -l < "$CAT_BH_WORK/sources.match" | tr -d ' ')
+      sort -u "$CAT_BH_WORK/sources.match" -o "$CAT_BH_WORK/sources.match"
+      _ma=$(wc -l < "$CAT_BH_WORK/sources.match" | tr -d ' ')
+      _dd=$(( _mb - _ma )); [ "$_dd" -gt 0 ] && echo "fuentes catalogo duplicadas:$_dd" >> "$CAT_BH_WORK/sources.dups"
+    fi
+    for _cf in sources.custom sources.archived sources.broken; do
+      _p="$CAT_BH_WORK/$_cf"; [ -s "$_p" ] || continue
+      _cb=$(wc -l < "$_p" | tr -d ' '); sort -u "$_p" -o "$_p"; _ca=$(wc -l < "$_p" | tr -d ' ')
+      _cd=$(( _cb - _ca )); [ "$_cd" -gt 0 ] && echo "$_cf duplicadas:$_cd" >> "$CAT_BH_WORK/sources.dups"
+    done
+  fi
+
+  # --- blacklist.txt: dominios a bloquear ---
+  if [ -f "$_dir/blacklist.txt" ]; then
+    while IFS= read -r _line; do
+      _l=$(printf '%s' "$_line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      [ -n "$_l" ] || continue
+      case "$_l" in \#*|!*) continue ;; esac
+      _d=$(cat_url_to_domain "$_l")
+      case "$(cat_domain_class "$_d")" in
+        ok) printf '%s\n' "$_d" >> "$CAT_BH_WORK/black.ok" ;;
+        example) printf '%s\t(blacklist)\n' "$_d" >> "$CAT_BH_WORK/example" ;;
+        suspicious) printf '%s\t(blacklist)\n' "$_d" >> "$CAT_BH_WORK/suspicious" ;;
+        *) printf '%s\t(blacklist)\n' "$_l" >> "$CAT_BH_WORK/invalid" ;;
+      esac
+    done < "$_dir/blacklist.txt"
+  fi
+
+  # --- whitelist.txt: dominios a permitir (RECHAZA URLs) ---
+  if [ -f "$_dir/whitelist.txt" ]; then
+    while IFS= read -r _line; do
+      _l=$(printf '%s' "$_line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      [ -n "$_l" ] || continue
+      case "$_l" in \#*|!*) continue ;; esac
+      case "$_l" in
+        http://*|https://*) printf '%s\t(URL en whitelist: rechazada)\n' "$_l" >> "$CAT_BH_WORK/invalid"; continue ;;
+      esac
+      _d=$(printf '%s' "$_l" | tr 'A-Z' 'a-z')
+      case "$(cat_domain_class "$_d")" in
+        ok) printf '%s\n' "$_d" >> "$CAT_BH_WORK/allow.ok" ;;
+        example) printf '%s\t(whitelist)\n' "$_d" >> "$CAT_BH_WORK/example" ;;
+        suspicious) printf '%s\t(whitelist)\n' "$_d" >> "$CAT_BH_WORK/suspicious" ;;
+        *) printf '%s\t(whitelist)\n' "$_l" >> "$CAT_BH_WORK/invalid" ;;
+      esac
+    done < "$_dir/whitelist.txt"
+  fi
+
+  # --- custom.txt: pares IP + dominio ---
+  if [ -f "$_dir/custom.txt" ]; then
+    while IFS= read -r _line; do
+      _l=$(printf '%s' "$_line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      [ -n "$_l" ] || continue
+      case "$_l" in \#*|!*) continue ;; esac
+      case "$_l" in http://*|https://*) printf '%s\t(URL en custom: no es un par hosts)\n' "$_l" >> "$CAT_BH_WORK/ignored"; continue ;; esac
+      _ip=$(printf '%s' "$_l" | awk '{print $1}')
+      _dom=$(printf '%s' "$_l" | awk '{print $2}' | tr 'A-Z' 'a-z')
+      [ -n "$_dom" ] || { printf '%s\t(sin dominio)\n' "$_l" >> "$CAT_BH_WORK/invalid"; continue; }
+      case "$(cat_domain_class "$_dom")" in
+        ok) : ;;
+        example) printf '%s\t(custom)\n' "$_dom" >> "$CAT_BH_WORK/example"; continue ;;
+        suspicious) printf '%s\t(custom)\n' "$_dom" >> "$CAT_BH_WORK/suspicious"; continue ;;
+        *) printf '%s\t(custom)\n' "$_l" >> "$CAT_BH_WORK/invalid"; continue ;;
+      esac
+      case "$_ip" in
+        0.0.0.0|127.0.0.1|::|::1) printf '%s\n' "$_dom" >> "$CAT_BH_WORK/black.ok" ;;
+        *) printf '%s -> %s\t(mapeo de IP no soportado; se ignora)\n' "$_ip" "$_dom" >> "$CAT_BH_WORK/ignored" ;;
+      esac
+    done < "$_dir/custom.txt"
+  fi
+
+  # dedupe y conteo de duplicados
+  for _f in black.ok allow.ok; do
+    _p="$CAT_BH_WORK/$_f"
+    [ -s "$_p" ] || continue
+    _before=$(wc -l < "$_p" | tr -d ' ')
+    sort -u "$_p" -o "$_p"
+    _after=$(wc -l < "$_p" | tr -d ' ')
+    _d=$(( _before - _after )); [ "$_d" -gt 0 ] && echo "$_f:$_d" >> "$CAT_BH_WORK/dups"
+  done
+  return 0
+}
+
+cat_bindhosts_summary() {
+  echo "Resumen de importacion BindHosts:"
+  echo "  fuentes reconocidas (catalogo) : $(grep -c . "$CAT_BH_WORK/sources.match" 2>/dev/null)"
+  echo "  fuentes -> personalizadas      : $(grep -c . "$CAT_BH_WORK/sources.custom" 2>/dev/null)"
+  echo "  fuentes archivadas             : $(grep -c . "$CAT_BH_WORK/sources.archived" 2>/dev/null)"
+  echo "  fuentes rotas/invalidas        : $(grep -c . "$CAT_BH_WORK/sources.broken" 2>/dev/null)"
+  echo "  dominios a blacklist (validos) : $(grep -c . "$CAT_BH_WORK/black.ok" 2>/dev/null)"
+  echo "  dominios a allowlist (validos) : $(grep -c . "$CAT_BH_WORK/allow.ok" 2>/dev/null)"
+  echo "  entradas de ejemplo (ignoradas): $(grep -c . "$CAT_BH_WORK/example" 2>/dev/null)"
+  echo "  sospechosos (revisar)          : $(grep -c . "$CAT_BH_WORK/suspicious" 2>/dev/null)"
+  echo "  invalidos rechazados           : $(grep -c . "$CAT_BH_WORK/invalid" 2>/dev/null)"
+  if [ -s "$CAT_BH_WORK/sources.dups" ]; then
+    echo "  --- duplicados de fuentes detectados ---"
+    sed 's/^/    /' "$CAT_BH_WORK/sources.dups"
+  fi
+  echo "  ignorados (mapeos IP / URLs)   : $(grep -c . "$CAT_BH_WORK/ignored" 2>/dev/null)"
+  if [ -s "$CAT_BH_WORK/suspicious" ]; then
+    echo "  --- sospechosos (NO se importan sin revision) ---"
+    sed 's/^/    /' "$CAT_BH_WORK/suspicious" | head -20
+  fi
+}
+
+cmd_bindhosts() {
+  cat_init_dirs
+  _sub="${1:-analyze}"; shift 2>/dev/null
+  _dir="$1"; shift 2>/dev/null
+  [ -n "$_dir" ] || { echo "Uso: dnscrypt-manager bindhosts {analyze|import} <directorio> [--confirmed]" >&2; return 1; }
+  case "$_dir" in *..*) echo "ERROR: ruta invalida" >&2; return 1 ;; esac
+  [ -d "$_dir" ] || { echo "ERROR: no es un directorio: $_dir" >&2; return 1; }
+
+  cat_bindhosts_scan "$_dir"
+  cat_bindhosts_summary
+
+  case "$_sub" in
+    analyze)
+      echo "(analisis: no se aplico nada. Para aplicar: dnscrypt-manager bindhosts import $_dir --confirmed)"
+      rm -rf "$CAT_BH_WORK" 2>/dev/null
+      return 0 ;;
+    import)
+      _confirmed=0
+      for _a in "$@"; do [ "$_a" = "--confirmed" ] && _confirmed=1; done
+      if [ "$_confirmed" != "1" ]; then
+        echo "No se aplico nada. Repeti con --confirmed para importar." >&2
+        rm -rf "$CAT_BH_WORK" 2>/dev/null
+        return 3
+      fi
+      # blacklist manual (append + dedupe)
+      if [ -s "$CAT_BH_WORK/black.ok" ]; then
+        { cat "$CAT_BLACKLIST" 2>/dev/null; cat "$CAT_BH_WORK/black.ok"; } | sort -u > "$CAT_BLACKLIST.tmp.$$"
+        mv -f "$CAT_BLACKLIST.tmp.$$" "$CAT_BLACKLIST"; chmod 0600 "$CAT_BLACKLIST" 2>/dev/null
+      fi
+      # allowlist (via CLI para revalidar cada dominio)
+      _al=0
+      if [ -s "$CAT_BH_WORK/allow.ok" ]; then
+        while IFS= read -r _d; do
+          [ -n "$_d" ] || continue
+          cmd_allowlist add "$_d" >/dev/null 2>&1 && _al=$((_al+1))
+        done < "$CAT_BH_WORK/allow.ok"
+      fi
+      # fuentes: match -> habilitar; custom -> agregar (sin activar)
+      _en=0
+      if [ -s "$CAT_BH_WORK/sources.match" ]; then
+        while IFS= read -r _lm; do
+          _mid=$(printf '%s' "$_lm" | cut -f1)
+          [ -n "$_mid" ] && cat_enable "$_mid" && _en=$((_en+1))
+        done < "$CAT_BH_WORK/sources.match"
+      fi
+      _cu=0
+      if [ -s "$CAT_BH_WORK/sources.custom" ]; then
+        while IFS= read -r _url; do
+          [ -n "$_url" ] || continue
+          cat_custom_add "$_url" --name "BindHosts import" >/dev/null 2>&1 && _cu=$((_cu+1))
+        done < "$CAT_BH_WORK/sources.custom"
+      fi
+      # recompilar con todo lo nuevo
+      cat_compile >/dev/null 2>&1
+      echo "OK: importado. blacklist += $(grep -c . "$CAT_BH_WORK/black.ok" 2>/dev/null), allowlist += $_al, fuentes activadas: $_en, fuentes personalizadas: $_cu."
+      echo "    (fuentes personalizadas quedan AGREGADAS pero NO activadas; revisalas en el catalogo)."
+      log_msg "bindhosts import: black+$(grep -c . "$CAT_BH_WORK/black.ok" 2>/dev/null) allow+$_al enable+$_en custom+$_cu"
+      rm -rf "$CAT_BH_WORK" 2>/dev/null
+      return 0 ;;
+    *)
+      rm -rf "$CAT_BH_WORK" 2>/dev/null
+      echo "Uso: dnscrypt-manager bindhosts {analyze|import} <directorio> [--confirmed]" >&2
+      return 1 ;;
+  esac
+}
+
+# Adaptador para el comando top-level `import-bindhosts DIR [--dry-run|--confirmed]`.
+# Dry-run (o sin flag) = seguro, no modifica nada. --confirmed = aplica atomico.
+cmd_import_bindhosts() {
+  _dir=""; _mode="analyze"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) _mode="analyze" ;;
+      --confirmed|--apply) _mode="import" ;;
+      -*) : ;;
+      *) [ -z "$_dir" ] && _dir="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$_dir" ] || { echo "Uso: dnscrypt-manager import-bindhosts <directorio> [--dry-run|--confirmed]" >&2; return 1; }
+  if [ "$_mode" = "import" ]; then
+    cmd_bindhosts import "$_dir" --confirmed
+  else
+    cmd_bindhosts analyze "$_dir"
+  fi
+}
