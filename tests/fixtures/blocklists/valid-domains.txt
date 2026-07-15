@@ -1,0 +1,7 @@
+# Lista de prueba valida (formato domains)
+malone.example
+maltwo.example
+sub.malthree.example
+EvilCaps.Example
+duplicated.example
+duplicated.example

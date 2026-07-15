@@ -98,12 +98,18 @@ for (const id of htmlIds) {
 }
 const providerNames = [...html.matchAll(/data-provider="([^"]+)"/g)].map((m) => m[1]);
 const providerButtons = providerNames.map((name) => new FakeElement('button', { 'data-provider': name }));
-const allButtons = [...registry.values()].filter((e) => e.tagName === 'BUTTON').concat(providerButtons);
+const profileNames = [...html.matchAll(/data-profile="([^"]+)"/g)].map((m) => m[1]);
+const profileButtons = profileNames.map((name) => new FakeElement('button', { 'data-profile': name }));
+const allButtons = [...registry.values()].filter((e) => e.tagName === 'BUTTON').concat(providerButtons, profileButtons);
 
 const document = {
   hidden: false, activeElement: null, _dcl: [], _vis: [],
   getElementById: (id) => registry.get(id) || null,
-  querySelectorAll: (sel) => (sel === '[data-provider]' ? providerButtons : allButtons),
+  querySelectorAll: (sel) => {
+    if (sel === '[data-provider]') return providerButtons;
+    if (sel === '[data-profile]') return profileButtons;
+    return allButtons;
+  },
   createElement: (tag) => new FakeElement(tag, {}),
   addEventListener(type, fn) {
     if (type === 'DOMContentLoaded') this._dcl.push(fn);

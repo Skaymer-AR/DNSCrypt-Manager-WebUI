@@ -25,7 +25,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$(pwd)"
-OUTPUT="/home/claude/DNSCrypt-Manager-release.zip"
+OUTPUT="${DCM_OUTPUT:-/home/claude/DNSCrypt-Manager-release.zip}"
 
 fail() { echo "" >&2; echo "ABORTADO: $*" >&2; exit 1; }
 step() { echo ""; echo "=== $* ==="; }
@@ -66,6 +66,7 @@ META-INF/com/google/android/update-binary
 META-INF/com/google/android/updater-script
 system/bin/dnscrypt-manager
 scripts/common.sh
+scripts/security.sh
 scripts/start.sh
 scripts/stop.sh
 webroot/index.html
@@ -109,6 +110,8 @@ echo "  --- tests/run-syntax-checks.sh ---"
 bash "$ROOT/tests/run-syntax-checks.sh" || fail "tests/run-syntax-checks.sh fallo. No hay release con tests rotos."
 echo "  --- tests/smoke-test-cli.sh ---"
 bash "$ROOT/tests/smoke-test-cli.sh" || fail "tests/smoke-test-cli.sh fallo. No hay release con tests rotos."
+echo "  --- tests/smoke-test-security.sh ---"
+bash "$ROOT/tests/smoke-test-security.sh" || fail "tests/smoke-test-security.sh fallo. No hay release con tests rotos."
 echo "  --- tests/smoke-test-webui.sh ---"
 bash "$ROOT/tests/smoke-test-webui.sh" || fail "tests/smoke-test-webui.sh fallo. No hay release con tests rotos."
 echo "  OK: las 3 suites pasaron"
