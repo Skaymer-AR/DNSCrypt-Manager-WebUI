@@ -1,0 +1,2 @@
+#id	service	name	block_domains	confidence	duration_support	last_verified	description_es
+youtube_no_history	youtube	YouTube - No registrar reproducciones	s.youtube.com	best_effort	normal,15m,1h,boot,perm	2026-07-15	Bloquea s.youtube.com para intentar que YouTube no guarde el historial de reproducciones. Control experimental de mejor esfuerzo. DNSCrypt Manager no puede garantizar que YouTube no utilice otros dominios o endpoints para registrar actividad.

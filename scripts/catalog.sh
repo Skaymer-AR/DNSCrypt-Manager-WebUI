@@ -133,6 +133,8 @@ cat_append_active() {
   done
   # Blacklist manual del usuario (dominios ya validados al agregarse).
   [ -s "$CAT_BLACKLIST" ] && grep -E '^[a-z0-9.-]+$' "$CAT_BLACKLIST" >> "$_out" 2>/dev/null
+  # Dominios bloqueados por controles de servicio ACTIVOS (p.ej. YouTube).
+  command -v cat_svc_active_blocked >/dev/null 2>&1 && cat_svc_active_blocked >> "$_out" 2>/dev/null
   return 0
 }
 
@@ -882,4 +884,142 @@ cmd_import_bindhosts() {
   else
     cmd_bindhosts analyze "$_dir"
   fi
+}
+
+##############################################################################
+# CONTROLES DE PRIVACIDAD POR SERVICIO (motor separado de las blocklists)
+# Estado: $CAT_DIR/service-state.tsv  ->  id \t mode \t block_until \t bootid
+#   block_until: epoch | "always" | "boot" | "0" (off)
+# Los dominios de controles ACTIVOS se suman a la compilacion (cat_append_active).
+# La blacklist/allowlist manual del usuario siguen siendo independientes.
+##############################################################################
+SVC_INDEX="$CAT_DIR/service-controls.index.tsv"
+SVC_STATE="$CAT_DIR/service-state.tsv"
+
+svc_init() { [ -f "$SVC_STATE" ] || : > "$SVC_STATE"; chmod 0600 "$SVC_STATE" 2>/dev/null; }
+
+svc_sync_index() {
+  _src="$MODDIR/config/catalog/service-controls.index.tsv"
+  [ -f "$_src" ] || return 0
+  if [ ! -f "$SVC_INDEX" ] || ! cmp -s "$_src" "$SVC_INDEX" 2>/dev/null; then
+    cp -f "$_src" "$SVC_INDEX" 2>/dev/null; chmod 0600 "$SVC_INDEX" 2>/dev/null
+  fi
+}
+
+svc_row() { awk -F'\t' -v id="$1" '!/^#/ && $1==id {print; exit}' "$SVC_INDEX" 2>/dev/null; }
+svc_exists() { [ -n "$(svc_row "$1")" ]; }
+svc_field() { svc_row "$1" | awk -F'\t' -v n="$2" '{print $n}'; }
+svc_block_domains() { svc_field "$1" 4 | tr ',' '\n' | grep -v '^$'; }
+
+# Estado actual (mode) de un control, respetando expiracion.
+svc_state_line() { awk -F'\t' -v id="$1" '$1==id {print; exit}' "$SVC_STATE" 2>/dev/null; }
+svc_current_mode() {
+  _l=$(svc_state_line "$1"); [ -n "$_l" ] || { echo normal; return; }
+  _mode=$(printf '%s' "$_l" | cut -f2)
+  _until=$(printf '%s' "$_l" | cut -f3)
+  _bid=$(printf '%s' "$_l" | cut -f4)
+  case "$_until" in
+    always) echo "$_mode" ;;
+    boot) if [ "$_bid" = "$(sec_bootid)" ]; then echo "$_mode"; else echo normal; fi ;;
+    0|'') echo normal ;;
+    *) if [ "$_until" -gt "$(sec_now)" ] 2>/dev/null; then echo "$_mode"; else echo normal; fi ;;
+  esac
+}
+
+# Un control esta "bloqueando" si su modo actual != normal.
+svc_is_blocking() { [ "$(svc_current_mode "$1")" != "normal" ]; }
+
+# Dominios que deben bloquearse AHORA por controles activos (para compilacion).
+cat_svc_active_blocked() {
+  [ -f "$SVC_INDEX" ] || return 0
+  awk -F'\t' '!/^#/ {print $1}' "$SVC_INDEX" 2>/dev/null | while IFS= read -r _id; do
+    [ -n "$_id" ] || continue
+    if svc_is_blocking "$_id"; then svc_block_domains "$_id"; fi
+  done
+}
+
+svc_set_state() {
+  # $1 id  $2 mode  $3 until  $4 bootid
+  svc_init
+  _t="$SVC_STATE.tmp.$$"
+  awk -F'\t' -v id="$1" '$1 != id' "$SVC_STATE" > "$_t" 2>/dev/null
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$_t"
+  mv -f "$_t" "$SVC_STATE"; chmod 0600 "$SVC_STATE" 2>/dev/null
+}
+
+# Reporta conflicto allowlist vs control (allowlist gana, pero se avisa).
+svc_check_allowlist_conflict() {
+  _id="$1"; _conf=0
+  svc_block_domains "$_id" | while IFS= read -r _d; do
+    [ -n "$_d" ] || continue
+    if command -v sec_allow_contains >/dev/null 2>&1 && sec_allow_contains "$_d"; then
+      echo "  [conflicto] '$_d' esta en la allowlist Y este control quiere bloquearlo."
+      echo "              La allowlist tiene prioridad: el control NO tendra efecto sobre '$_d'."
+      echo "              Elegí una conducta coherente: quitalo de la allowlist o no uses este control."
+    fi
+  done
+}
+
+cmd_service() {
+  cat_init_dirs; svc_init
+  _sub="${1:-list}"; shift 2>/dev/null
+  case "$_sub" in
+    sync) svc_sync_index; echo "OK: controles de servicio sincronizados." ;;
+    list)
+      if [ "${1:-}" = "--json" ]; then
+        printf '{"controls":['
+        _first=1
+        awk -F'\t' '!/^#/ {print $1}' "$SVC_INDEX" 2>/dev/null | while IFS= read -r _id; do
+          [ "$_first" = 0 ] && printf ','; _first=0
+          printf '{"id":"%s","service":"%s","name":"%s","mode":"%s","confidence":"%s"}' \
+            "$_id" "$(svc_field "$_id" 2)" "$(cat_json_escape "$(svc_field "$_id" 3)")" \
+            "$(svc_current_mode "$_id")" "$(svc_field "$_id" 5)"
+        done
+        printf ']}\n'
+      else
+        echo "Controles de privacidad por servicio:"
+        awk -F'\t' '!/^#/ {print $1}' "$SVC_INDEX" 2>/dev/null | while IFS= read -r _id; do
+          [ -n "$_id" ] || continue
+          printf '  [%s] %-22s %s\n' "$(svc_current_mode "$_id")" "$_id" "$(svc_field "$_id" 3)"
+        done
+        [ -s "$SVC_INDEX" ] || echo "  (sin controles disponibles; corre 'migrate' o 'service sync')"
+      fi ;;
+    info|status)
+      _id="$1"; svc_exists "$_id" || { echo "ERROR: control desconocido: '$_id'" >&2; return 1; }
+      echo "id           : $_id"
+      echo "servicio     : $(svc_field "$_id" 2)"
+      echo "nombre       : $(svc_field "$_id" 3)"
+      echo "bloquea      : $(svc_field "$_id" 4)"
+      echo "confianza    : $(svc_field "$_id" 5)"
+      echo "modos        : $(svc_field "$_id" 6)"
+      echo "modo actual  : $(svc_current_mode "$_id")"
+      echo "descripcion  : $(svc_field "$_id" 8)"
+      svc_check_allowlist_conflict "$_id" ;;
+    set)
+      _id="$1"; _mode="$2"
+      svc_exists "$_id" || { echo "ERROR: control desconocido: '$_id'" >&2; return 1; }
+      _support=$(svc_field "$_id" 6)
+      printf '%s' ",$_support," | grep -q ",$_mode," || { echo "ERROR: modo invalido '$_mode'. Validos: $_support" >&2; return 1; }
+      case "$_mode" in
+        normal) svc_set_state "$_id" normal 0 "" ; echo "OK: '$_id' en modo normal (sin bloquear)." ;;
+        15m) svc_set_state "$_id" 15m "$(( $(sec_now) + 900 ))" "" ;;
+        1h)  svc_set_state "$_id" 1h "$(( $(sec_now) + 3600 ))" "" ;;
+        boot) svc_set_state "$_id" boot boot "$(sec_bootid)" ;;
+        perm) svc_set_state "$_id" perm always "" ;;
+      esac
+      if [ "$_mode" != "normal" ]; then
+        echo "Control experimental de mejor esfuerzo. DNSCrypt Manager no puede garantizar que YouTube no utilice otros dominios o endpoints para registrar actividad."
+        echo "Puede afectar: historial, recomendaciones, algoritmo, progreso y sincronizacion."
+        svc_check_allowlist_conflict "$_id"
+      fi
+      cat_compile >/dev/null 2>&1
+      echo "OK: '$_id' -> $_mode (recompilado)." ;;
+    conflicts)
+      _any=0
+      awk -F'\t' '!/^#/ {print $1}' "$SVC_INDEX" 2>/dev/null | while IFS= read -r _id; do
+        svc_is_blocking "$_id" || continue
+        svc_check_allowlist_conflict "$_id"
+      done ;;
+    *) echo "Uso: dnscrypt-manager service {list [--json]|info <id>|status <id>|set <id> <normal|15m|1h|boot|perm>|conflicts|sync}" >&2; return 1 ;;
+  esac
 }
