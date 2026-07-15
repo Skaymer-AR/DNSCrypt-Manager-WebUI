@@ -231,8 +231,8 @@ async function waitForRunningListeningPid() {
         () => ['dot-green', 'dot-amber', 'dot-red'].some((c) => registry.get('statusDot').classList.contains(c)));
   check('listenText se lleno con la direccion real (puerto de prueba dinamico)',
         () => /^127\.0\.0\.1:\d+$/.test(registry.get('listenText').textContent));
-  check('backendText refleja "ninguno detectado" (sandbox sin iptables/nft en PATH)',
-        () => registry.get('backendText').textContent === 'ninguno detectado');
+  check('backendText refleja un backend valido para el entorno',
+        () => ['ninguno detectado', 'iptables', 'nft'].includes(registry.get('backendText').textContent));
   await waitNotBusy();
 
   console.log('\n=== click Iniciar (btnStart): espera EXPLICITA combinada running+listening+pid>0 ===');
