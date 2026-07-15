@@ -68,7 +68,7 @@ DEFAULTS = {
     "family_id": "", "maintainer": "", "homepage": "", "description_es": "",
     "categories": [], "coverage": "", "aggressiveness": "medium",
     "format": "domains", "primary_url": "", "mirrors": [], "license": "",
-    "upstream_status": "active", "recommended": False,
+    "upstream_status": "unverified", "recommended": False,
     "mobile_suitability": "good", "known_side_effects": [],
     "known_required_allowlist": [], "supersedes": [], "contained_by": [],
     "overlaps_with": [], "conflicts_with": [], "archived": False,
@@ -533,7 +533,7 @@ ENTRIES += [
       categories=["regional"], aggressiveness="low", recommended=False, mobile_suitability="fair",
       coverage="Hosts para acceso a GitHub (NO es blocklist: mapea IPs).",
       primary_url="https://raw.githubusercontent.com/maxiaof/github-hosts/refs/heads/master/hosts",
-      upstream_status="active",
+      upstream_status="legacy",
       known_side_effects=["No es una lista de bloqueo: son pares IP+dominio de acceso a GitHub."],
       notes="Formato hosts con IPs reales de acceso; util como custom, no como blocklist.",
       description_es="Hosts de acceso a GitHub. No bloquea: mapea IPs. Se incluye como fuente heredada, apagada."),
@@ -542,7 +542,7 @@ ENTRIES += [
       categories=["ads", "trackers"], aggressiveness="medium", recommended=False,
       coverage="Lista de ads/trackers de terceros (procedencia a verificar).",
       primary_url="https://raw.githubusercontent.com/Turtlecute33/toolz/refs/heads/master/src/d3host.txt",
-      upstream_status="unverified",
+      upstream_status="legacy",
       notes="Procedencia/licencia no verificadas; se incluye apagada.",
       description_es="Fuente heredada del usuario. Procedencia sin verificar: apagada y no recomendada."),
     E("legacy_frogeye_firstparty", "Frogeye First-Party Trackers", family_id="legacy", maintainer="Frogeye",
@@ -550,13 +550,14 @@ ENTRIES += [
       categories=["trackers", "cname_tracking"], aggressiveness="high", recommended=False,
       coverage="Rastreadores first-party (CNAME).",
       primary_url="https://hostfiles.frogeye.fr/firstparty-trackers-hosts.txt",
+      upstream_status="legacy",
       description_es="Rastreadores first-party de Frogeye. Fuente heredada, apagada por defecto."),
     E("legacy_divested", "Divested Hosts", family_id="legacy", maintainer="Divested", format="hosts",
       homepage="https://divested.dev/", license="unknown",
       categories=["ads", "trackers", "malware"], aggressiveness="very_high", recommended=False, mobile_suitability="fair",
       coverage="Agregador grande (procedencia a verificar).",
       primary_url="https://divested.dev/hosts",
-      upstream_status="unverified",
+      upstream_status="legacy",
       description_es="Agregador heredado del usuario. Grande y sin verificar: apagado."),
     E("legacy_antipopads_re", "antipopads-re (Legacy/Archived)", family_id="legacy", maintainer="AdroitAdorKhan",
       format="hosts", homepage="https://github.com/AdroitAdorKhan/antipopads-re", license="unknown",
@@ -571,7 +572,7 @@ ENTRIES += [
       categories=["doh_bypass", "vpn_bypass"], aggressiveness="high", recommended=False,
       coverage="Endpoints de bypass (procedencia a verificar).",
       primary_url="https://hosts.rem01gaming.dev/bypassroot",
-      upstream_status="unverified",
+      upstream_status="legacy",
       overlaps_with=["hagezi_doh_vpn_tor_proxy"],
       description_es="Fuente heredada de bypass. Sin verificar: apagada."),
     E("legacy_hagezi_proplus_compressed", "HaGeZi Pro++ (compressed, legacy URL)", family_id="legacy",
@@ -580,6 +581,7 @@ ENTRIES += [
       coverage="Variante comprimida de Pro++ (URL heredada del usuario).",
       primary_url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus-compressed.txt",
       contained_by=["hagezi_multi_proplus"],
+      upstream_status="legacy",
       notes="Duplicado funcional de hagezi_multi_proplus; se conserva por compatibilidad con la config del usuario.",
       description_es="Pro++ comprimida (URL heredada). Equivale a HaGeZi Multi PRO++."),
     E("legacy_o0_pro", "o0.pages.dev Pro", family_id="legacy", maintainer="o0", format="hosts",
@@ -587,7 +589,7 @@ ENTRIES += [
       categories=["ads", "trackers"], aggressiveness="high", recommended=False,
       coverage="Espejo/derivado (procedencia a verificar).",
       primary_url="https://o0.pages.dev/Pro/hosts.txt",
-      upstream_status="unverified",
+      upstream_status="legacy",
       description_es="Fuente heredada del usuario. Procedencia sin verificar: apagada."),
 ]
 
@@ -606,6 +608,19 @@ def validate(entries):
             errs.append(f"{e['id']}: formato invalido '{e['format']}'")
         if not e["primary_url"].startswith("https://"):
             errs.append(f"{e['id']}: primary_url no https")
+        if e["upstream_status"] not in ("verified", "unverified", "archived", "broken", "legacy"):
+            errs.append(f"{e['id']}: estado invalido '{e['upstream_status']}'")
+        if e["archived"] and e["upstream_status"] != "archived":
+            errs.append(f"{e['id']}: archived=True requiere upstream_status='archived'")
+        if e["upstream_status"] in ("archived", "broken") and e["recommended"]:
+            errs.append(f"{e['id']}: no se puede recomendar una fuente archived/broken")
+    # URLs duplicadas: dos entradas no deben compartir primary_url.
+    seen_urls = {}
+    for e in entries:
+        u = e["primary_url"]
+        if u in seen_urls:
+            errs.append(f"{e['id']}: primary_url duplicada con '{seen_urls[u]}'")
+        seen_urls[u] = e["id"]
     # Referencias cruzadas (supersedes/contained_by/...) deben existir o ser
     # marcadores de servicio (prefijo '_service').
     for e in entries:
