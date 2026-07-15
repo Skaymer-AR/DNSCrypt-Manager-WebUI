@@ -316,6 +316,10 @@ sec_merge_blocked() {
     [ -s "$_f" ] || continue
     cat "$_f" >> "$1"
   done
+  # RC2: fusionar tambien las fuentes del catalogo habilitadas + blacklist
+  # manual (motor por metadatos, aditivo sobre las categorias legacy).
+  command -v cat_append_active >/dev/null 2>&1 && cat_append_active "$1"
+  # Fusion a escala: sort -u externo (maneja millones de lineas sin bucles).
   [ -s "$1" ] && sort -u "$1" -o "$1"
   return 0
 }
@@ -1543,6 +1547,8 @@ sec_migrate() {
     echo "       la redireccion automatica se omite hasta resolverlo. Ver: dnscrypt-manager logs" >&2
     return 1
   fi
+  # RC2 (aditivo): copiar el index del catalogo al dispositivo (sin descargar).
+  command -v cat_sync_index >/dev/null 2>&1 && cat_sync_index
   echo 2 > "$SCHEMA_FILE"
   log_msg "migracion v0.1.0 -> v0.2.0: OK (schema 2)"
   echo "OK: migracion a schema 2 completada. Proveedor, NextDNS, IPv6, redireccion,"

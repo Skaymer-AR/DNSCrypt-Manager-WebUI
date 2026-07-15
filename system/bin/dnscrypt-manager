@@ -45,6 +45,13 @@ if [ -f "$SECURITY_LIB" ]; then
   . "$SECURITY_LIB"
 fi
 
+# catalog.sh: motor del catalogo de listas (v0.2.0-RC2). Mismo patron de carga.
+CATALOG_LIB="${COMMON%/*}/catalog.sh"
+if [ -f "$CATALOG_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$CATALOG_LIB"
+fi
+
 ##############################################################################
 # TOML helpers
 ##############################################################################
@@ -1140,6 +1147,13 @@ DNSCrypt Manager - comandos
     events [list [--limit N] [--filter S] [--json]|clear|export|stats|pause|resume]
     migrate
 
+  Catalogo de listas (v0.2.0-RC2):
+    catalog list [--json][--search S][--category C][--maintainer M][--enabled][--recommended][--archived]
+    catalog info <id> | enable <id> | disable <id>
+    catalog update [id|enabled|all] | compile
+    catalog conflicts [id1 id2] | metrics <id> | test <id>
+    catalog custom {add <url> [--name N][--category C][--format F]|remove <id>|list|export}
+
     set-flag {boot_redirect|ipv6_mode|prerouting|hist_mode|hist_days|hist_max} <valor>
     get-flag <clave>
     version | help
@@ -1149,6 +1163,12 @@ EOF
 require_seclib() {
   command -v sec_lib_loaded >/dev/null 2>&1 && return 0
   echo "ERROR: falta scripts/security.sh (capa de seguridad no cargada)." >&2
+  exit 1
+}
+
+require_catlib() {
+  command -v cat_lib_loaded >/dev/null 2>&1 && return 0
+  echo "ERROR: falta scripts/catalog.sh (motor de catalogo no cargado)." >&2
   exit 1
 }
 
@@ -1192,6 +1212,7 @@ main() {
     events)           require_seclib; cmd_events "$@" ;;
     security-regen)   require_seclib; sec_regen_and_reload "$@" ;;
     migrate)          require_seclib; sec_migrate "$@" ;;
+    catalog)          require_catlib; cmd_catalog "$@" ;;
     version)          cmd_get version ;;
     config)
       _sub="$1"; shift 2>/dev/null
