@@ -36,7 +36,29 @@ const DCM = (() => {
     logsClear:      CLI + ' logs --clear',
     privateDns:     CLI + ' privatedns',
     panic:          CLI + ' panic',
-    enable:         CLI + ' enable'
+    enable:         CLI + ' enable',
+
+    /* --- Seguridad v0.2.0: TODAS cadenas FIJAS (JSON donde aplica) --- */
+    protectionStatus:   CLI + ' protection status --json',
+    blocklistsStatus:   CLI + ' blocklists status --json',
+    blocklistsUpdate:   CLI + ' blocklists update all',
+    blocklistsValidate: CLI + ' blocklists validate',
+    allowlistList:      CLI + ' allowlist list --json',
+    tempAllowList:      CLI + ' temporary-allow list --json',
+    tempAllowSweep:     CLI + ' temporary-allow sweep',
+    profileStatus:      CLI + ' security-profile status --json',
+    profileBalanced:    CLI + ' security-profile balanced',
+    profileStrict:      CLI + ' security-profile strict --confirmed',
+    profilePrivacy:     CLI + ' security-profile privacy',
+    failclosedStatus:   CLI + ' failclosed status --json',
+    failclosedEnable:   CLI + ' failclosed enable --confirmed',
+    failclosedDisable:  CLI + ' failclosed disable',
+    leakTest:           CLI + ' leak-test --json',
+    eventsList:         CLI + ' events list --limit 100 --json',
+    eventsStats:        CLI + ' events stats --json',
+    eventsClear:        CLI + ' events clear',
+    eventsPause:        CLI + ' events pause',
+    eventsResume:       CLI + ' events resume'
   });
 
   function available() {
@@ -153,6 +175,97 @@ const DCM = (() => {
     return runRaw(CLI + ' nextdns ' + clean);
   }
 
+  /* ---------------------------------------------------------------------
+   * Proteccion por categoria: 12 comandos FIJOS (6 categorias x on/off).
+   * Igual que PROVIDER_COMMANDS: cada boton dispara una cadena literal.
+   * ------------------------------------------------------------------- */
+  const CATEGORIES = Object.freeze(['malware', 'phishing', 'scams', 'trackers', 'ads', 'cryptomining']);
+  const PROTECTION_COMMANDS = (() => {
+    const m = {};
+    CATEGORIES.forEach((c) => {
+      m['enable_' + c] = CLI + ' protection enable ' + c;
+      m['disable_' + c] = CLI + ' protection disable ' + c;
+    });
+    return Object.freeze(m);
+  })();
+
+  function runProtection(cat, enable) {
+    const cmd = PROTECTION_COMMANDS[(enable ? 'enable_' : 'disable_') + cat];
+    if (!cmd) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Categoria no reconocida: ' + cat });
+    return runRaw(cmd);
+  }
+
+  /* Actualizar/rollback UNA categoria: cadena fija a partir de la lista blanca. */
+  function runBlocklistUpdateCat(cat) {
+    if (CATEGORIES.indexOf(cat) < 0) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Categoria no reconocida: ' + cat });
+    return runRaw(CLI + ' blocklists update ' + cat);
+  }
+  function runBlocklistRollbackCat(cat) {
+    if (CATEGORIES.indexOf(cat) < 0) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Categoria no reconocida: ' + cat });
+    return runRaw(CLI + ' blocklists rollback ' + cat);
+  }
+
+  /* ---------------------------------------------------------------------
+   * Acciones con DOMINIO variable (allowlist / temporary-allow / eventos).
+   *
+   * Mismo razonamiento de seguridad que runNextdns: el dominio se valida
+   * ACA con la misma clase de caracteres que la CLI (letras/digitos/./-,
+   * sin espacios ni ; & | $ ` < > ( ) comillas ni backslash), y la CLI lo
+   * REVALIDA con sec_valid_domain antes de tocar nada. Un valor invalido se
+   * rechaza en ambos lados con CERO efectos. El dominio viaja citado como
+   * "$1" en el shell; nunca por eval.
+   * ------------------------------------------------------------------- */
+  const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+  const DURATIONS = Object.freeze(['5m', '15m', '1h', 'boot', 'perm']);
+
+  function cleanDomain(d) {
+    return String(d == null ? '' : d).trim().toLowerCase();
+  }
+  function domainInvalidResult(d) {
+    return Promise.resolve({
+      errno: -1, stdout: '',
+      stderr: 'Dominio invalido: "' + d + '". Formato: example.com o sub.example.com ' +
+              '(sin http://, sin barras, sin comodines, sin IP).'
+    });
+  }
+
+  function runAllowlistAdd(domain) {
+    const d = cleanDomain(domain);
+    if (!DOMAIN_RE.test(d) || d.length > 253) return domainInvalidResult(domain);
+    return runRaw(CLI + ' allowlist add ' + d);
+  }
+  function runAllowlistRemove(domain) {
+    const d = cleanDomain(domain);
+    if (!DOMAIN_RE.test(d) || d.length > 253) return domainInvalidResult(domain);
+    return runRaw(CLI + ' allowlist remove ' + d);
+  }
+  function runAllowlistSearch(domain) {
+    const d = cleanDomain(domain).replace(/[^a-z0-9.-]/g, '');
+    if (!d) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Termino de busqueda vacio.' });
+    return runRaw(CLI + ' allowlist search ' + d);
+  }
+  function runTempAllowAdd(domain, duration, reason) {
+    const d = cleanDomain(domain);
+    if (!DOMAIN_RE.test(d) || d.length > 253) return domainInvalidResult(domain);
+    if (DURATIONS.indexOf(duration) < 0) {
+      return Promise.resolve({ errno: -1, stdout: '', stderr: 'Duracion no reconocida: ' + duration });
+    }
+    let cmd = CLI + ' temporary-allow add ' + d + ' ' + duration + ' --origin webui';
+    // Motivo OPCIONAL: colapsado a UNA sola palabra segura (sin espacios ni
+    // metacaracteres) para preservar la forma fija del comando. La CLI ademas
+    // lo sanea con tr -cd. Si queda vacio tras sanear, no se agrega.
+    if (reason != null) {
+      const safe = String(reason).trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+      if (safe.length) cmd += ' --reason ' + safe;
+    }
+    return runRaw(cmd);
+  }
+  function runTempAllowRemove(domain) {
+    const d = cleanDomain(domain);
+    if (!DOMAIN_RE.test(d) || d.length > 253) return domainInvalidResult(domain);
+    return runRaw(CLI + ' temporary-allow remove ' + d);
+  }
+
   // Ejecuta una cadena de comando ya validada/fija (uso interno de este modulo).
   function runRaw(cmd) {
     return new Promise((resolve) => {
@@ -191,9 +304,20 @@ const DCM = (() => {
     runProvider,
     runIpv6Mode,
     runNextdns,
+    runProtection,
+    runBlocklistUpdateCat,
+    runBlocklistRollbackCat,
+    runAllowlistAdd,
+    runAllowlistRemove,
+    runAllowlistSearch,
+    runTempAllowAdd,
+    runTempAllowRemove,
     available,
     toast,
     COMMANDS,
-    NEXTDNS_ID_RE
+    CATEGORIES,
+    DURATIONS,
+    NEXTDNS_ID_RE,
+    DOMAIN_RE
   };
 })();

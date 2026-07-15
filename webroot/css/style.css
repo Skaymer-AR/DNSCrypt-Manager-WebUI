@@ -154,7 +154,7 @@ button.wide    { flex: 1 1 100%; }
   display: block; font-size: 12.5px; color: var(--text-dim);
   margin-bottom: 6px;
 }
-.field input[type="text"], .field select {
+.field input[type="text"], .field input[type="number"], .field select, .field textarea {
   width: 100%;
   font-family: var(--font-mono);
   font-size: 14.5px;
@@ -164,10 +164,37 @@ button.wide    { flex: 1 1 100%; }
   border-radius: var(--radius-sm);
   padding: 11px 12px;
   min-height: 44px;
+  box-sizing: border-box;
 }
-.field input[type="text"]:focus, .field select:focus {
+.field textarea { resize: vertical; line-height: 1.4; }
+.field input[type="text"]:focus, .field input[type="number"]:focus,
+.field select:focus, .field textarea:focus {
   outline: none; border-color: var(--accent);
 }
+
+/* Lista de toggles de proteccion por categoria */
+.toggle-list { display: flex; flex-direction: column; gap: 2px; }
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--card-brd);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-row .tl-name { font-size: 14.5px; color: var(--text); text-transform: capitalize; }
+.toggle-row .tl-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.toggle-row .switch input { width: 44px; height: 26px; }
+
+/* Estados de la auditoria de fugas y eventos */
+.leak-row, .event-row {
+  padding: 8px 0; border-bottom: 1px solid var(--card-brd); font-size: 13px;
+}
+.leak-row:last-child, .event-row:last-child { border-bottom: none; }
+.st-protegido    { color: var(--green); font-weight: 600; }
+.st-posible_fuga { color: var(--amber); font-weight: 600; }
+.st-conflicto    { color: var(--red); font-weight: 600; }
+.st-fallo        { color: var(--red); font-weight: 600; }
+.st-no_verificable { color: var(--text-dim); font-weight: 600; }
+.event-actions { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+.event-actions button { padding: 5px 10px; min-height: 34px; font-size: 12px; }
 .field input.field-invalid { border-color: var(--red); }
 .field .err { min-height: 16px; font-size: 12px; color: var(--red); margin-top: 4px; }
 

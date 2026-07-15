@@ -31,7 +31,7 @@ SHELL_FILES=(
   customize.sh post-fs-data.sh service.sh boot-completed.sh uninstall.sh action.sh
   scripts/backup.sh scripts/common.sh scripts/validate-binary.sh scripts/redirect.sh
   scripts/remove-redirect.sh scripts/restart.sh scripts/restore.sh scripts/start.sh
-  scripts/stop.sh scripts/test-dns.sh
+  scripts/stop.sh scripts/test-dns.sh scripts/security.sh
   system/bin/dnscrypt-manager
   META-INF/com/google/android/update-binary
 )

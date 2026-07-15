@@ -56,5 +56,21 @@ const DCMValidate = (() => {
     return { ok: true, msg: '' };
   }
 
-  return { nextdnsId, ip, host, doh, stamp };
+  /* Dominio para allowlist / excepciones. MISMA clase que la CLI
+   * (sec_valid_domain): minusculas, etiquetas alfanumericas con guiones
+   * internos, al menos un punto, y explicitamente NO una IPv4. Rechaza
+   * http://, barras, comodines, comillas y metacaracteres de shell. */
+  const RE_DOMAIN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+  function isValidDomain(v) {
+    const s = String(v == null ? '' : v).trim().toLowerCase();
+    if (!s) return { ok: false, msg: 'Ingresa un dominio (ej: example.com).' };
+    if (s.length > 253) return { ok: false, msg: 'Dominio demasiado largo.' };
+    if (RE.ipv4.test(s)) return { ok: false, msg: 'Es una IP, no un dominio. Usa un nombre como example.com.' };
+    if (!RE_DOMAIN.test(s)) {
+      return { ok: false, msg: 'Dominio invalido. Formato: example.com o sub.example.com (sin http://, barras ni comodines).' };
+    }
+    return { ok: true, msg: '', value: s };
+  }
+
+  return { nextdnsId, ip, host, doh, stamp, isValidDomain };
 })();
