@@ -1,0 +1,118 @@
+name: Validate DNSCrypt Manager v0.2.0 RC
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-v020-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DNSCRYPT_VERSION: '2.1.17'
+      DNSCRYPT_ASSET_SHA256: '85601b3398c7013ca0d102c075d0f46ccb9c5b6b84001be6f15992019560f572'
+      RC_ZIP: '/tmp/DNSCrypt-Manager-v0.2.0-RC1.zip'
+
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            zip unzip binutils file iproute2 nodejs python3 curl ca-certificates
+
+      - name: Download and verify official dnscrypt-proxy ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://github.com/DNSCrypt/dnscrypt-proxy/releases/download/${DNSCRYPT_VERSION}/dnscrypt-proxy-android_arm64-${DNSCRYPT_VERSION}.zip"
+          curl --fail --location --retry 3 --output /tmp/dnscrypt-proxy.zip "$URL"
+          echo "$DNSCRYPT_ASSET_SHA256  /tmp/dnscrypt-proxy.zip" | sha256sum -c -
+          rm -rf /tmp/dnscrypt-proxy
+          mkdir -p /tmp/dnscrypt-proxy
+          unzip -q /tmp/dnscrypt-proxy.zip -d /tmp/dnscrypt-proxy
+          BIN="$(find /tmp/dnscrypt-proxy -type f -name dnscrypt-proxy -print -quit)"
+          test -n "$BIN"
+          test -s "$BIN"
+          bash tools/inject-binary.sh "$BIN"
+          file bin/arm64/dnscrypt-proxy | grep -q 'ARM aarch64'
+          test "$(sha256sum bin/arm64/dnscrypt-proxy | awk '{print $1}')" = \
+            '940b650911cfa55cbc0544a9025ceb866101590a88031a90a7e1ca05f5781cbc'
+
+      - name: Syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=5s 180s \
+            bash tests/run-syntax-checks.sh
+
+      - name: CLI smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=10s 360s \
+            bash tests/smoke-test-cli.sh
+
+      - name: Security smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=10s 420s \
+            bash tests/smoke-test-security.sh
+
+      - name: WebUI smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=5s 180s \
+            bash tests/smoke-test-webui.sh
+
+      - name: Build clean RC package
+        shell: bash
+        run: |
+          set -euo pipefail
+          DCM_SKIP_TESTS=1 DCM_OUTPUT="$RC_ZIP" bash tools/build-module.sh
+          sha256sum "$RC_ZIP" > "${RC_ZIP}.sha256"
+
+      - name: Audit generated ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -tq "$RC_ZIP"
+          unzip -Z1 "$RC_ZIP" | sed 's#^\./##' > /tmp/rc-entries.txt
+          grep -qx 'module.prop' /tmp/rc-entries.txt
+          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'version=v0.2.0'
+          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'versionCode=200'
+          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'author=Skaymer AR'
+          if grep -Eq '^(tests|tools|dist|fixtures|bootstrap)/|(^|/)COLOCAR_BINARIO_AQUI\.md$|(^|/)__pycache__(/|$)|(^|/)\.git(/|$)' /tmp/rc-entries.txt; then
+            echo 'Development artifacts or placeholders leaked into the RC ZIP:' >&2
+            grep -E '^(tests|tools|dist|fixtures|bootstrap)/|(^|/)COLOCAR_BINARIO_AQUI\.md$|(^|/)__pycache__(/|$)|(^|/)\.git(/|$)' /tmp/rc-entries.txt >&2
+            exit 1
+          fi
+          unzip -p "$RC_ZIP" bin/arm64/dnscrypt-proxy | sha256sum | \
+            grep -q '^940b650911cfa55cbc0544a9025ceb866101590a88031a90a7e1ca05f5781cbc '
+          cat "${RC_ZIP}.sha256"
+
+      - name: Upload verified RC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DNSCrypt-Manager-v0.2.0-RC1
+          path: |
+            /tmp/DNSCrypt-Manager-v0.2.0-RC1.zip
+            /tmp/DNSCrypt-Manager-v0.2.0-RC1.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
