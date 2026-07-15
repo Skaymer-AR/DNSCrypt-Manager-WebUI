@@ -1,0 +1,56 @@
+name: Import verified v0.2.0 bundle
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bootstrap-v020/**'
+      - '.github/workflows/import-v020-bundle.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: import-v020-bundle
+  cancel-in-progress: false
+
+jobs:
+  import-branch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout bootstrap branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Reconstruct and verify Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat bootstrap-v020/chunk-*.b64 | base64 --decode > /tmp/feature-security-v0.2.0.bundle
+          echo '987f516d07c40bd1aac91b78d9db769e205dfb0acc7892185958bec20b1469de  /tmp/feature-security-v0.2.0.bundle' | sha256sum -c -
+          git bundle verify /tmp/feature-security-v0.2.0.bundle
+          git bundle list-heads /tmp/feature-security-v0.2.0.bundle
+
+      - name: Import exact eight-commit branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_HEAD='23003a1ab0437ee30fc39c18bd81be77cdec2824'
+          git fetch /tmp/feature-security-v0.2.0.bundle \
+            'refs/heads/feature/security-v0.2.0:refs/remotes/bundle/feature/security-v0.2.0'
+          ACTUAL_HEAD="$(git rev-parse refs/remotes/bundle/feature/security-v0.2.0)"
+          test "$ACTUAL_HEAD" = "$EXPECTED_HEAD"
+          git merge-base --is-ancestor 1a8fd94f98f4a6ee1c506ab4c9f09d14c6a85c2e "$ACTUAL_HEAD"
+          git push origin \
+            'refs/remotes/bundle/feature/security-v0.2.0:refs/heads/feature/security-v0.2.0'
+
+      - name: Verify published branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feature/security-v0.2.0
+          test "$(git rev-parse FETCH_HEAD)" = '23003a1ab0437ee30fc39c18bd81be77cdec2824'
+          test "$(git rev-list --count 1a8fd94f98f4a6ee1c506ab4c9f09d14c6a85c2e..FETCH_HEAD)" = '8'
