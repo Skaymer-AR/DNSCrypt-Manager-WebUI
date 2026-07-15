@@ -80,6 +80,13 @@ cat_field() {
 
 cat_exists() { [ -n "$(cat_row "$1")" ]; }
 
+# Estado efectivo: si el dispositivo ya descargo+valido la fuente, "verified";
+# si no, el estado declarado en el catalogo (unverified/legacy/archived/broken).
+cat_effective_status() {
+  _st=$(cat_meta_get "$1" status)
+  if [ "$_st" = "verified" ]; then echo verified; else cat_field "$1" 10; fi
+}
+
 # Lista todos los ids (custom primero, luego catalogo), sin duplicar.
 cat_all_ids() {
   {
@@ -234,7 +241,7 @@ cat_update_one() {
   mv -f "$_norm" "$CAT_CACHE_DIR/$_id.list" || { echo "ERROR ($_id): mv fallo" >&2; rm -f "$_raw"; return 1; }
   chmod 0600 "$CAT_CACHE_DIR/$_id.list" 2>/dev/null
   cat_meta_set "$_id" \
-    id "$_id" format "$_fmt" partial_dns "$_partial" \
+    id "$_id" format "$_fmt" partial_dns "$_partial" status verified \
     total_source "$_total" valid_domains "$_valid" invalid_entries "$_invalid" \
     sha256_raw "$_sha" sha256_list "$_shalist" bytes_raw "$_sz" \
     updated_at "$(date '+%Y-%m-%d %H:%M:%S')" updated_epoch "$(sec_now)"
@@ -465,7 +472,7 @@ cmd_catalog() {
         _name=$(printf '%s' "$_row" | cut -f3); _maint=$(printf '%s' "$_row" | cut -f4)
         _cats=$(printf '%s' "$_row" | cut -f5); _agg=$(printf '%s' "$_row" | cut -f6)
         _fmt=$(printf '%s' "$_row" | cut -f7); _lic=$(printf '%s' "$_row" | cut -f9)
-        _ups=$(printf '%s' "$_row" | cut -f10); _rec=$(printf '%s' "$_row" | cut -f11)
+        _ups=$(cat_effective_status "$_id"); _rec=$(printf '%s' "$_row" | cut -f11)
         _mob=$(printf '%s' "$_row" | cut -f12); _arch=$(printf '%s' "$_row" | cut -f13)
         _desc=$(printf '%s' "$_row" | cut -f19)
         # filtros
@@ -519,7 +526,7 @@ cmd_catalog() {
       echo "formato      : $(printf '%s' "$_row" | cut -f7)"
       echo "url          : $(printf '%s' "$_row" | cut -f8)"
       echo "licencia     : $(printf '%s' "$_row" | cut -f9)"
-      echo "upstream     : $(printf '%s' "$_row" | cut -f10)"
+      echo "estado       : $(cat_effective_status "$_id")"
       echo "movil        : $(printf '%s' "$_row" | cut -f12)"
       echo "recomendada  : $( [ "$(printf '%s' "$_row" | cut -f11)" = 1 ] && echo si || echo no )"
       echo "archivada    : $( [ "$(printf '%s' "$_row" | cut -f13)" = 1 ] && echo si || echo no )"
