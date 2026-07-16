@@ -148,6 +148,9 @@ LC_ALL=C sort -c "$TR/hosts.out" 2>/dev/null && ok "3.2 salida de parseo ordenad
 
 # ---------------------------------------------------------------------------
 echo "== 4. Mecanica del pipeline (lock/cancel/timeout/huerfano/rollback) =="
+if [ "${SKIP_MECH:-0}" = "1" ]; then
+  echo "  (omitida por SKIP_MECH=1; ya cubierta en la corrida de 100k)"
+else
 # 4.1 lock concurrente: una compilacion lenta en segundo plano, otra debe fallar
 DNSCRYPT_TEST_COMPILE_SLEEP=6 cli catalog compile >/dev/null 2>&1 &
 BGPID=$!
@@ -181,6 +184,7 @@ STRAY=$(ps -eo pid,args 2>/dev/null | grep -F "$TR/mod" | grep -v grep | wc -l |
 [ "${STRAY:-0}" = "0" ] && ok "4.8 sin procesos residuales del modulo" || bad "4.8 procesos residuales: $STRAY"
 # 4.9 lock liberado tras toda la mecanica
 [ ! -d "$DATA/run/catalog.compile.lock" ] && ok "4.9 lock liberado al final" || bad "4.9 lock no liberado"
+fi
 
 echo ""
 echo "Resumen escala (SCALE=$SCALE): $PASS OK, $FAILN FAIL | tiempo_merge=${DUR}s maxRSS=${MAXRSS}"
