@@ -31,7 +31,10 @@ CAT_CUSTOM="$CAT_DIR/custom.tsv"
 CAT_CACHE_DIR="$CAT_DIR/cache"
 CAT_BLACKLIST="$CAT_DIR/blacklist.txt"
 SRCST="$CAT_DIR/source-status.tsv"   # estado runtime persistente (separado del catalogo)
-CAT_COMPILE_LOCK="$RUN_DIR/catalog.compile.lock"
+CAT_COMPILE_LOCK="$RUN_DIR/catalog.compile.lock"        # lock DIR (mkdir atomico)
+CAT_COMPILE_PROGRESS="$RUN_DIR/catalog.compile.progress" # estado consultable
+CAT_COMPILE_TIMEOUT_DEFAULT=900                          # 15 min tope seguro
+CAT_STATS="$CAT_DIR/contribution-stats.tsv"             # aporte unico (runtime, separado)
 CAT_MIN_FREE_KB=51200          # ~50 MB libres minimos para compilar
 CAT_MAX_SOURCE_BYTES=104857600 # 100 MB por fuente descargada
 CAT_MIN_SOURCE_BYTES=32
@@ -121,6 +124,89 @@ cat_enabled_lists() {
     _f="$CAT_CACHE_DIR/$_id.list"
     [ -s "$_f" ] && printf '%s\n' "$_f"
   done < "$CAT_ENABLED"
+}
+
+# Orden CANONICO y estable de fuentes activas: prioridad explicita (recomendadas
+# primero) y luego ID alfabetico. NO depende del orden del filesystem. El aporte
+# unico por fuente depende de este orden; por eso se fija y se documenta.
+cat_enabled_ordered() {
+  [ -f "$CAT_ENABLED" ] || return 0
+  while IFS= read -r _id; do
+    [ -n "$_id" ] || continue
+    _rec=$(cat_field "$_id" 11); [ "$_rec" = "1" ] && _pri=0 || _pri=1
+    printf '%s\t%s\n' "$_pri" "$_id"
+  done < "$CAT_ENABLED" | sort -t"$(printf '\t')" -k1,1 -k2,2 | awk -F'\t' '{print $2}'
+}
+
+# ---------------------------------------------------------------------------
+# APORTE UNICO por fuente (estadisticas runtime, SEPARADAS del catalogo).
+# Procesa las fuentes activas en orden canonico acumulando un conjunto "visto"
+# y usa comm/sort por LOTES (nunca loops por dominio). Guarda:
+#   source_id, total, internal_dups, already_present, unique, redundant_pct
+# Mas un resumen: total unico y efectivo tras allowlist.
+# ---------------------------------------------------------------------------
+cat_stats_compute() {
+  cat_init_dirs
+  _seen="$RUN_DIR/stats.seen.$$"; : > "$_seen"
+  _tmp="$CAT_STATS.tmp.$$"
+  printf '#source_id\ttotal\tinternal_dups\talready_present\tunique\tredundant_pct\n' > "$_tmp"
+  _order="$RUN_DIR/stats.order.$$"; cat_enabled_ordered > "$_order"
+  while IFS= read -r _id; do
+    [ -n "$_id" ] || continue
+    _f="$CAT_CACHE_DIR/$_id.list"; [ -s "$_f" ] || continue
+    _u="$RUN_DIR/stats.u.$$"; sort -u "$_f" > "$_u"
+    _total=$(grep -cve '^[[:space:]]*$' "$_f" 2>/dev/null)
+    _uin=$(wc -l < "$_u" | tr -d ' ')
+    _intdup=$(( _total - _uin )); [ "$_intdup" -lt 0 ] && _intdup=0
+    _already=$(comm -12 "$_u" "$_seen" 2>/dev/null | wc -l | tr -d ' ')
+    _contrib=$(( _uin - _already )); [ "$_contrib" -lt 0 ] && _contrib=0
+    sort -u "$_seen" "$_u" -o "$_seen"
+    _pct=0; [ "$_total" -gt 0 ] 2>/dev/null && _pct=$(( (_intdup + _already) * 100 / _total ))
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_id" "$_total" "$_intdup" "$_already" "$_contrib" "$_pct" >> "$_tmp"
+    rm -f "$_u"
+  done < "$_order"
+  # Resumen: total unico y efectivo tras allowlist.
+  _tot_uniq=$(wc -l < "$_seen" | tr -d ' ')
+  _allow_hit=0
+  if [ -f "$ALLOWLIST_FILE" ]; then
+    _al="$RUN_DIR/stats.al.$$"; sort -u "$ALLOWLIST_FILE" > "$_al" 2>/dev/null
+    _allow_hit=$(comm -12 "$_al" "$_seen" 2>/dev/null | wc -l | tr -d ' '); rm -f "$_al"
+  fi
+  _eff=$(( _tot_uniq - _allow_hit )); [ "$_eff" -lt 0 ] && _eff=0
+  printf '#summary\ttotal_unique\t%s\tallowlisted\t%s\teffective\t%s\n' "$_tot_uniq" "$_allow_hit" "$_eff" >> "$_tmp"
+  mv -f "$_tmp" "$CAT_STATS"; chmod 0600 "$CAT_STATS" 2>/dev/null
+  rm -f "$_seen" "$_order"
+}
+
+cat_stats_show() {
+  if [ "${1:-}" = "--compute" ] || [ ! -f "$CAT_STATS" ]; then
+    echo "Calculando aporte unico (orden canonico)…" >&2
+    cat_stats_compute
+  fi
+  [ -f "$CAT_STATS" ] || { echo "(sin estadisticas; compila o usa 'catalog stats --compute')"; return 0; }
+  if [ "${1:-}" = "--json" ]; then
+    printf '{"sources":['
+    _first=1
+    awk -F'\t' '!/^#/{print}' "$CAT_STATS" | while IFS= read -r _l; do
+      [ "$_first" = 0 ] && printf ','; _first=0
+      printf '{"id":"%s","total":%s,"internal_dups":%s,"already_present":%s,"unique":%s,"redundant_pct":%s}' \
+        "$(printf '%s' "$_l" | cut -f1)" "$(printf '%s' "$_l" | cut -f2)" "$(printf '%s' "$_l" | cut -f3)" \
+        "$(printf '%s' "$_l" | cut -f4)" "$(printf '%s' "$_l" | cut -f5)" "$(printf '%s' "$_l" | cut -f6)"
+    done
+    _sum=$(grep '^#summary' "$CAT_STATS" 2>/dev/null)
+    printf '],"summary":{"total_unique":%s,"allowlisted":%s,"effective":%s}}\n' \
+      "$(printf '%s' "$_sum" | cut -f3)" "$(printf '%s' "$_sum" | cut -f5)" "$(printf '%s' "$_sum" | cut -f7)"
+  else
+    echo "Aporte unico por fuente (orden canonico: recomendadas, luego id):"
+    printf '  %-34s %8s %8s %9s %8s %5s\n' "fuente" "total" "int.dup" "yapresen" "unico" "red%"
+    awk -F'\t' '!/^#/{printf "  %-34s %8s %8s %9s %8s %4s%%\n",$1,$2,$3,$4,$5,$6}' "$CAT_STATS"
+    _sum=$(grep '^#summary' "$CAT_STATS" 2>/dev/null)
+    if [ -n "$_sum" ]; then
+      echo "  ----"
+      echo "  total unico: $(printf '%s' "$_sum" | cut -f3) · en allowlist: $(printf '%s' "$_sum" | cut -f5) · efectivo tras allowlist: $(printf '%s' "$_sum" | cut -f7)"
+    fi
+    echo "  (nota: el 'aporte unico' depende del orden de compilacion; se usa un orden canonico fijo.)"
+  fi
 }
 
 # HOOK invocado por sec_merge_blocked: agrega al archivo de salida las fuentes
@@ -303,40 +389,176 @@ cat_free_kb() {
   df -k "$DATA_DIR" 2>/dev/null | awk 'NR==2 {print $4; found=1} END{ if(!found) print 0 }'
 }
 
-cat_compile() {
-  # Lock anti doble-compilacion.
-  if [ -e "$CAT_COMPILE_LOCK" ]; then
-    _lpid=$(cat "$CAT_COMPILE_LOCK" 2>/dev/null)
-    if [ -n "$_lpid" ] && kill -0 "$_lpid" 2>/dev/null; then
-      echo "ERROR: ya hay una compilacion en curso (pid $_lpid)." >&2; return 1
-    fi
+# Marcador para identificar procesos de compilacion de este modulo (evita matar
+# procesos ajenos por reuso de PID).
+CAT_PROC_MARK="dnscrypt-manager"
+
+# ¿El lock corresponde a una compilacion REALMENTE viva de este modulo?
+_cat_lock_live() {
+  _p=$(cat "$CAT_COMPILE_LOCK/pid" 2>/dev/null)
+  [ -n "$_p" ] || return 1
+  kill -0 "$_p" 2>/dev/null || return 1
+  if [ -r "/proc/$_p/cmdline" ]; then
+    tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null | grep -q "$CAT_PROC_MARK" && return 0
+    return 1   # PID reutilizado por otro proceso ajeno -> lock huerfano
   fi
-  echo "$$" > "$CAT_COMPILE_LOCK" 2>/dev/null
-  # Espacio libre.
+  return 0      # sin /proc: conservador
+}
+
+# ¿Un PID dado es un proceso de compilacion de este modulo? (para cancelar)
+_cat_pid_is_ours() {
+  _p="$1"; [ -n "$_p" ] || return 1
+  kill -0 "$_p" 2>/dev/null || return 1
+  if [ -r "/proc/$_p/cmdline" ]; then
+    tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null | grep -q "$CAT_PROC_MARK"
+    return $?
+  fi
+  return 0
+}
+
+cat_progress_set() {
+  printf '%s\t%s\t%s\n' "$1" "$(sec_now)" "${2:-}" > "$CAT_COMPILE_PROGRESS" 2>/dev/null
+}
+
+# Aplica nice/ionice AL PROPIO proceso pesado (no a un comando vacio) y corre el
+# pipeline atomico real. Fallback silencioso si nice/ionice no existen.
+cat_compile_heavy() {
+  command -v renice >/dev/null 2>&1 && renice -n 10 -p "$$" >/dev/null 2>&1
+  command -v ionice >/dev/null 2>&1 && ionice -c 3 -p "$$" >/dev/null 2>&1
+  # Hook de prueba CONTROLADO (solo bajo TEST_MODE): valores numericos/booleanos,
+  # nunca ejecucion de comandos arbitrarios. Permite probar cancelacion/timeout/
+  # fallo/exito a traves de la CLI real sin tocar el pipeline de produccion.
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ]; then
+    _ts="${DNSCRYPT_TEST_COMPILE_SLEEP:-}"
+    case "$_ts" in ''|*[!0-9]*) : ;; *) sleep "$_ts" ;; esac
+    [ "${DNSCRYPT_TEST_COMPILE_FAIL:-0}" = "1" ] && return 1
+    : > "$BL_BLOCKED" 2>/dev/null
+    cat_append_active "$BL_BLOCKED" 2>/dev/null
+    sort -u "$BL_BLOCKED" -o "$BL_BLOCKED" 2>/dev/null
+    return 0
+  fi
+  if command -v sec_regen_and_reload >/dev/null 2>&1; then
+    sec_regen_and_reload
+  else
+    return 1
+  fi
+}
+
+# Compilacion completa (accion explicita). NO se ejecuta en boot.
+cat_compile() {
+  _to="${CAT_COMPILE_TIMEOUT:-$CAT_COMPILE_TIMEOUT_DEFAULT}"
+  case "$_to" in ''|*[!0-9]*) _to="$CAT_COMPILE_TIMEOUT_DEFAULT" ;; esac
+
+  # 1) Lock ATOMICO via mkdir. Si existe: distinguir vivo vs huerfano.
+  if ! mkdir "$CAT_COMPILE_LOCK" 2>/dev/null; then
+    if _cat_lock_live; then
+      echo "ERROR: ya hay una compilacion en curso (pid $(cat "$CAT_COMPILE_LOCK/pid" 2>/dev/null))." >&2
+      echo "       Consultá 'catalog compile-status' o cancelá con 'catalog compile-cancel'." >&2
+      return 1
+    fi
+    # Lock huerfano (proceso muerto o PID reutilizado): recuperar.
+    log_msg "catalog compile: lock huerfano recuperado"
+    rm -rf "$CAT_COMPILE_LOCK" 2>/dev/null
+    mkdir "$CAT_COMPILE_LOCK" 2>/dev/null || { echo "ERROR: no se pudo tomar el lock de compilacion." >&2; return 1; }
+  fi
+  echo "$$" > "$CAT_COMPILE_LOCK/pid" 2>/dev/null
+  echo "$(sec_now)" > "$CAT_COMPILE_LOCK/started" 2>/dev/null
+  # Trap: limpiar el lock ante cualquier salida/senal. No borra la ultima lista.
+  trap 'rm -rf "$CAT_COMPILE_LOCK" 2>/dev/null' EXIT INT TERM HUP
+  cat_progress_set running "inicio"
+
+  # 2) Espacio libre.
   _free=$(cat_free_kb)
   if [ -n "$_free" ] && [ "$_free" -lt "$CAT_MIN_FREE_KB" ] 2>/dev/null; then
-    rm -f "$CAT_COMPILE_LOCK"
+    cat_progress_set failed "espacio insuficiente (${_free}KB)"
+    rm -rf "$CAT_COMPILE_LOCK" 2>/dev/null; trap - EXIT INT TERM HUP
     echo "ERROR: espacio libre insuficiente (${_free}KB < ${CAT_MIN_FREE_KB}KB)." >&2; return 1
   fi
+
   _t0=$(sec_now)
   echo "Compilando listas activas (categorias legacy + catalogo)…"
-  # nice/ionice si estan disponibles (fallback seguro: correr normal).
-  if command -v sec_regen_and_reload >/dev/null 2>&1; then
-    if have nice; then nice -n 10 sh -c ':' 2>/dev/null; fi
-    sec_regen_and_reload; _rc=$?
-  else
-    _rc=1
-  fi
+  cat_progress_set merging "fusionando y validando fuentes"
+
+  # 3) Operacion pesada en un HIJO en SU PROPIO grupo de procesos (set -m), para
+  #    poder cancelar/timeoutear TODO el subarbol (no dejar temporales vivos).
+  _had_m=0; case "$-" in *m*) _had_m=1 ;; esac
+  set -m 2>/dev/null
+  ( cat_compile_heavy ) &
+  _child=$!
+  [ "$_had_m" = "0" ] && set +m 2>/dev/null
+  echo "$_child" > "$CAT_COMPILE_LOCK/child" 2>/dev/null
+  # Watchdog de timeout: mata SOLO el grupo del hijo registrado.
+  ( sleep "$_to"; kill -TERM "-$_child" 2>/dev/null || kill -TERM "$_child" 2>/dev/null
+    sleep 3; kill -KILL "-$_child" 2>/dev/null || kill -KILL "$_child" 2>/dev/null ) &
+  _wd=$!
+  wait "$_child" 2>/dev/null; _rc=$?
+  kill "$_wd" 2>/dev/null; wait "$_wd" 2>/dev/null
   _t1=$(sec_now)
-  rm -f "$CAT_COMPILE_LOCK" 2>/dev/null
+
+  # ¿Cancelado/expirado? (rc por senal = 128+n)
+  if [ "$_rc" -ge 128 ] 2>/dev/null; then
+    _dur=$((_t1 - _t0))
+    if [ "$_dur" -ge "$_to" ] 2>/dev/null; then
+      cat_progress_set timeout "excedio ${_to}s"
+      echo "ERROR: compilacion abortada por timeout (${_to}s). Se conserva la ultima lista valida." >&2
+    else
+      cat_progress_set cancelled "cancelada por el usuario"
+      echo "Compilacion cancelada. Se conserva la ultima lista valida." >&2
+    fi
+    rm -rf "$CAT_COMPILE_LOCK" 2>/dev/null; trap - EXIT INT TERM HUP
+    return 1
+  fi
+
+  rm -rf "$CAT_COMPILE_LOCK" 2>/dev/null; trap - EXIT INT TERM HUP
   _cnt=0; [ -f "$BL_BLOCKED" ] && _cnt=$(wc -l < "$BL_BLOCKED" | tr -d ' ')
   if [ "$_rc" = "0" ]; then
+    cat_progress_set done "$_cnt dominios en $((_t1 - _t0))s"
     echo "OK: compilacion terminada. $_cnt dominios activos en $((_t1 - _t0))s."
     log_msg "catalog compile: OK ($_cnt dominios, $((_t1 - _t0))s)"
+    # Estadisticas de aporte unico (best-effort; no altera el catalogo canonico).
+    command -v cat_stats_compute >/dev/null 2>&1 && cat_stats_compute 2>/dev/null
   else
+    cat_progress_set failed "rc=$_rc"
     echo "ERROR: la compilacion fallo (rc=$_rc). Se conserva la ultima lista valida." >&2
   fi
   return "$_rc"
+}
+
+# Estado consultable de la compilacion.
+cat_compile_status() {
+  if [ -d "$CAT_COMPILE_LOCK" ] && _cat_lock_live; then
+    _p=$(cat "$CAT_COMPILE_LOCK/pid" 2>/dev/null)
+    _st=$(cat "$CAT_COMPILE_LOCK/started" 2>/dev/null)
+    _el=$(( $(sec_now) - ${_st:-$(sec_now)} ))
+    echo "estado    : EN CURSO (pid $_p, ${_el}s)"
+  else
+    echo "estado    : inactiva"
+  fi
+  if [ -f "$CAT_COMPILE_PROGRESS" ]; then
+    _pl=$(cat "$CAT_COMPILE_PROGRESS" 2>/dev/null)
+    echo "progreso  : $(printf '%s' "$_pl" | cut -f1) ($(printf '%s' "$_pl" | cut -f3-))"
+    echo "timestamp : $(printf '%s' "$_pl" | cut -f2)"
+  else
+    echo "progreso  : (sin registro)"
+  fi
+}
+
+# Cancelacion explicita: valida y mata SOLO el hijo registrado por el motor.
+cat_compile_cancel() {
+  if [ ! -d "$CAT_COMPILE_LOCK" ]; then echo "No hay compilacion en curso."; return 0; fi
+  _child=$(cat "$CAT_COMPILE_LOCK/child" 2>/dev/null)
+  _drv=$(cat "$CAT_COMPILE_LOCK/pid" 2>/dev/null)
+  _killed=0
+  if _cat_pid_is_ours "$_child"; then
+    kill -TERM "-$_child" 2>/dev/null || kill -TERM "$_child" 2>/dev/null
+    sleep 1
+    kill -KILL "-$_child" 2>/dev/null || kill -KILL "$_child" 2>/dev/null
+    _killed=1
+  fi
+  # El driver liberara el lock via su trap; si el driver ya no existe, limpiar.
+  if [ -n "$_drv" ] && ! kill -0 "$_drv" 2>/dev/null; then rm -rf "$CAT_COMPILE_LOCK" 2>/dev/null; fi
+  cat_progress_set cancelled "cancelada por el usuario"
+  if [ "$_killed" = "1" ]; then echo "OK: compilacion cancelada."; else echo "No se encontro un proceso de compilacion propio para cancelar (lock limpiado si estaba huerfano)."; fi
 }
 
 # ---------------------------------------------------------------------------
@@ -365,13 +587,18 @@ cat_conflicts_report() {
     for _s in $_sup; do
       [ -n "$_s" ] || continue
       if cat_is_enabled "$_s"; then
+        # Evitar el DUAL: si '_s' ya declara estar contenida en '_id', la relacion
+        # se reporta desde el lado contained_by. Emitir una sola advertencia.
+        _sc=$(cat_field "$_s" 15)
+        case ",$_sc," in *",$_id,"*) continue ;; esac
         echo "  [sustitucion] '$_id' hace redundante a '$_s' (activa). Estas fuentes no son incompatibles, pero gran parte de su contenido ya esta incluido."
         _any=1
       fi
     done
     for _o in $_ovl; do
       [ -n "$_o" ] || continue
-      if cat_is_enabled "$_o"; then
+      # Relacion SIMETRICA: reportar una sola vez por par (id < otro).
+      if cat_is_enabled "$_o" && [ "$_id" \< "$_o" ]; then
         echo "  [superposicion] '$_id' y '$_o' se solapan bastante (ambas activas)."
         _any=1
       fi
@@ -382,7 +609,8 @@ cat_conflicts_report() {
         echo "  [conflicto funcional] '$_id' puede chocar con el control de servicio '$_x'. Elegí un comportamiento."
         _any=1 ;;
       *)
-        if cat_is_enabled "$_x"; then
+        # Simetrica: una sola vez por par.
+        if cat_is_enabled "$_x" && [ "$_id" \< "$_x" ]; then
           echo "  [conflicto] '$_id' entra en conflicto con '$_x' (ambas activas)."
           _any=1
         fi ;;
@@ -390,6 +618,37 @@ cat_conflicts_report() {
     done
     IFS=$_oldIFS
   done < "$CAT_ENABLED"
+  # Segunda pasada: estados/formatos de las activas + allowlist que neutraliza.
+  while IFS= read -r _id; do
+    [ -n "$_id" ] || continue
+    cat_is_enabled "$_id" || continue
+    _ups=$(cat_upstream_status "$_id"); _rt=$(cat_runtime_status "$_id")
+    _fmt=$(cat_field "$_id" 7)
+    case "$_ups" in
+      archived) echo "  [archivada] '$_id' esta ACTIVA pero su upstream esta archivado; puede quedar sin actualizaciones."; _any=1 ;;
+      broken)   echo "  [rota] '$_id' esta ACTIVA pero el catalogo la marca como rota; revisá si conviene desactivarla."; _any=1 ;;
+    esac
+    case "$_rt" in
+      download_failed|validation_failed) echo "  [sin datos] '$_id' esta activa pero su ultima descarga fallo ($_rt); se usa la ultima copia valida si existe."; _any=1 ;;
+    esac
+    case "$_fmt" in
+      abp) echo "  [formato parcial] '$_id' es ABP: solo se importan reglas de dominio inequivocas (cobertura DNS parcial)."; _any=1 ;;
+    esac
+  done < "$CAT_ENABLED"
+  # Allowlist que neutraliza dominios bloqueados por controles de servicio activos.
+  if command -v cat_svc_active_blocked >/dev/null 2>&1 && [ -f "$ALLOWLIST_FILE" ]; then
+    _svcb="$RUN_DIR/conf.svcb.$$"; cat_svc_active_blocked 2>/dev/null | sort -u > "$_svcb"
+    if [ -s "$_svcb" ]; then
+      _aln="$RUN_DIR/conf.aln.$$"; sort -u "$ALLOWLIST_FILE" > "$_aln" 2>/dev/null
+      comm -12 "$_svcb" "$_aln" 2>/dev/null | while IFS= read -r _d; do
+        [ -n "$_d" ] || continue
+        echo "  [allowlist neutraliza] '$_d' esta en la allowlist Y bloqueado por un control de servicio; la allowlist gana (el bloqueo no aplica a ese dominio)."
+        _any=1
+      done
+      rm -f "$_aln"
+    fi
+    rm -f "$_svcb"
+  fi
   [ "$_any" = "0" ] && echo "  (sin redundancias ni conflictos conocidos entre las fuentes activas)"
   return 0
 }
@@ -580,15 +839,18 @@ cmd_catalog() {
       echo "conflictos   : $(printf '%s' "$_row" | cut -f17)"
       echo "activa       : $( cat_is_enabled "$_id" && echo si || echo no )"
       echo "descripcion  : $(printf '%s' "$_row" | cut -f19)"
-      _m="$CAT_CACHE_DIR/$_id.meta"
-      if [ -f "$_m" ]; then
-        echo "--- metricas de la ultima descarga ---"
-        echo "  total_source   : $(cat_meta_get "$_id" total_source)"
-        echo "  valid_domains  : $(cat_meta_get "$_id" valid_domains)"
-        echo "  invalid_entries: $(cat_meta_get "$_id" invalid_entries)"
-        echo "  sha256_list    : $(cat_meta_get "$_id" sha256_list)"
-        echo "  cobertura DNS  : $( [ "$(cat_meta_get "$_id" partial_dns)" = 1 ] && echo 'parcial (ABP)' || echo completa )"
-        echo "  actualizada    : $(cat_meta_get "$_id" updated_at)"
+      if [ -n "$(srcst_row "$_id")" ]; then
+        echo "--- ultimo intento (persistente, source-status.tsv) ---"
+        echo "  total_source   : $(srcst_field "$_id" 8)"
+        echo "  valid_domains  : $(srcst_field "$_id" 9)"
+        echo "  invalid_entries: $(srcst_field "$_id" 10)"
+        echo "  http           : $(srcst_field "$_id" 5)"
+        echo "  bytes          : $(srcst_field "$_id" 6)"
+        echo "  sha256_list    : $(srcst_field "$_id" 7)"
+        echo "  cobertura DNS  : $( [ "$(srcst_field "$_id" 11)" = 1 ] && echo 'parcial (ABP)' || echo completa )"
+        echo "  last_attempt   : $(srcst_field "$_id" 3)"
+        echo "  last_success   : $(srcst_field "$_id" 4)"
+        _emsg=$(srcst_field "$_id" 12); [ -n "$_emsg" ] && echo "  error          : $_emsg"
       else
         echo "(aun no descargada: usa 'catalog update $_id')"
       fi
@@ -634,8 +896,12 @@ cmd_catalog() {
       ;;
 
     compile) cat_compile ;;
-    conflicts)
-      if [ -n "$1" ] && [ -n "$2" ]; then cat_overlap_exact "$1" "$2"; else cat_conflicts_report; fi ;;
+    compile-status) cat_compile_status ;;
+    compile-cancel) cat_compile_cancel ;;
+    conflicts) cat_conflicts_report ;;
+    overlap)
+      if [ -n "$1" ] && [ -n "$2" ]; then cat_overlap_exact "$1" "$2"; else echo "Uso: catalog overlap <fuente_a> <fuente_b>" >&2; return 1; fi ;;
+    stats) cat_stats_show "$1" ;;
     metrics)
       _id="$1"; cat_exists "$_id" || { echo "ERROR: id desconocido" >&2; return 1; }
       echo "Metricas de '$_id' (source-status.tsv):"
