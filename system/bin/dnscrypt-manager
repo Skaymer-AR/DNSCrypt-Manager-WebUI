@@ -922,6 +922,9 @@ cmd_logs() {
 
 cmd_panic() {
   echo "!! PANIC: retirando redireccion, deteniendo proxy y restaurando red..."
+  # Cancelar cualquier compilacion en curso (mata SOLO nuestro hijo, libera el
+  # lock). NO borra catalogos, fuentes ni configuracion.
+  command -v cat_compile_cancel >/dev/null 2>&1 && cat_compile_cancel >/dev/null 2>&1
   cmd_redirect remove 2>/dev/null
   cmd_stop 2>/dev/null
   set_flag failclosed 0 2>/dev/null
@@ -1152,6 +1155,9 @@ DNSCrypt Manager - comandos
     catalog info <id> | enable <id> | disable <id>
     catalog update [id|enabled|all] | compile
     catalog conflicts [id1 id2] | metrics <id> | test <id>
+    catalog compile-status | catalog compile-cancel
+    catalog overlap <fuente_a> <fuente_b>   (comparacion exacta, bajo demanda)
+    catalog stats [--compute|--json]        (aporte unico por fuente)
     catalog custom {add <url> [--name N][--category C][--format F]|remove <id>|list|export}
     import-bindhosts <directorio> [--dry-run|--confirmed]
     service {list [--json]|info <id>|set <id> <normal|15m|1h|boot|perm>|conflicts}
