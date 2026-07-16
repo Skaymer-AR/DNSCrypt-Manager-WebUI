@@ -61,10 +61,11 @@ Roadmap: **v0.2.0-RC2 → v0.3.0-RC1 → prueba real ~5 días → v1.0.0**.
 - syntax: **OK** · WebUI: **23/23** · security: **61/61** · CLI: **48/48**
 - catalog: **41/41** (`tests/smoke-test-catalog.sh`)
 - args: **37/37** (`tests/smoke-test-webui-args.cjs`)
-- compile+stats: **19/19** (`tests/smoke-test-compile.sh` — lock/huérfano incl. PID
-  ajeno vivo/cancel/timeout/progreso/**PANIC libera lock**/aporte único)
-- escala **100k: 21/21** (`tests/scale-test-compile.sh` — suite funcional COMPLETA:
-  merge + aporte único + parseo real + mecánica end-to-end del pipeline)
+- compile+stats: **19/19** (`tests/smoke-test-compile.sh` — **portable**: residuos
+  acotados a descendientes del harness vía /proc, sin escaneo global de procesos)
+- escala **100k: 24/24** (`tests/scale-test-compile.sh` — suite funcional COMPLETA;
+  low-space **determinístico** vía override `DNSCRYPT_TEST_FREE_KB` solo en TEST_MODE
+  y numérico; producción usa `df` real. Ambos harnesses independientes del host)
 - escala **500k/1M/2.5M: benchmark MÍNIMO del merge** (solo `cat_append_active`+`sort -u`;
   NO se ejecutaron cancel/timeout/rollback/recarga DNS/lock a esa escala):
   700 002 / 1 400 002 / 3 500 002 dominios; wall 0.50/0.75/2.28 s; maxRSS 52/103/**255** MB
@@ -84,10 +85,11 @@ Roadmap: **v0.2.0-RC2 → v0.3.0-RC1 → prueba real ~5 días → v1.0.0**.
   temporales en DATA_DIR, rollback + última lista preservada, nice/ionice sobre el
   proceso pesado real, **PANIC cancela compilación sin borrar datos**, boot no recompila.
 
-### HEAD actual
-`3df8ef7` — docs(rc2): scale results with honest scope.
-Commits RC2 (13): 032ffd9, b88a4b0, a5e2fe1, a2a21db, 8dc50ad, bf95028, c979829,
-157e99e, d3fa7a6, ff31c64, cb87afa, 904b846, 3df8ef7.
+### HEAD
+Este documento describe el estado hasta el commit anterior al de su propia
+actualización; el HEAD final exacto se entrega fuera del repositorio (bundle/patch
+y en la respuesta de cierre), para no auto-referenciar un hash que cambia al
+commitear este archivo.
 
 ### Pendientes reales de RC2 (orden)
 1. Docs de capacidad restantes: CATALOG_SCHEMA.md, BLOCKLIST_CONFLICTS.md,

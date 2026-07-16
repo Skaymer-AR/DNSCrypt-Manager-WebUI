@@ -109,6 +109,29 @@ bash tests/smoke-test-webui.sh
 
 Parte del desarrollo y la auditoría contó con asistencia de herramientas de IA. La autoría, dirección y responsabilidad del proyecto son de **Skaymer AR**.
 
+## Novedades en v0.2.0-RC2
+
+Catálogo de blocklists por metadatos con motor genérico de fuentes, además de la
+capa de seguridad de RC1. Documentación detallada en `docs/`:
+`CATALOG_SCHEMA.md`, `BLOCKLIST_CONFLICTS.md`, `BINDHOSTS_IMPORT.md`,
+`SERVICE_CONTROLS.md`, `SCALE_RESULTS.md` y `ANDROID_TEST_PLAN_v0.2.0.md`.
+
+Puntos clave:
+- Catálogo canónico (`config/catalog/blocklists.json` + `.index.tsv`) generado en
+  dev/CI; **inmutable en el dispositivo**. El estado local de verificación vive
+  aparte en `catalog/source-status.tsv` (persistente, sobrevive updates).
+- Estados de fuente honestos: `unverified`/`legacy`/`archived`/`broken`; el estado
+  `verified` se otorga **solo** tras una descarga+validación real en el equipo.
+- `dnscrypt-manager catalog {list|enable|disable|update|compile|compile-status|
+  compile-cancel|conflicts|overlap|stats|custom|...}`,
+  `dnscrypt-manager import-bindhosts <dir> [--dry-run|--confirmed]`,
+  `dnscrypt-manager service {list|info|set|conflicts}`.
+- Compilación por lotes a escala con lock/timeout/cancelación/rollback y **PANIC**
+  que cancela la compilación sin borrar datos. No se compila en boot.
+- Predeterminados sin cambios: redirect OFF, fail-closed OFF, transporte directo,
+  controles de servicio OFF, fuentes externas apagadas. Fuentes multimillonarias
+  son opt-in (ver advertencias de memoria en `docs/SCALE_RESULTS.md`).
+
 ## Autor
 
 **Skaymer AR**
