@@ -386,6 +386,14 @@ cat_update_one() {
 # -> cat_append_active). Aca se agrega control operativo.
 # ---------------------------------------------------------------------------
 cat_free_kb() {
+  # Override SOLO para pruebas: valor estrictamente numerico y con TEST_MODE=1.
+  # En produccion se ignora por completo y se usa df real.
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ]; then
+    case "${DNSCRYPT_TEST_FREE_KB:-}" in
+      ''|*[!0-9]*) : ;;
+      *) printf '%s\n' "$DNSCRYPT_TEST_FREE_KB"; return 0 ;;
+    esac
+  fi
   df -k "$DATA_DIR" 2>/dev/null | awk 'NR==2 {print $4; found=1} END{ if(!found) print 0 }'
 }
 

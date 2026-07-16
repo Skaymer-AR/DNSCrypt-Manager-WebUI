@@ -175,9 +175,15 @@ BLSHA_BEFORE=$(sha256sum "$BL" | cut -d' ' -f1)
 DNSCRYPT_TEST_COMPILE_FAIL=1 cli catalog compile > "$TR/fl" 2>&1
 BLSHA_AFTER=$(sha256sum "$BL" | cut -d' ' -f1)
 [ "$BLSHA_BEFORE" = "$BLSHA_AFTER" ] && ok "4.6 fallo de compilacion preserva la ultima lista valida" || bad "4.6 rollback/preservacion"
-# 4.7 poco espacio (forzar via CAT_MIN_FREE_KB gigante)
-CAT_MIN_FREE_KB=999999999 cli catalog compile > "$TR/sp" 2>&1
-grep -qi "espacio libre insuficiente" "$TR/sp" && ok "4.7 poco espacio aborta con mensaje claro" || bad "4.7 poco espacio"
+# 4.7 poco espacio DETERMINISTICO: override numerico solo bajo TEST_MODE.
+BLSHA_SP=$(sha256sum "$BL" 2>/dev/null | cut -d' ' -f1)
+DNSCRYPT_TEST_FREE_KB=1 CAT_MIN_FREE_KB=2 cli catalog compile > "$TR/sp" 2>&1
+grep -qi "espacio libre insuficiente" "$TR/sp" && ok "4.7 poco espacio aborta con mensaje claro" || bad "4.7 poco espacio ($(head -1 $TR/sp))"
+BLSHA_SP2=$(sha256sum "$BL" 2>/dev/null | cut -d' ' -f1)
+[ "$BLSHA_SP" = "$BLSHA_SP2" ] && ok "4.7b no crea lista nueva / conserva la ultima valida" || bad "4.7b lista alterada por poco espacio"
+[ ! -d "$DATA/run/catalog.compile.lock" ] && ok "4.7c lock liberado tras abortar por espacio" || bad "4.7c lock no liberado"
+_sptmp=$(ls "$DATA/run/" 2>/dev/null | grep -cE 'cat\.|stats\.' | tr -d ' ')
+[ "${_sptmp:-0}" = "0" ] && ok "4.7d sin temporales tras abortar por espacio" || bad "4.7d temporales: $_sptmp"
 # 4.8 sin procesos residuales del modulo
 sleep 1
 STRAY=$(ps -eo pid,args 2>/dev/null | grep -F "$TR/mod" | grep -v grep | wc -l | tr -d ' ')

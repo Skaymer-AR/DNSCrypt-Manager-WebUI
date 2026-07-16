@@ -99,7 +99,7 @@ LSHA=$(sha256sum "$DATA/security/active/blocked-names.txt" 2>/dev/null | cut -d'
 DNSCRYPT_TEST_COMPILE_SLEEP=8 CAT_COMPILE_TIMEOUT=2 cli catalog compile > "$TR/c5" 2>&1
 grep -q "timeout" "$TR/c5" && ok "J10 timeout aborta la compilacion" || bad "J10 timeout ($(cat $TR/c5))"
 [ ! -d "$DATA/run/catalog.compile.lock" ] && ok "J11 lock liberado tras timeout" || bad "J11 lock tras timeout"
-sleep 7  # dejar terminar el sleep huerfano del stub antes del chequeo de residuales
+sleep 1  # settle breve; kill_tree ya debe haber matado el stub del timeout
 
 # J12 PANIC cancela compilacion en curso sin borrar catalogos
 DNSCRYPT_TEST_COMPILE_SLEEP=6 cli catalog compile >/dev/null 2>&1 & BGP2=$!
@@ -112,10 +112,34 @@ ENABLED_AFTER=$(wc -l < "$DATA/catalog/enabled.txt" 2>/dev/null | tr -d ' ')
 [ "$ENABLED_BEFORE" = "$ENABLED_AFTER" ] && [ -f "$DATA/catalog/blocklists.index.tsv" ] && ok "J14 PANIC no borra catalogo/fuentes/config" || bad "J14 PANIC borro datos"
 cli enable >/dev/null 2>&1  # revertir el disable del panic
 
-# residuales
-sleep 1
-STRAY=$(ps -eo pid,args 2>/dev/null | grep -E "sleep (6|8)" | grep -v grep | awk '{print $1}')
-[ -z "$STRAY" ] && ok "J15 sin sleeps residuales del stub" || { bad "J15 residuales: $STRAY"; for p in $STRAY; do kill -9 "$p" 2>/dev/null; done; }
+# residuales: SOLO procesos descendientes de este harness (no del host).
+# descendants: walk /proc por PPID desde un PID raiz.
+descendants() {
+  _root="$1"; _pending="$_root"; _acc=""
+  while [ -n "$_pending" ]; do
+    _next=""
+    for _p in $_pending; do
+      for _st in /proc/[0-9]*/stat; do
+        [ -r "$_st" ] || continue
+        set -- $(sed 's/([^)]*)/X/' "$_st" 2>/dev/null)
+        if [ "${4:-}" = "$_p" ]; then _acc="$_acc $1"; _next="$_next $1"; fi
+      done
+    done
+    _pending="$_next"
+  done
+  echo $_acc
+}
+sleep 1  # dar tiempo a que kill_tree/trap propaguen tras cancel/timeout/PANIC
+STRAY=""
+for _p in $(descendants $$); do
+  [ "$_p" = "$WD" ] && continue                 # el watchdog del harness no cuenta
+  _cl=$(tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null)
+  case "$_cl" in
+    *"catalog compile"*) STRAY="$STRAY $_p" ;;   # driver de compilacion vivo
+    "sleep 6 "*|"sleep 8 "*|*" sleep 6"|*" sleep 8") STRAY="$STRAY $_p" ;;  # sleep del stub
+  esac
+done
+[ -z "$STRAY" ] && ok "J15 sin procesos de compilacion residuales (solo descendientes del harness)" || { bad "J15 residuales: $STRAY"; for p in $STRAY; do kill -9 "$p" 2>/dev/null; done; }
 
 echo ""
 echo "Resumen compile+stats: $PASS OK, $FAILN FAIL"
