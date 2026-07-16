@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.2.0-RC2
+
+Catálogo de blocklists por metadatos y motor genérico de fuentes, sobre la capa de
+seguridad de RC1. Creada por **Skaymer AR**. Predeterminados sin cambios: redirect
+OFF, fail-closed OFF, transporte directo, controles de servicio OFF, fuentes
+externas apagadas, sin descargas en boot.
+
+- **Catálogo por metadatos**: `blocklists.json` canónico + `blocklists.index.tsv`
+  (awk en Android; Python solo en dev/CI, generación reproducible con `--check`).
+  70 fuentes, 10 familias. Estados upstream honestos:
+  `unverified`/`legacy`/`archived`/`broken` — el generador **no** afirma `verified`.
+- **Estado runtime separado e inmutabilidad**: `source-status.tsv` en DATA_DIR
+  guarda el resultado local (`verified` tras descarga+validación, `download_failed`,
+  `validation_failed`, …) sin tocar el catálogo generado; sobrevive a updates del
+  módulo; un fallo posterior no destruye la última lista válida.
+- **Motor genérico de fuentes**: activar/desactivar, fuentes personalizadas,
+  descarga+validación, formatos hosts/domains/**ABP parcial**, compilación por lotes
+  (sort/uniq/comm, sin loops por dominio).
+- **Pipeline de compilación**: lock atómico, PID validado por `/proc`, lock huérfano
+  recuperable, `compile-status`/`compile-cancel`, timeout real, progreso, temporales
+  en DATA_DIR, reemplazo atómico + rollback, `nice`/`ionice` sobre el proceso pesado,
+  **PANIC cancela la compilación** sin borrar datos. Nunca compila en boot.
+- **Redundancias/conflictos** por metadatos (supersedes/contained_by/overlaps/
+  conflicto/archivada/rota/ABP/allowlist-neutraliza), una advertencia canónica por
+  relación; comparación exacta bajo demanda (`catalog overlap A B`); sin O(N²).
+- **Aporte único** por fuente (total/dups internos/ya presentes/único/% redundante)
+  en orden canónico, efectivo tras allowlist; guardado aparte del catálogo.
+- **Importación BindHosts** (`--dry-run`/`--confirmed`) con detección de duplicados,
+  archivadas, rotas, URLs a normalizar, sospechosos y posibles inyecciones.
+- **Control de servicio YouTube** (experimental, mejor esfuerzo) con modos temporales
+  y estado propio; conflicto con allowlist reportado sin tocar datos del usuario.
+- **WebUI RC2**: catálogo con búsqueda/paginación, fuentes personalizadas, BindHosts
+  en dos pasos y controles de servicio; argumentos validados y comillados (sin eval).
+- **adult_advertising** separado de `adult_content`; mensaje literal si no hay fuente
+  dedicada verificable.
+
 ## v0.2.0
 
 Capa de protección de navegación sobre v0.1.0. Creada por **Skaymer AR**.
