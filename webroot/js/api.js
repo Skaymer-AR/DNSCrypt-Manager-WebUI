@@ -268,6 +268,11 @@ const DCM = (() => {
 
   // Ejecuta una cadena de comando ya validada/fija (uso interno de este modulo).
   function runRaw(cmd) {
+    return runRawT(cmd, 30000);
+  }
+
+  // Variante con timeout configurable (compilaciones grandes tardan mas).
+  function runRawT(cmd, ms) {
     return new Promise((resolve) => {
       if (!available()) {
         resolve({ errno: -1, stdout: '', stderr: 'API ksu no disponible en este entorno.' });
@@ -285,8 +290,8 @@ const DCM = (() => {
         if (done) return;
         done = true;
         try { delete window[cb]; } catch (_) { window[cb] = undefined; }
-        resolve({ errno: -1, stdout: '', stderr: 'Tiempo de espera agotado (30 s).' });
-      }, 30000);
+        resolve({ errno: -1, stdout: '', stderr: 'Tiempo de espera agotado.' });
+      }, ms);
       try {
         window.ksu.exec(cmd, JSON.stringify({}), cb);
       } catch (e) {
@@ -297,6 +302,90 @@ const DCM = (() => {
         }
       }
     });
+  }
+
+  /* -----------------------------------------------------------------------
+   * CATALOGO / SERVICIOS / BINDHOSTS (v0.2.0-RC2)
+   * Cada funcion mapea a UN subcomando fijo (allowlist). app.js NUNCA pasa una
+   * linea de shell; solo pasa valores concretos (id, url, ruta, modo) que se
+   * validan aca contra listas blancas y se interpolan SIEMPRE entre comillas
+   * simples (shQuote). Sin eval, sin sh -c armado con datos, sin source. La CLI
+   * revalida todo. ksu.exec corre via shell, por eso el comillado es obligatorio.
+   * --------------------------------------------------------------------- */
+  // SOURCE_ID / SERVICE_CONTROL_ID: empieza alfanumerico, luego [a-z0-9._-], <=64.
+  const SOURCE_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+  const SVC_MODES = Object.freeze(['normal', '15m', '1h', 'boot', 'perm']);
+  // URL: solo https://, sin comillas ni metacaracteres de shell peligrosos
+  // ($ ( ) ; backtick ' " < > | espacio * ! ,). Se permiten los de query (& ? = %).
+  const URL_RE = /^https:\/\/[A-Za-z0-9._~:/?#@+=%&-]{3,509}$/;
+  // Ruta de importacion: absoluta, sin '..', sin comillas, longitud acotada.
+  const PATH_RE = /^\/[A-Za-z0-9._/-]{0,511}$/;
+
+  // Comillado shell seguro: envuelve en comillas simples. Los valores ya se
+  // validaron para EXCLUIR la comilla simple, de modo que esto es inyectable-safe.
+  function shQuote(s) {
+    const v = String(s == null ? '' : s);
+    if (v.indexOf("'") >= 0 || /[\u0000-\u001f]/.test(v)) return null; // no debería pasar
+    return "'" + v + "'";
+  }
+  function argErr(msg) { return Promise.resolve({ errno: -1, stdout: '', stderr: msg }); }
+  function validId(id) { return SOURCE_ID_RE.test(String(id == null ? '' : id)); }
+
+  function runCatalogListJson() { return runRawT(CLI + ' catalog list --json', 45000); }
+  function runServiceListJson() { return runRaw(CLI + ' service list --json'); }
+  function runCatalogInfo(id) {
+    if (!validId(id)) return argErr('Identificador de fuente invalido.');
+    return runRaw(CLI + ' catalog info ' + shQuote(id));
+  }
+  function runCatalogEnable(id) {
+    if (!validId(id)) return argErr('Identificador de fuente invalido.');
+    return runRawT(CLI + ' catalog enable ' + shQuote(id), 180000);
+  }
+  function runCatalogDisable(id) {
+    if (!validId(id)) return argErr('Identificador de fuente invalido.');
+    return runRawT(CLI + ' catalog disable ' + shQuote(id), 180000);
+  }
+  function runCatalogUpdate() { return runRawT(CLI + ' catalog update enabled', 300000); }
+  function runCatalogCompile() { return runRawT(CLI + ' catalog compile', 300000); }
+  function runCatalogConflicts() { return runRaw(CLI + ' catalog conflicts'); }
+
+  function runServiceSet(id, mode) {
+    if (!validId(id)) return argErr('Identificador de control invalido.');
+    if (SVC_MODES.indexOf(mode) < 0) return argErr('Modo invalido.');
+    return runRawT(CLI + ' service set ' + shQuote(id) + ' ' + shQuote(mode), 180000);
+  }
+
+  function runCustomAdd(url, name, category) {
+    const u = String(url == null ? '' : url).trim();
+    if (!URL_RE.test(u)) return argErr('URL invalida. Debe ser https:// y sin caracteres peligrosos.');
+    const qu = shQuote(u);
+    if (!qu) return argErr('URL invalida.');
+    let cmd = CLI + ' catalog custom add ' + qu;
+    const n = String(name == null ? '' : name).replace(/[^A-Za-z0-9 ._-]+/g, ' ').trim().slice(0, 60);
+    if (n) cmd += ' --name ' + shQuote(n.replace(/\s+/g, '_'));
+    const c = String(category == null ? '' : category).replace(/[^a-z_,]+/g, '');
+    if (c) cmd += ' --category ' + shQuote(c);
+    return runRawT(cmd, 60000);
+  }
+  function runCustomRemove(id) {
+    if (!validId(id)) return argErr('Identificador de fuente invalido.');
+    return runRawT(CLI + ' catalog custom remove ' + shQuote(id), 120000);
+  }
+
+  function checkPath(dir) {
+    const d = String(dir == null ? '' : dir).trim();
+    if (!PATH_RE.test(d) || d.indexOf('..') >= 0 || d.charAt(0) === '-') return null;
+    return shQuote(d);
+  }
+  function runBindhostsAnalyze(dir) {
+    const qd = checkPath(dir);
+    if (!qd) return argErr('Ruta invalida. Debe ser absoluta y sin caracteres peligrosos.');
+    return runRawT(CLI + ' import-bindhosts ' + qd + ' --dry-run', 60000);
+  }
+  function runBindhostsImport(dir) {
+    const qd = checkPath(dir);
+    if (!qd) return argErr('Ruta invalida. Debe ser absoluta y sin caracteres peligrosos.');
+    return runRawT(CLI + ' import-bindhosts ' + qd + ' --confirmed', 300000);
   }
 
   return {
@@ -312,11 +401,25 @@ const DCM = (() => {
     runAllowlistSearch,
     runTempAllowAdd,
     runTempAllowRemove,
+    runCatalogListJson,
+    runCatalogInfo,
+    runCatalogEnable,
+    runCatalogDisable,
+    runCatalogUpdate,
+    runCatalogCompile,
+    runCatalogConflicts,
+    runServiceListJson,
+    runServiceSet,
+    runCustomAdd,
+    runCustomRemove,
+    runBindhostsAnalyze,
+    runBindhostsImport,
     available,
     toast,
     COMMANDS,
     CATEGORIES,
     DURATIONS,
+    SVC_MODES,
     NEXTDNS_ID_RE,
     DOMAIN_RE
   };

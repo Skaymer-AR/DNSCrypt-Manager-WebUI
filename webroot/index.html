@@ -273,6 +273,80 @@
     </p>
   </section>
 
+  <!-- ========================= CATALOGO DE LISTAS (RC2) ======================= -->
+  <section class="card">
+    <h2>Catalogo de listas</h2>
+    <p class="hint" style="margin-top:0;">
+      Motor por metadatos. Activar una fuente la descarga, valida y recompila.
+      Estado: <code>verified</code> (descargada y validada en este equipo),
+      <code>unverified</code> (URL oficial, aun no descargada), <code>legacy</code>,
+      <code>archived</code>, <code>broken</code>.
+    </p>
+    <div class="field">
+      <label for="catSearch">Buscar (nombre, id, categoria)</label>
+      <input type="text" id="catSearch" placeholder="ej: hagezi, malware, ads" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="btn-row" style="margin-bottom:8px;">
+      <button id="btnCatRecommended" class="small">Recomendadas</button>
+      <button id="btnCatEnabled" class="small">Activas</button>
+      <button id="btnCatAll" class="small">Todas</button>
+    </div>
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button id="btnCatUpdate" class="primary">Actualizar activas</button>
+      <button id="btnCatCompile">Compilar</button>
+      <button id="btnCatConflicts" class="small">Conflictos</button>
+    </div>
+    <div id="catResults" class="hint">Escribi una busqueda o toca “Recomendadas”.</div>
+    <div id="catPager" class="btn-row" style="margin-top:8px;"></div>
+    <div id="catConflicts" class="hint" style="margin-top:8px;"></div>
+  </section>
+
+  <!-- ====================== FUENTES PERSONALIZADAS (RC2) ====================== -->
+  <section class="card">
+    <h2>Fuentes personalizadas</h2>
+    <div class="field">
+      <label for="customUrl">URL (https://)</label>
+      <input type="text" id="customUrl" placeholder="https://ejemplo.net/lista.txt" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="err" id="customError"></div>
+    </div>
+    <div class="field">
+      <label for="customName">Nombre (opcional)</label>
+      <input type="text" id="customName" placeholder="Mi lista" maxlength="60" autocapitalize="off" spellcheck="false">
+    </div>
+    <button id="btnCustomAdd" class="wide primary" style="margin-bottom:12px;">Agregar fuente</button>
+    <div id="customList" class="hint">—</div>
+  </section>
+
+  <!-- ========================= IMPORTAR BINDHOSTS (RC2) ======================= -->
+  <section class="card">
+    <h2>Importar BindHosts</h2>
+    <p class="hint" style="margin-top:0;">
+      Analiza <code>sources.txt</code>, <code>blacklist.txt</code>,
+      <code>whitelist.txt</code> y <code>custom.txt</code> de un directorio.
+      El analisis no modifica nada.
+    </p>
+    <div class="field">
+      <label for="bhDir">Directorio (ruta absoluta)</label>
+      <input type="text" id="bhDir" placeholder="/data/adb/bindhosts" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="err" id="bhError"></div>
+    </div>
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button id="btnBhAnalyze" class="primary">Analizar (dry-run)</button>
+      <button id="btnBhImport" class="danger">Importar</button>
+    </div>
+    <div id="bhResults" class="hint" style="white-space:pre-wrap;">—</div>
+  </section>
+
+  <!-- ======================= CONTROLES DE SERVICIO (RC2) ====================== -->
+  <section class="card">
+    <h2>Controles de servicio</h2>
+    <p class="hint" style="margin-top:0;">
+      Controles experimentales de mejor esfuerzo. No garantizan privacidad
+      perfecta y pueden afectar funciones del servicio.
+    </p>
+    <div id="svcList" class="hint">Cargando…</div>
+  </section>
+
   <!-- ============================== DIAGNOSTICO ================================ -->
   <details class="card">
     <summary>Diagnostico — Private DNS de Android</summary>
