@@ -30,6 +30,7 @@ CAT_ENABLED="$CAT_DIR/enabled.txt"
 CAT_CUSTOM="$CAT_DIR/custom.tsv"
 CAT_CACHE_DIR="$CAT_DIR/cache"
 CAT_BLACKLIST="$CAT_DIR/blacklist.txt"
+SRCST="$CAT_DIR/source-status.tsv"   # estado runtime persistente (separado del catalogo)
 CAT_COMPILE_LOCK="$RUN_DIR/catalog.compile.lock"
 CAT_MIN_FREE_KB=51200          # ~50 MB libres minimos para compilar
 CAT_MAX_SOURCE_BYTES=104857600 # 100 MB por fuente descargada
@@ -43,7 +44,8 @@ cat_init_dirs() {
   [ -f "$CAT_ENABLED" ] || : > "$CAT_ENABLED"
   [ -f "$CAT_CUSTOM" ] || : > "$CAT_CUSTOM"
   [ -f "$CAT_BLACKLIST" ] || : > "$CAT_BLACKLIST"
-  chmod 0600 "$CAT_ENABLED" "$CAT_CUSTOM" "$CAT_BLACKLIST" 2>/dev/null
+  [ -f "$SRCST" ] || : > "$SRCST"
+  chmod 0600 "$CAT_ENABLED" "$CAT_CUSTOM" "$CAT_BLACKLIST" "$SRCST" 2>/dev/null
   return 0
 }
 cat_init_dirs
@@ -82,10 +84,8 @@ cat_exists() { [ -n "$(cat_row "$1")" ]; }
 
 # Estado efectivo: si el dispositivo ya descargo+valido la fuente, "verified";
 # si no, el estado declarado en el catalogo (unverified/legacy/archived/broken).
-cat_effective_status() {
-  _st=$(cat_meta_get "$1" status)
-  if [ "$_st" = "verified" ]; then echo verified; else cat_field "$1" 10; fi
-}
+cat_upstream_status() { cat_field "$1" 10; }
+cat_runtime_status() { srcst_status "$1"; }
 
 # Lista todos los ids (custom primero, luego catalogo), sin duplicar.
 cat_all_ids() {
@@ -193,15 +193,40 @@ cat_abp_extract() {
 # ---------------------------------------------------------------------------
 # Descarga + normalizacion de UNA fuente -> cache/<id>.list + .meta con metricas
 # ---------------------------------------------------------------------------
-cat_meta_set() {
-  # $1 id ; luego pares clave valor
-  _mid="$1"; shift
-  _mf="$CAT_CACHE_DIR/$_mid.meta"; _mt="$_mf.tmp.$$"
-  : > "$_mt"
-  while [ $# -ge 2 ]; do printf '%s=%s\n' "$1" "$2" >> "$_mt"; shift 2; done
-  mv -f "$_mt" "$_mf"; chmod 0600 "$_mf" 2>/dev/null
+# Estado RUNTIME persistente y SEPARADO del catalogo (que es inmutable).
+# Archivo: $CAT_DIR/source-status.tsv  (nunca se toca el JSON/TSV generado).
+# Columnas 1-indexadas:
+#  1 source_id 2 runtime_status 3 last_attempt 4 last_success 5 http_status
+#  6 bytes 7 sha256 8 total_source 9 valid 10 invalid 11 partial_dns
+#  12 error 13 effective_url
+# runtime_status: never_checked|verified|download_failed|validation_failed|stale|rollback_active
+srcst_init() { [ -f "$SRCST" ] || : > "$SRCST"; chmod 0600 "$SRCST" 2>/dev/null; }
+srcst_row() { awk -F'\t' -v id="$1" '$1==id {print; exit}' "$SRCST" 2>/dev/null; }
+srcst_field() { srcst_row "$1" | awk -F'\t' -v n="$2" '{print $n}'; }
+srcst_status() { _s=$(srcst_field "$1" 2); [ -n "$_s" ] && echo "$_s" || echo never_checked; }
+srcst_last_success() { _s=$(srcst_field "$1" 4); [ -n "$_s" ] && echo "$_s" || echo 0; }
+# Sanitiza un valor para el TSV (sin tabs ni saltos).
+srcst_clean() { printf '%s' "$1" | tr '\t\n\r' '   ' | cut -c1-200; }
+# Escribe/actualiza la fila de una fuente (upsert). Argumentos posicionales:
+#  id status http bytes sha total valid invalid partial error url success(0/1)
+srcst_write() {
+  srcst_init
+  _sid="$1"; _st="$2"; _http="$3"; _by="$4"; _sha="$5"; _tot="$6"; _val="$7"
+  _inv="$8"; _par="$9"; _err="$(srcst_clean "${10}")"; _url="$(srcst_clean "${11}")"; _ok="${12}"
+  _now=$(sec_now)
+  _prevok=$(srcst_last_success "$_sid")
+  if [ "$_ok" = "1" ]; then _ls="$_now"; else _ls="$_prevok"; fi
+  _t="$SRCST.tmp.$$"
+  awk -F'\t' -v id="$_sid" '$1 != id' "$SRCST" 2>/dev/null > "$_t"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$_sid" "$_st" "$_now" "$_ls" "$_http" "$_by" "$_sha" "$_tot" "$_val" "$_inv" "$_par" "$_err" "$_url" >> "$_t"
+  mv -f "$_t" "$SRCST"; chmod 0600 "$SRCST" 2>/dev/null
 }
-cat_meta_get() { grep "^$2=" "$CAT_CACHE_DIR/$1.meta" 2>/dev/null | tail -n1 | cut -d= -f2-; }
+srcst_clear() {
+  srcst_init; _t="$SRCST.tmp.$$"
+  awk -F'\t' -v id="$1" '$1 != id' "$SRCST" 2>/dev/null > "$_t"
+  mv -f "$_t" "$SRCST"; chmod 0600 "$SRCST" 2>/dev/null
+}
 
 cat_update_one() {
   _id="$1"
@@ -209,19 +234,26 @@ cat_update_one() {
   _url=$(cat_field "$_id" 8)
   _fmt=$(cat_field "$_id" 7)
   case "$_url" in https://*|file://*) : ;; *) echo "ERROR ($_id): url invalida" >&2; return 1 ;; esac
+  _http="-"; case "$_url" in file://*) _http="local" ;; esac
 
   _raw="$RUN_DIR/cat.$_id.raw.$$"
   _norm="$RUN_DIR/cat.$_id.norm.$$"
-  # 1-2) descarga (reusa sec_download: file:// solo en TEST_MODE) + HTTP
+  # 1-2) descarga (reusa sec_download: file:// solo en TEST_MODE) + HTTP.
+  # NO se toca cache/<id>.list salvo exito: una descarga fallida conserva la
+  # ultima fuente valida.
   if ! sec_download "$_url" "$_raw"; then
+    srcst_write "$_id" download_failed "$_http" 0 "" 0 0 0 0 "descarga fallida" "$_url" 0
     echo "ERROR ($_id): descarga fallida" >&2; rm -f "$_raw"; return 1
   fi
   # 3) tamano
   _sz=$(wc -c < "$_raw" 2>/dev/null | tr -d ' ')
-  [ "$_sz" -ge "$CAT_MIN_SOURCE_BYTES" ] 2>/dev/null && [ "$_sz" -le "$CAT_MAX_SOURCE_BYTES" ] 2>/dev/null || {
-    echo "ERROR ($_id): tamano fuera de rango ($_sz bytes)" >&2; rm -f "$_raw"; return 1; }
+  if ! { [ "$_sz" -ge "$CAT_MIN_SOURCE_BYTES" ] 2>/dev/null && [ "$_sz" -le "$CAT_MAX_SOURCE_BYTES" ] 2>/dev/null; }; then
+    srcst_write "$_id" validation_failed "$_http" "$_sz" "" 0 0 0 0 "tamano fuera de rango" "$_url" 0
+    echo "ERROR ($_id): tamano fuera de rango ($_sz bytes)" >&2; rm -f "$_raw"; return 1
+  fi
   # 4) tipo (texto)
   if command -v sec_is_binary >/dev/null 2>&1 && sec_is_binary "$_raw"; then
+    srcst_write "$_id" validation_failed "$_http" "$_sz" "" 0 0 0 0 "contenido binario" "$_url" 0
     echo "ERROR ($_id): contenido binario" >&2; rm -f "$_raw"; return 1
   fi
   _sha=$(sec_sha256 "$_raw")
@@ -235,18 +267,23 @@ cat_update_one() {
   else
     _valid=$(sec_parse_domains "$_raw" "$_fmt" "$_norm")
   fi
-  case "$_valid" in ''|*[!0-9]*) echo "ERROR ($_id): parseo fallo" >&2; rm -f "$_raw" "$_norm"; return 1 ;; esac
-  [ "$_valid" -ge 1 ] || { echo "ERROR ($_id): 0 dominios validos" >&2; rm -f "$_raw" "$_norm"; return 1; }
+  case "$_valid" in
+    ''|*[!0-9]*)
+      srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" 0 0 "$_partial" "parseo fallo" "$_url" 0
+      echo "ERROR ($_id): parseo fallo" >&2; rm -f "$_raw" "$_norm"; return 1 ;;
+  esac
+  if [ "$_valid" -lt 1 ]; then
+    srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" 0 "$_total" "$_partial" "0 dominios validos" "$_url" 0
+    echo "ERROR ($_id): 0 dominios validos" >&2; rm -f "$_raw" "$_norm"; return 1
+  fi
   _invalid=$(( _total - _valid )); [ "$_invalid" -lt 0 ] && _invalid=0
   _shalist=$(sec_sha256 "$_norm")
-  # 10) guardar fuente normalizada (atomico)
-  mv -f "$_norm" "$CAT_CACHE_DIR/$_id.list" || { echo "ERROR ($_id): mv fallo" >&2; rm -f "$_raw"; return 1; }
+  # 10) guardar fuente normalizada (atomico) — solo aca se reemplaza la .list
+  mv -f "$_norm" "$CAT_CACHE_DIR/$_id.list" || {
+    srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" "$_valid" "$_invalid" "$_partial" "mv fallo" "$_url" 0
+    echo "ERROR ($_id): mv fallo" >&2; rm -f "$_raw"; return 1; }
   chmod 0600 "$CAT_CACHE_DIR/$_id.list" 2>/dev/null
-  cat_meta_set "$_id" \
-    id "$_id" format "$_fmt" partial_dns "$_partial" status verified \
-    total_source "$_total" valid_domains "$_valid" invalid_entries "$_invalid" \
-    sha256_raw "$_sha" sha256_list "$_shalist" bytes_raw "$_sz" \
-    updated_at "$(date '+%Y-%m-%d %H:%M:%S')" updated_epoch "$(sec_now)"
+  srcst_write "$_id" verified "$_http" "$_sz" "$_shalist" "$_total" "$_valid" "$_invalid" "$_partial" "" "$_url" 1
   rm -f "$_raw" 2>/dev/null
   if [ "$_partial" = "1" ]; then
     echo "OK ($_id): $_valid dominios (formato ABP: cobertura DNS parcial)."
@@ -412,7 +449,7 @@ cat_custom_remove() {
   awk -F'\t' -v id="$_id" '$1 != id' "$CAT_CUSTOM" > "$_t"
   mv -f "$_t" "$CAT_CUSTOM"; chmod 0600 "$CAT_CUSTOM" 2>/dev/null
   cat_disable "$_id"
-  rm -f "$CAT_CACHE_DIR/$_id.list" "$CAT_CACHE_DIR/$_id.meta" 2>/dev/null
+  rm -f "$CAT_CACHE_DIR/$_id.list" 2>/dev/null; command -v srcst_clear >/dev/null 2>&1 && srcst_clear "$_id"
   echo "OK: fuente '$_id' eliminada."
   log_msg "catalog custom remove $_id"
 }
@@ -474,7 +511,7 @@ cmd_catalog() {
         _name=$(printf '%s' "$_row" | cut -f3); _maint=$(printf '%s' "$_row" | cut -f4)
         _cats=$(printf '%s' "$_row" | cut -f5); _agg=$(printf '%s' "$_row" | cut -f6)
         _fmt=$(printf '%s' "$_row" | cut -f7); _lic=$(printf '%s' "$_row" | cut -f9)
-        _ups=$(cat_effective_status "$_id"); _rec=$(printf '%s' "$_row" | cut -f11)
+        _ups=$(cat_upstream_status "$_id"); _rt=$(cat_runtime_status "$_id"); _rec=$(printf '%s' "$_row" | cut -f11)
         _mob=$(printf '%s' "$_row" | cut -f12); _arch=$(printf '%s' "$_row" | cut -f13)
         _desc=$(printf '%s' "$_row" | cut -f19)
         # filtros
@@ -485,20 +522,20 @@ cmd_catalog() {
         [ -n "$_filter_maint" ] && { printf '%s' "$_maint" | grep -qiF "$_filter_maint" || return 0; }
         [ -n "$_search" ] && { printf '%s' "$_id $_name $_desc $_cats" | tr 'A-Z' 'a-z' | grep -qF "$_search" || return 0; }
         _en=no; cat_is_enabled "$_id" && _en=si
-        _dom=$(cat_meta_get "$_id" valid_domains); [ -n "$_dom" ] || _dom="-"
+        _dom=$(srcst_field "$_id" 9); [ -n "$_dom" ] || _dom="-"
         if [ "$_json" = "1" ]; then
           _enb=false; cat_is_enabled "$_id" && _enb=true
           _recb=false; [ "$_rec" = "1" ] && _recb=true
           _arb=false; [ "$_arch" = "1" ] && _arb=true
           [ "$CAT_JSON_FIRST" = "0" ] && printf ','
           CAT_JSON_FIRST=0
-          printf '{"id":"%s","name":"%s","maintainer":"%s","categories":"%s","aggressiveness":"%s","format":"%s","license":"%s","upstream_status":"%s","mobile_suitability":"%s","recommended":%s,"archived":%s,"enabled":%s,"valid_domains":"%s"}' \
+          printf '{"id":"%s","name":"%s","maintainer":"%s","categories":"%s","aggressiveness":"%s","format":"%s","license":"%s","upstream_status":"%s","runtime_status":"%s","mobile_suitability":"%s","recommended":%s,"archived":%s,"enabled":%s,"valid_domains":"%s"}' \
             "$(cat_json_escape "$_id")" "$(cat_json_escape "$_name")" "$(cat_json_escape "$_maint")" \
             "$(cat_json_escape "$_cats")" "$_agg" "$_fmt" "$(cat_json_escape "$_lic")" "$_ups" "$_mob" \
             "$_recb" "$_arb" "$_enb" "$_dom"
         else
-          printf '  [%s] %-34s %-12s %-9s dom=%-8s %s%s\n' \
-            "$_en" "$_id" "$_maint" "$_agg" "$_dom" \
+          printf '  [%s] %-34s %-12s %-9s %s/%s dom=%-8s %s%s\n' \
+            "$_en" "$_id" "$_maint" "$_agg" "$_ups" "$_rt" "$_dom" \
             "$( [ "$_rec" = 1 ] && echo '(recomendada) ' )" \
             "$( [ "$_arch" = 1 ] && echo '(ARCHIVADA) ' )"
         fi
@@ -512,6 +549,10 @@ cmd_catalog() {
         echo "Catalogo de listas (marca [si/no] = activa):"
         cat_all_ids | while IFS= read -r _id; do _print_one "$_id"; done
         echo "Total: $(cat_all_ids | wc -l | tr -d ' ') fuentes. Activas: $(grep -c . "$CAT_ENABLED" 2>/dev/null)."
+      fi
+      # adult_advertising: no existe una fuente dedicada verificable.
+      if [ "$_filter_cat" = "adult_advertising" ]; then
+        echo "No se encontro una fuente mantenida y verificable dedicada exclusivamente a publicidad para adultos. La cobertura actual proviene de listas generales de anuncios, pop-ups y malvertising."
       fi
       ;;
 
@@ -528,7 +569,8 @@ cmd_catalog() {
       echo "formato      : $(printf '%s' "$_row" | cut -f7)"
       echo "url          : $(printf '%s' "$_row" | cut -f8)"
       echo "licencia     : $(printf '%s' "$_row" | cut -f9)"
-      echo "estado       : $(cat_effective_status "$_id")"
+      echo "estado up.   : $(cat_upstream_status "$_id") (declarado por el catalogo)"
+      echo "estado local : $(cat_runtime_status "$_id") (resultado en este equipo)"
       echo "movil        : $(printf '%s' "$_row" | cut -f12)"
       echo "recomendada  : $( [ "$(printf '%s' "$_row" | cut -f11)" = 1 ] && echo si || echo no )"
       echo "archivada    : $( [ "$(printf '%s' "$_row" | cut -f13)" = 1 ] && echo si || echo no )"
@@ -596,10 +638,15 @@ cmd_catalog() {
       if [ -n "$1" ] && [ -n "$2" ]; then cat_overlap_exact "$1" "$2"; else cat_conflicts_report; fi ;;
     metrics)
       _id="$1"; cat_exists "$_id" || { echo "ERROR: id desconocido" >&2; return 1; }
-      echo "Metricas de '$_id':"
-      for _k in total_source valid_domains invalid_entries sha256_list partial_dns updated_at; do
-        echo "  $_k = $(cat_meta_get "$_id" "$_k")"
-      done ;;
+      echo "Metricas de '$_id' (source-status.tsv):"
+      echo "  runtime_status  = $(srcst_status "$_id")"
+      echo "  total_source    = $(srcst_field "$_id" 8)"
+      echo "  valid_domains   = $(srcst_field "$_id" 9)"
+      echo "  invalid_entries = $(srcst_field "$_id" 10)"
+      echo "  sha256_list     = $(srcst_field "$_id" 7)"
+      echo "  partial_dns     = $(srcst_field "$_id" 11)"
+      echo "  last_attempt    = $(srcst_field "$_id" 3)"
+      echo "  last_success    = $(srcst_field "$_id" 4)" ;;
     test) cat_test_source "$1" ;;
 
     custom)

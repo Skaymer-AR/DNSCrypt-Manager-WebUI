@@ -945,6 +945,273 @@ async function initSecurity() {
 }
 
 /* ------------------------------------------------------------------------ */
+/* ======================================================================== *
+ *  RC2 — Catalogo, fuentes personalizadas, BindHosts, controles de servicio.
+ *  Paginacion del lado cliente (no se renderizan miles de tarjetas de una).
+ * ======================================================================== */
+let catCache = [];        // entradas del catalogo (cacheadas del JSON)
+let catView = 'recommended';
+let catPage = 0;
+const CAT_PAGE_SIZE = 15;
+
+async function catLoad() {
+  const r = await DCM.runCatalogListJson();
+  if (r.errno !== 0) { setText('catResults', backendError(r, 'catalog list')); return false; }
+  const d = safeParse(r.stdout);
+  if (!d || !d.entries) { setText('catResults', 'Respuesta no valida del catalogo.'); return false; }
+  catCache = d.entries;
+  return true;
+}
+
+function catFiltered() {
+  const q = (($('catSearch') || {}).value || '').trim().toLowerCase();
+  return catCache.filter((e) => {
+    if (catView === 'recommended' && !e.recommended) return false;
+    if (catView === 'enabled' && !e.enabled) return false;
+    if (q) {
+      const hay = (e.id + ' ' + e.name + ' ' + e.maintainer + ' ' + e.categories).toLowerCase();
+      if (hay.indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+}
+
+function catRender() {
+  const box = $('catResults');
+  if (!box) return;
+  const list = catFiltered();
+  const pages = Math.max(1, Math.ceil(list.length / CAT_PAGE_SIZE));
+  if (catPage >= pages) catPage = pages - 1;
+  const slice = list.slice(catPage * CAT_PAGE_SIZE, catPage * CAT_PAGE_SIZE + CAT_PAGE_SIZE);
+  box.textContent = '';
+  if (!slice.length) { box.textContent = '(sin coincidencias)'; }
+  slice.forEach((e) => {
+    const row = document.createElement('div');
+    row.className = 'event-row';
+    const head = document.createElement('div');
+    head.textContent = (e.enabled ? '● ' : '○ ') + e.name + '  [' + e.upstream_status + '/' + (e.runtime_status || 'never_checked') + ']';
+    const meta = document.createElement('div');
+    meta.className = 'tl-sub';
+    meta.textContent = e.maintainer + ' · ' + e.categories + ' · ' + e.aggressiveness +
+      ' · movil:' + e.mobile_suitability + (e.valid_domains && e.valid_domains !== '-' ? ' · ' + e.valid_domains + ' dom' : '') +
+      (e.recommended ? ' · recomendada' : '') + (e.archived ? ' · ARCHIVADA' : '');
+    const acts = document.createElement('div');
+    acts.className = 'event-actions';
+    const tog = document.createElement('button');
+    tog.textContent = e.enabled ? 'Desactivar' : 'Activar';
+    if (!e.enabled) tog.className = 'primary';
+    tog.addEventListener('click', async () => {
+      if (busy) return;
+      setBusy(true);
+      setText('catResults', e.enabled ? 'Desactivando y recompilando…' : 'Activando, descargando y compilando…');
+      try {
+        const rr = e.enabled ? await DCM.runCatalogDisable(e.id) : await DCM.runCatalogEnable(e.id);
+        toast(rr.errno === 0 ? (e.name + (e.enabled ? ' desactivada' : ' activada')) : backendError(rr, 'catalog'), rr.errno === 0 ? 'ok' : 'error');
+        if (await catLoad()) catRender();
+      } finally { setBusy(false); }
+    });
+    acts.appendChild(tog);
+    row.appendChild(head); row.appendChild(meta); row.appendChild(acts);
+    box.appendChild(row);
+  });
+  const pager = $('catPager');
+  if (pager) {
+    pager.textContent = '';
+    if (pages > 1) {
+      const prev = document.createElement('button'); prev.textContent = '‹'; prev.className = 'small';
+      prev.disabled = catPage === 0;
+      prev.addEventListener('click', () => { if (catPage > 0) { catPage--; catRender(); } });
+      const lbl = document.createElement('span'); lbl.className = 'hint';
+      lbl.textContent = ' ' + (catPage + 1) + '/' + pages + ' (' + list.length + ') ';
+      const next = document.createElement('button'); next.textContent = '›'; next.className = 'small';
+      next.disabled = catPage >= pages - 1;
+      next.addEventListener('click', () => { if (catPage < pages - 1) { catPage++; catRender(); } });
+      pager.appendChild(prev); pager.appendChild(lbl); pager.appendChild(next);
+    }
+  }
+}
+
+async function catRefreshAndRender() {
+  setText('catResults', 'Cargando catalogo…');
+  if (await catLoad()) { catPage = 0; catRender(); }
+}
+
+function wireCatalog() {
+  const s = $('catSearch');
+  if (s) s.addEventListener('input', () => { catPage = 0; if (catCache.length) catRender(); else catRefreshAndRender(); });
+  const rec = $('btnCatRecommended');
+  if (rec) rec.addEventListener('click', () => { catView = 'recommended'; catPage = 0; if (catCache.length) catRender(); else catRefreshAndRender(); });
+  const en = $('btnCatEnabled');
+  if (en) en.addEventListener('click', () => { catView = 'enabled'; catPage = 0; if (catCache.length) catRender(); else catRefreshAndRender(); });
+  const all = $('btnCatAll');
+  if (all) all.addEventListener('click', () => { catView = 'all'; catPage = 0; if (catCache.length) catRender(); else catRefreshAndRender(); });
+  const up = $('btnCatUpdate');
+  if (up) up.addEventListener('click', async () => {
+    if (busy) return; setBusy(true);
+    setText('catResults', 'Actualizando fuentes activas (puede tardar)…');
+    try {
+      const r = await DCM.runCatalogUpdate();
+      toast(r.errno === 0 ? 'Fuentes actualizadas.' : backendError(r, 'update'), r.errno === 0 ? 'ok' : 'error');
+      if (await catLoad()) catRender();
+    } finally { setBusy(false); }
+  });
+  const cp = $('btnCatCompile');
+  if (cp) cp.addEventListener('click', async () => {
+    if (busy) return; setBusy(true);
+    setText('catResults', 'Compilando…');
+    try {
+      const r = await DCM.runCatalogCompile();
+      toast(r.errno === 0 ? 'Compilado.' : backendError(r, 'compile'), r.errno === 0 ? 'ok' : 'error');
+      if (await catLoad()) catRender();
+    } finally { setBusy(false); }
+  });
+  const cf = $('btnCatConflicts');
+  if (cf) cf.addEventListener('click', async () => {
+    if (busy) return; setBusy(true);
+    try {
+      const r = await DCM.runCatalogConflicts();
+      setText('catConflicts', (r.stdout || r.stderr || '').trim());
+    } finally { setBusy(false); }
+  });
+}
+
+async function customRender() {
+  const box = $('customList');
+  if (!box) return;
+  if (!catCache.length) { await catLoad(); }
+  const customs = catCache.filter((e) => e.id.indexOf('custom_') === 0);
+  box.textContent = '';
+  if (!customs.length) { box.textContent = '(sin fuentes personalizadas)'; return; }
+  customs.forEach((e) => {
+    const row = document.createElement('div');
+    row.className = 'event-row';
+    const t = document.createElement('div');
+    t.textContent = (e.enabled ? '● ' : '○ ') + e.name + ' [' + e.id + ']';
+    const acts = document.createElement('div');
+    acts.className = 'event-actions';
+    const tog = document.createElement('button');
+    tog.textContent = e.enabled ? 'Desactivar' : 'Activar';
+    tog.addEventListener('click', async () => {
+      if (busy) return; setBusy(true);
+      try {
+        const rr = e.enabled ? await DCM.runCatalogDisable(e.id) : await DCM.runCatalogEnable(e.id);
+        toast(rr.errno === 0 ? 'Listo.' : backendError(rr, 'catalog'), rr.errno === 0 ? 'ok' : 'error');
+        if (await catLoad()) { customRender(); catRender(); }
+      } finally { setBusy(false); }
+    });
+    const del = document.createElement('button');
+    del.textContent = 'Eliminar'; del.className = 'small danger';
+    del.addEventListener('click', async () => {
+      if (busy) return; setBusy(true);
+      try {
+        const rr = await DCM.runCustomRemove(e.id);
+        toast(rr.errno === 0 ? 'Eliminada.' : backendError(rr, 'remove'), rr.errno === 0 ? 'ok' : 'error');
+        if (await catLoad()) { customRender(); catRender(); }
+      } finally { setBusy(false); }
+    });
+    acts.appendChild(tog); acts.appendChild(del);
+    row.appendChild(t); row.appendChild(acts);
+    box.appendChild(row);
+  });
+}
+function wireCustom() {
+  const add = $('btnCustomAdd');
+  if (add) add.addEventListener('click', async () => {
+    if (busy) return;
+    const url = (($('customUrl') || {}).value || '').trim();
+    const name = (($('customName') || {}).value || '').trim();
+    if (!/^https:\/\//i.test(url)) { setText('customError', 'La URL debe empezar con https://'); return; }
+    setText('customError', '');
+    setBusy(true);
+    try {
+      const r = await DCM.runCustomAdd(url, name, '');
+      toast(r.errno === 0 ? 'Fuente agregada (no activada).' : backendError(r, 'custom add'), r.errno === 0 ? 'ok' : 'error');
+      if (r.errno === 0) { const u = $('customUrl'); if (u) u.value = ''; const n = $('customName'); if (n) n.value = ''; }
+      if (await catLoad()) { customRender(); catRender(); }
+    } finally { setBusy(false); }
+  });
+}
+
+function wireBindhosts() {
+  const an = $('btnBhAnalyze');
+  if (an) an.addEventListener('click', async () => {
+    if (busy) return;
+    const dir = (($('bhDir') || {}).value || '').trim();
+    if (!/^\//.test(dir)) { setText('bhError', 'Ingresa una ruta absoluta (empieza con /).'); return; }
+    setText('bhError', '');
+    setBusy(true);
+    setText('bhResults', 'Analizando…');
+    try {
+      const r = await DCM.runBindhostsAnalyze(dir);
+      setText('bhResults', (r.stdout || r.stderr || '').trim());
+    } finally { setBusy(false); }
+  });
+  const im = $('btnBhImport');
+  if (im) im.addEventListener('click', async () => {
+    if (busy) return;
+    const dir = (($('bhDir') || {}).value || '').trim();
+    if (!/^\//.test(dir)) { setText('bhError', 'Ingresa una ruta absoluta.'); return; }
+    if (!confirm('Importar desde ' + dir + '? Se agregaran dominios a blacklist/allowlist y se activaran fuentes reconocidas.')) return;
+    setText('bhError', '');
+    setBusy(true);
+    setText('bhResults', 'Importando…');
+    try {
+      const r = await DCM.runBindhostsImport(dir);
+      setText('bhResults', (r.stdout || r.stderr || '').trim());
+      toast(r.errno === 0 ? 'Importado.' : backendError(r, 'import'), r.errno === 0 ? 'ok' : 'error');
+      if (await catLoad()) catRender();
+    } finally { setBusy(false); }
+  });
+}
+
+async function svcRender() {
+  const box = $('svcList');
+  if (!box) return;
+  const r = await DCM.runServiceListJson();
+  if (r.errno !== 0) { setText('svcList', backendError(r, 'service list')); return; }
+  const d = safeParse(r.stdout);
+  if (!d || !d.controls) { setText('svcList', 'Sin controles.'); return; }
+  box.textContent = '';
+  if (!d.controls.length) { box.textContent = '(sin controles disponibles)'; return; }
+  d.controls.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'event-row';
+    const head = document.createElement('div');
+    head.textContent = c.name + ' — modo: ' + c.mode + ' [' + c.confidence + ']';
+    const sel = document.createElement('select');
+    DCM.SVC_MODES.forEach((m) => {
+      const o = document.createElement('option'); o.value = m;
+      o.textContent = m === 'normal' ? 'Normal' : (m === 'boot' ? 'Hasta reiniciar' : (m === 'perm' ? 'Siempre' : m));
+      if (m === c.mode) o.selected = true;
+      sel.appendChild(o);
+    });
+    const acts = document.createElement('div');
+    acts.className = 'event-actions';
+    const apply = document.createElement('button');
+    apply.textContent = 'Aplicar'; apply.className = 'primary';
+    apply.addEventListener('click', async () => {
+      if (busy) return; setBusy(true);
+      try {
+        const rr = await DCM.runServiceSet(c.id, sel.value);
+        setText('svcList', (rr.stdout || rr.stderr || '').trim());
+        toast(rr.errno === 0 ? 'Aplicado.' : backendError(rr, 'service set'), rr.errno === 0 ? 'ok' : 'error');
+        await svcRender();
+      } finally { setBusy(false); }
+    });
+    acts.appendChild(sel); acts.appendChild(apply);
+    row.appendChild(head); row.appendChild(acts);
+    box.appendChild(row);
+  });
+}
+
+async function initCatalogRC2() {
+  wireCatalog();
+  wireCustom();
+  wireBindhosts();
+  await svcRender();
+  await customRender();
+}
+
 function init() {
   if (!DCM.available()) {
     const b = $('ksuBanner');
@@ -960,6 +1227,7 @@ function init() {
   wireLogs();
   wirePanic();
   initSecurity();
+  initCatalogRC2();
   startPolling();
 }
 
