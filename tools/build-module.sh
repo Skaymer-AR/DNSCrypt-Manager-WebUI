@@ -67,6 +67,7 @@ META-INF/com/google/android/updater-script
 system/bin/dnscrypt-manager
 scripts/common.sh
 scripts/security.sh
+scripts/catalog.sh
 scripts/start.sh
 scripts/stop.sh
 webroot/index.html
@@ -76,6 +77,10 @@ webroot/js/validation.js
 webroot/css/style.css
 config/dnscrypt-proxy.toml
 config/defaults/dnscrypt-proxy.toml
+config/catalog/blocklists.index.tsv
+config/catalog/blocklists.json
+config/catalog/service-controls.index.tsv
+config/catalog/service-controls.json
 README.md
 BINARY_INFO.md
 "
@@ -118,8 +123,14 @@ else
   bash "$ROOT/tests/smoke-test-security.sh" || fail "tests/smoke-test-security.sh fallo. No hay release con tests rotos."
   echo "  --- tests/smoke-test-webui.sh ---"
   bash "$ROOT/tests/smoke-test-webui.sh" || fail "tests/smoke-test-webui.sh fallo. No hay release con tests rotos."
+  echo "  --- python3 tools/build-catalog.py --check (catalogo reproducible) ---"
+  python3 "$ROOT/tools/build-catalog.py" --check || fail "El catalogo generado no es reproducible (build-catalog.py --check)."
+  echo "  --- tests/smoke-test-catalog.sh ---"
+  bash "$ROOT/tests/smoke-test-catalog.sh" || fail "tests/smoke-test-catalog.sh fallo. No hay release con tests rotos."
+  echo "  --- tests/smoke-test-webui-args.cjs ---"
+  node "$ROOT/tests/smoke-test-webui-args.cjs" || fail "tests/smoke-test-webui-args.cjs fallo (seguridad de argumentos)."
 fi
-echo "  OK: las 4 suites pasaron"
+echo "  OK: suites RC2 pasaron"
 
 ##############################################################################
 step "6) Ningun fixture debe colarse en el instalable"
