@@ -416,6 +416,30 @@ _cat_pid_is_ours() {
   return 0
 }
 
+# Mata un PID y TODOS sus descendientes recorriendo /proc por PPID (portable,
+# sin pkill/killall/patrones amplios). Solo toca el subarbol del PID indicado.
+_cat_kill_tree() {
+  _root="$1"; _sig="${2:-TERM}"
+  [ -n "$_root" ] || return 0
+  # recolectar descendientes (BFS) antes de matar, para no perder la cadena
+  _pending="$_root"; _all=""
+  while [ -n "$_pending" ]; do
+    _next=""
+    for _p in $_pending; do
+      _all="$_all $_p"
+      for _st in /proc/[0-9]*/stat; do
+        [ -r "$_st" ] || continue
+        # campo 4 = PPID (tras "pid (comm) state"); comm puede tener espacios/())
+        set -- $(sed 's/([^)]*)/X/' "$_st" 2>/dev/null)
+        _cpid="$1"; _cppid="$4"
+        [ "$_cppid" = "$_p" ] && _next="$_next $_cpid"
+      done
+    done
+    _pending="$_next"
+  done
+  for _p in $_all; do kill -"$_sig" "$_p" 2>/dev/null; done
+}
+
 cat_progress_set() {
   printf '%s\t%s\t%s\n' "$1" "$(sec_now)" "${2:-}" > "$CAT_COMPILE_PROGRESS" 2>/dev/null
 }
@@ -487,9 +511,11 @@ cat_compile() {
   _child=$!
   [ "$_had_m" = "0" ] && set +m 2>/dev/null
   echo "$_child" > "$CAT_COMPILE_LOCK/child" 2>/dev/null
-  # Watchdog de timeout: mata SOLO el grupo del hijo registrado.
-  ( sleep "$_to"; kill -TERM "-$_child" 2>/dev/null || kill -TERM "$_child" 2>/dev/null
-    sleep 3; kill -KILL "-$_child" 2>/dev/null || kill -KILL "$_child" 2>/dev/null ) &
+  # Watchdog de timeout: mata el grupo del hijo registrado Y su subarbol.
+  ( sleep "$_to"
+    kill -TERM "-$_child" 2>/dev/null; _cat_kill_tree "$_child" TERM
+    sleep 3
+    kill -KILL "-$_child" 2>/dev/null; _cat_kill_tree "$_child" KILL ) &
   _wd=$!
   wait "$_child" 2>/dev/null; _rc=$?
   kill "$_wd" 2>/dev/null; wait "$_wd" 2>/dev/null
@@ -550,9 +576,9 @@ cat_compile_cancel() {
   _drv=$(cat "$CAT_COMPILE_LOCK/pid" 2>/dev/null)
   _killed=0
   if _cat_pid_is_ours "$_child"; then
-    kill -TERM "-$_child" 2>/dev/null || kill -TERM "$_child" 2>/dev/null
+    kill -TERM "-$_child" 2>/dev/null; _cat_kill_tree "$_child" TERM
     sleep 1
-    kill -KILL "-$_child" 2>/dev/null || kill -KILL "$_child" 2>/dev/null
+    kill -KILL "-$_child" 2>/dev/null; _cat_kill_tree "$_child" KILL
     _killed=1
   fi
   # El driver liberara el lock via su trap; si el driver ya no existe, limpiar.
