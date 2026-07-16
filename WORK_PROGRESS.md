@@ -57,29 +57,49 @@ Roadmap: **v0.2.0-RC2 → v0.3.0-RC1 → prueba real ~5 días → v1.0.0**.
   sin eval, sin sh -c con datos, sin source de archivos del usuario.
 - **adult_advertising**: mensaje literal cuando no hay fuente dedicada verificable.
 
-### Tests RC2 (ejecutados en este checkpoint)
+### Tests RC2 (ejecutados)
 - syntax: **OK** · WebUI: **23/23** · security: **61/61** · CLI: **48/48**
 - catalog: **41/41** (`tests/smoke-test-catalog.sh`)
 - args: **37/37** (`tests/smoke-test-webui-args.cjs`)
-- **Total: 210/210, 0 fallos.** Sin regresiones de RC1.
-- Gate del build (`build-module.sh`) ahora corre `build-catalog.py --check` +
-  las dos suites nuevas; `REQUIRED_FILES` incluye `catalog.sh` + `config/catalog/*`.
+- compile+stats: **19/19** (`tests/smoke-test-compile.sh` — lock/huérfano incl. PID
+  ajeno vivo/cancel/timeout/progreso/**PANIC libera lock**/aporte único)
+- escala **100k: 21/21** (`tests/scale-test-compile.sh` — suite funcional COMPLETA:
+  merge + aporte único + parseo real + mecánica end-to-end del pipeline)
+- escala **500k/1M/2.5M: benchmark MÍNIMO del merge** (solo `cat_append_active`+`sort -u`;
+  NO se ejecutaron cancel/timeout/rollback/recarga DNS/lock a esa escala):
+  700 002 / 1 400 002 / 3 500 002 dominios; wall 0.50/0.75/2.28 s; maxRSS 52/103/**255** MB
+  (Linux; **advertencia para Android**: catálogos multimillonarios deben ser opt-in).
+- **Suite completa base: 210/210, 0 fallos.** Sin regresiones de RC1.
+
+### Conflictos/redundancias, aporte único y pipeline (verificado en código)
+- Conflictos distingue supersedes/contained_by/overlaps_with/conflicto funcional +
+  **archivada/rota/formato-parcial-ABP/allowlist-neutraliza**, una sola advertencia
+  canónica por relación; `catalog overlap A B` exacto bajo demanda; sin O(N²).
+- Aporte único por fuente en orden canónico (recomendadas→id), lotes comm/sort,
+  resumen efectivo tras allowlist; guardado en `contribution-stats.tsv` (runtime,
+  separado del catálogo). Documentado: depende del orden → se fija orden canónico.
+- Pipeline: lock atómico (mkdir), PID validado por `/proc/cmdline`, huérfano
+  recuperable (PID muerto **y** ajeno vivo), trap EXIT/INT/TERM/HUP, `_cat_kill_tree`
+  portable (sin pkill/killall), `compile-status`/`compile-cancel`, timeout real,
+  temporales en DATA_DIR, rollback + última lista preservada, nice/ionice sobre el
+  proceso pesado real, **PANIC cancela compilación sin borrar datos**, boot no recompila.
 
 ### HEAD actual
-`c979829` — test(rc2): cover catalog, webui argument safety, and wire into build gate.
-Commits RC2 (7): 032ffd9, b88a4b0, a5e2fe1, a2a21db, 8dc50ad, bf95028, c979829.
+`3df8ef7` — docs(rc2): scale results with honest scope.
+Commits RC2 (13): 032ffd9, b88a4b0, a5e2fe1, a2a21db, 8dc50ad, bf95028, c979829,
+157e99e, d3fa7a6, ff31c64, cb87afa, 904b846, 3df8ef7.
 
-### Pendientes reales de RC2 (orden acordado)
-1. Conflictos y redundancias (pulido). 2. Estadísticas de aporte único.
-3. Pipeline de compilación a escala + cancelación/lock/timeout/rollback.
-4. Tests de 100k/500k/1M/2.5M (fixtures generados en test-time, una sola vez).
-5. Documentación final (CATALOG.md, BINDHOSTS_IMPORT.md, SERVICE_CONTROLS.md).
-6. `module.prop` → v0.2.0-RC2 / versionCode=202. 7. Build RC2. 8. Auditoría del
-   ZIP. 9. SHA-256 final.
+### Pendientes reales de RC2 (orden)
+1. Docs de capacidad restantes: CATALOG_SCHEMA.md, BLOCKLIST_CONFLICTS.md,
+   BINDHOSTS_IMPORT.md, SERVICE_CONTROLS.md, ANDROID_TEST_PLAN_v0.2.0.md;
+   actualizar README/CHANGELOG/AUDIT_REPORT. 2. `module.prop` → v0.2.0-RC2 /
+   versionCode=202 (mantener author=Skaymer AR). 3. Suite completa una sola vez.
+   4. Build limpio + `unzip -t` + auditoría de contenido + verificación binario
+   ARM64 + SHA-256 final. **Sin** reemplazar RC1.
 
 ### Próximo paso exacto
-Continuar con (1) conflictos/redundancias y (2) estadísticas de aporte único;
-luego el pipeline de escala y las pruebas 100k–2.5M; recién después empaquetar.
+Escribir las docs de capacidad restantes; luego cambiar module.prop a RC2, correr
+la suite completa una vez, build, auditoría del ZIP y checksum.
 
 ### Pendientes documentados para v0.3.0-RC1 (fuera de RC2)
 Anonymized DNSCrypt, ODoH, captive portal, extensión de detección de bypass,
