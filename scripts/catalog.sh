@@ -33,11 +33,11 @@ CAT_BLACKLIST="$CAT_DIR/blacklist.txt"
 SRCST="$CAT_DIR/source-status.tsv"   # estado runtime persistente (separado del catalogo)
 CAT_COMPILE_LOCK="$RUN_DIR/catalog.compile.lock"        # lock DIR (mkdir atomico)
 CAT_COMPILE_PROGRESS="$RUN_DIR/catalog.compile.progress" # estado consultable
-CAT_COMPILE_TIMEOUT_DEFAULT=900                          # 15 min tope seguro
+: "${CAT_COMPILE_TIMEOUT_DEFAULT:=900}"                    # 15 min tope seguro (override por env)
 CAT_STATS="$CAT_DIR/contribution-stats.tsv"             # aporte unico (runtime, separado)
-CAT_MIN_FREE_KB=51200          # ~50 MB libres minimos para compilar
-CAT_MAX_SOURCE_BYTES=104857600 # 100 MB por fuente descargada
-CAT_MIN_SOURCE_BYTES=32
+: "${CAT_MIN_FREE_KB:=51200}"   # ~50 MB libres minimos para compilar (override por env)
+: "${CAT_MAX_SOURCE_BYTES:=104857600}" # 100 MB por fuente descargada (override por env)
+: "${CAT_MIN_SOURCE_BYTES:=32}"
 
 cat_lib_loaded() { return 0; }
 
