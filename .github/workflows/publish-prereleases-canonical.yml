@@ -1,0 +1,213 @@
+name: Publish canonical DNSCrypt Manager prereleases
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-prereleases-canonical.yml'
+      - 'import-assets/exact-rc22-*.b64'
+      - 'import-assets/exact-v03-*.b64'
+      - 'import-assets/RELEASE_NOTES_*.md'
+      - 'import-assets/AUDIT_RC2.2.md'
+      - 'import-assets/TEST_RESULTS_RC2.2.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: publish-canonical-dnscrypt-prereleases
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout publication branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare exact verified inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Skaymer AR'
+          git config user.email 'skaymer@users.noreply.github.com'
+          git fetch origin probe/wip3-existing main --tags
+
+          test "$(git rev-parse origin/probe/wip3-existing)" = "34df8e428bb76880d1887f01ffc5ec97956a030d"
+          git show origin/probe/wip3-existing:module.prop | grep -qx 'version=v0.2.0-RC2'
+          git show origin/probe/wip3-existing:module.prop | grep -qx 'versionCode=202'
+
+          cat import-assets/exact-rc22-*.b64 | base64 --decode | gzip -dc > /tmp/rc22.patch
+          cat import-assets/exact-v03-*.b64 | base64 --decode | gzip -dc > /tmp/v03.patch
+
+          echo '70e9b4a8fcbc7992575219f01c1b9ee9beae548161603ba7ce9b4eccbca4bb86  /tmp/rc22.patch' | sha256sum -c -
+          echo 'a6fb245395ebb4d93e4d46bfb26879b95def90a77b0751330affe9f03e0c869a  /tmp/v03.patch' | sha256sum -c -
+          test "$(grep -c '^From [0-9a-f]\{40\} ' /tmp/rc22.patch)" -eq 3
+          test "$(grep -c '^From [0-9a-f]\{40\} ' /tmp/v03.patch)" -eq 4
+
+          cp import-assets/RELEASE_NOTES_RC22.md /tmp/RELEASE_NOTES_RC22.md
+          cp import-assets/RELEASE_NOTES_V03.md /tmp/RELEASE_NOTES_V03.md
+          cp import-assets/AUDIT_RC2.2.md /tmp/AUDIT_RC2.2.md
+          cp import-assets/TEST_RESULTS_RC2.2.md /tmp/TEST_RESULTS_RC2.2.md
+          mkdir -p "$RUNNER_TEMP/releases"
+
+      - name: Reconstruct, test and build v0.2.0-RC2.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B pre-release/v0.2.0-rc2.2 origin/probe/wip3-existing
+          git am -3 /tmp/rc22.patch
+
+          grep -qx 'id=dnscrypt_manager' module.prop
+          grep -qx 'version=v0.2.0-RC2.2' module.prop
+          grep -qx 'versionCode=204' module.prop
+          grep -qx 'author=Skaymer AR' module.prop
+
+          mkdir -p docs
+          cp /tmp/RELEASE_NOTES_RC22.md docs/PRE_RELEASE_STATUS.md
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          warning = (
+              '> [!WARNING]\n'
+              '> **Versión preliminar en pruebas.** La RC2 original está descartada. '
+              'BindHosts debe estar desactivado y el dispositivo reiniciado antes de habilitar '
+              'DNSCrypt Manager, porque usarlos simultáneamente puede provocar pérdida de red o '
+              'bootloop. En KernelSU Next puede ser necesario activar Hybrid Mount y reiniciar. '
+              'La primera versión estable será v1.0.0.\n\n'
+          )
+          text = p.read_text(encoding='utf-8')
+          if 'La RC2 original está descartada' not in text:
+              p.write_text(warning + text, encoding='utf-8')
+          PY
+          git add README.md docs/PRE_RELEASE_STATUS.md
+          git commit -m 'docs(rc2.2): add preliminary, BindHosts and Hybrid Mount warnings'
+
+          bash tests/run-syntax-checks.sh
+          bash tests/smoke-test-cli.sh
+          bash tests/smoke-test-catalog.sh
+          bash tests/smoke-test-environment-v030.sh
+
+          DCM_SKIP_TESTS=1 \
+            DCM_OUTPUT="$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" \
+            bash tools/build-module.sh
+
+          unzip -t "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip"
+          unzip -p "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" module.prop | grep -qx 'version=v0.2.0-RC2.2'
+          unzip -p "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" module.prop | grep -qx 'versionCode=204'
+          sha256sum "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" \
+            > "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256"
+          cp /tmp/rc22.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch"
+          cp /tmp/AUDIT_RC2.2.md "$RUNNER_TEMP/releases/AUDIT_RC2.2.md"
+          cp /tmp/TEST_RESULTS_RC2.2.md "$RUNNER_TEMP/releases/TEST_RESULTS_RC2.2.md"
+          git push --force origin HEAD:refs/heads/pre-release/v0.2.0-rc2.2
+
+      - name: Reconstruct, test and build v0.3.0-RC1-WIP-A
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B feature/v0.3.0-rc1 pre-release/v0.2.0-rc2.2
+          git am -3 /tmp/v03.patch
+
+          sed -i 's/^version=.*/version=v0.3.0-RC1-WIP-A/' module.prop
+          sed -i 's/^versionCode=.*/versionCode=300/' module.prop
+          sed -i 's/^description=.*/description=PREVIEW en pruebas: SPA e i18n sobre RC2.2. BindHosts debe estar desactivado; estable desde v1.0.0. KernelSU Next puede requerir Hybrid Mount./' module.prop
+          mkdir -p docs
+          cp /tmp/RELEASE_NOTES_V03.md docs/PRE_RELEASE_STATUS.md
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          warning = (
+              '> [!CAUTION]\n'
+              '> **v0.3.0-RC1-WIP-A es una vista previa de desarrollo.** BindHosts debe estar '
+              'desactivado y el dispositivo reiniciado antes de habilitar DNSCrypt Manager; '
+              'usarlos juntos puede provocar pérdida de conectividad o bootloop. KernelSU Next '
+              'puede requerir Hybrid Mount y reinicio. El proyecto sigue en pruebas hasta v1.0.0.\n\n'
+          )
+          text = p.read_text(encoding='utf-8')
+          if 'vista previa de desarrollo' not in text:
+              p.write_text(warning + text, encoding='utf-8')
+          PY
+          git add module.prop README.md docs/PRE_RELEASE_STATUS.md
+          git commit -m 'chore(v0.3): mark Checkpoint A as development preview'
+
+          bash tests/run-syntax-checks.sh
+          bash tests/smoke-test-webui.sh
+          bash tests/smoke-test-i18n.sh
+          node tests/smoke-test-webui-v030.cjs
+
+          DCM_SKIP_TESTS=1 \
+            DCM_OUTPUT="$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" \
+            bash tools/build-module.sh
+
+          unzip -t "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip"
+          unzip -p "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" module.prop | grep -qx 'version=v0.3.0-RC1-WIP-A'
+          unzip -p "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" module.prop | grep -qx 'versionCode=300'
+          sha256sum "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" \
+            > "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256"
+          cp /tmp/v03.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch"
+          cp WORK_PROGRESS_v0.3.md "$RUNNER_TEMP/releases/WORK_PROGRESS_v0.3.md"
+          git push --force origin HEAD:refs/heads/feature/v0.3.0-rc1
+
+      - name: Create and verify both prereleases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git tag -f v0.2.0-rc2.2 pre-release/v0.2.0-rc2.2
+          git tag -f v0.3.0-rc1-wip-a feature/v0.3.0-rc1
+          git push --force origin refs/tags/v0.2.0-rc2.2 refs/tags/v0.3.0-rc1-wip-a
+
+          gh release delete v0.2.0-rc2.2 --yes >/dev/null 2>&1 || true
+          gh release create v0.2.0-rc2.2 \
+            --title 'DNSCrypt Manager v0.2.0-RC2.2 (Preliminary)' \
+            --notes-file /tmp/RELEASE_NOTES_RC22.md \
+            --prerelease \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256" \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch" \
+            "$RUNNER_TEMP/releases/AUDIT_RC2.2.md" \
+            "$RUNNER_TEMP/releases/TEST_RESULTS_RC2.2.md"
+
+          gh release delete v0.3.0-rc1-wip-a --yes >/dev/null 2>&1 || true
+          gh release create v0.3.0-rc1-wip-a \
+            --title 'DNSCrypt Manager v0.3.0-RC1-WIP-A (Preview)' \
+            --notes-file /tmp/RELEASE_NOTES_V03.md \
+            --prerelease \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256" \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch" \
+            "$RUNNER_TEMP/releases/WORK_PROGRESS_v0.3.md"
+
+          gh release view v0.2.0-rc2.2 --json url,isPrerelease,assets > /tmp/verify-rc22.json
+          gh release view v0.3.0-rc1-wip-a --json url,isPrerelease,assets > /tmp/verify-v03.json
+          python3 - <<'PY'
+          import json
+          checks = [
+              ('/tmp/verify-rc22.json', 'DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip'),
+              ('/tmp/verify-v03.json', 'DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip'),
+          ]
+          for path, required in checks:
+              data = json.load(open(path, encoding='utf-8'))
+              assert data['isPrerelease'] is True
+              assets = {a['name'] for a in data['assets']}
+              assert required in assets, (required, assets)
+              print(data['url'])
+          PY
+
+      - name: Upload CI artifact backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-prerelease-assets
+          path: ${{ runner.temp }}/releases
+          if-no-files-found: warn
