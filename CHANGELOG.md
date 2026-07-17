@@ -1,33 +1,11 @@
 # Changelog
 
-## v0.2.0
+## Estado actual de pruebas
 
-Capa de protección de navegación sobre v0.1.0. Creada por **Skaymer AR**.
+- La serie `v0.2.x` continúa en testeo; la primera versión estable prevista es `v1.0.0`.
+- El ZIP original `v0.2.0-RC2` queda **descartado/roto** y no debe instalarse: la WebUI podía no encontrar la CLI en KernelSU Next.
+- `v0.2.0-RC2.1` es un hotfix de prueba para la resolución de la CLI desde la WebUI.
+- Desde RC2/hotfixes posteriores, BindHosts debe estar desactivado y el dispositivo reiniciado antes de instalar o habilitar DNSCrypt Manager. Ejecutarlos simultáneamente puede provocar superposición de reglas DNS, pérdida de conectividad y riesgo de bootloop.
+- En KernelSU Next puede ser necesario habilitar Hybrid Mount y reiniciar para que la WebUI acceda al módulo.
 
-- Blocklists por categoría (malware, phishing, estafas, rastreadores, publicidad, criptominería). Malware/phishing/estafas activas por defecto tras validarse; el resto desactivadas para no romper apps/páginas.
-- Actualización verificada de listas (tamaño, SHA-256, sintaxis, `-check` de dnscrypt-proxy) con reemplazo atómico y **rollback automático**. Nunca queda una lista vacía o incompleta activa.
-- Allowlist con validación estricta (misma clase en WebUI y CLI; la CLI es la autoridad final).
-- Desbloqueo temporal (5m/15m/1h/hasta reiniciar/permanente) con expiración **sin cron** y protección ante cambios de reloj.
-- Perfiles de seguridad (equilibrado/estricto/privacidad), aplicación atómica con rollback; el estricto pide confirmación por activar fail-closed.
-- Modo **fail-closed opcional** (opt-in): cadenas/tabla propias, idempotente, nunca bloquea loopback ni la recuperación root; desactivable por WebUI/CLI/ADB. **PANIC siempre restaura la red.**
-- Detector de fugas DNS (protegido/posible_fuga/no_verificable/conflicto/fallo); no afirma bloquear DoH de navegador si no puede comprobarse. No bloquea el puerto 443 global, no hace MITM, no instala certificados.
-- Panel “por qué fue bloqueado” con historial local limitado y rotado (por defecto: solo bloqueos, 3 días, 1000 eventos). Sin telemetría.
-- WebUI con 9 secciones nuevas; CLI con ~30 comandos nuevos; migración versionada v0.1.0 → v0.2.0 que conserva proveedor, NextDNS, IPv6, redirección, backups y PANIC.
-- Nuevas pruebas: `smoke-test-security.sh` (61 checks) + fixtures; el build exige todas las suites.
-
-La redirección global y el fail-closed permanecen desactivados por defecto.
-
-
-## v0.1.0
-
-Primera versión pública funcional de **DNSCrypt Manager**, creada por **Skaymer AR**.
-
-- WebUI para KernelSU, KernelSU Next y APatch.
-- CLI y botón de Acción para Magisk.
-- dnscrypt-proxy oficial ARM64 2.1.17.
-- Cloudflare, Quad9, AdGuard, Mullvad y NextDNS.
-- Redirección DNS opcional mediante iptables/nftables.
-- Watchdog, rollback automático y modo PANIC.
-- Probado en Moto Edge 40 Pro con Android 16 sin pérdida de conectividad.
-
-La redirección global permanece desactivada por defecto.
+Consultar `docs/RELEASE_STATUS.md` antes de instalar versiones candidatas.
