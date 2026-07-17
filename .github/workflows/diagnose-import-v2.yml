@@ -1,0 +1,54 @@
+name: Diagnose prerelease import payloads v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-import-v2.yml'
+      - 'import-assets/**'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          show-progress: false
+      - name: Produce diagnostic report
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '=== files ==='
+            ls -l import-assets/wip3gz-part-* import-assets/rc22-part-*.b64 import-assets/v03-part-*.b64
+            cat import-assets/wip3gz-part-00 import-assets/wip3gz-part-01 import-assets/wip3gz-part-02 > /tmp/wip3.b64
+            base64 --decode import-assets/wip3gz-part-03-fixed.b64 >> /tmp/wip3.b64
+            echo "fixed_decode_rc=$?"
+            cat import-assets/wip3gz-part-04 import-assets/wip3gz-part-05 import-assets/wip3gz-part-06 import-assets/wip3gz-part-07 import-assets/wip3gz-part-08 import-assets/wip3gz-part-09 >> /tmp/wip3.b64
+            echo '=== input sizes ==='
+            wc -c /tmp/wip3.b64 import-assets/rc22-part-*.b64 import-assets/v03-part-*.b64
+            echo '=== decode ==='
+            base64 --decode /tmp/wip3.b64 | gzip -dc > /tmp/wip3.patch
+            echo "wip3_decode_rc=$?"
+            cat import-assets/rc22-part-*.b64 | base64 --decode > /tmp/rc22.patch
+            echo "rc22_decode_rc=$?"
+            cat import-assets/v03-part-*.b64 | base64 --decode > /tmp/v03.patch
+            echo "v03_decode_rc=$?"
+            echo '=== hashes ==='
+            sha256sum /tmp/wip3.patch /tmp/rc22.patch /tmp/v03.patch
+            echo '=== commit counts ==='
+            grep -c '^From [0-9a-f]\{40\} ' /tmp/wip3.patch || true
+            grep -c '^From [0-9a-f]\{40\} ' /tmp/rc22.patch || true
+            grep -c '^From [0-9a-f]\{40\} ' /tmp/v03.patch || true
+          } > diagnostic.txt 2>&1
+          exit 0
+      - name: Upload diagnostic report
+        uses: actions/upload-artifact@v4
+        with:
+          name: import-diagnostic
+          path: diagnostic.txt
+          if-no-files-found: error
