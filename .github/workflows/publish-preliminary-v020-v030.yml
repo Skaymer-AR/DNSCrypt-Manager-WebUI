@@ -1,0 +1,120 @@
+name: Publish preliminary v0.2.0 and v0.3.0
+
+on:
+  push:
+    branches:
+      - publish/previews-2026-07-17
+    paths:
+      - '.github/workflows/publish-preliminary-v020-v030.yml'
+      - 'import-assets/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-preliminary-v020-v030
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout publication branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name 'Skaymer AR'
+          git config user.email 'skaymer@users.noreply.github.com'
+          git fetch origin main feature/security-v0.2.0 --tags
+          cat import-assets/rc22-part-* > /tmp/rc22.patch
+          cat import-assets/v03-part-* > /tmp/v03.patch
+
+      - name: Reconstruct v0.2.0-RC2.2 branch
+        run: |
+          set -euo pipefail
+          git checkout -B pre-release/v0.2.0-rc2.2 origin/feature/security-v0.2.0
+          git am -3 /tmp/rc22.patch
+          mkdir -p docs
+          cp "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_RC22.md" docs/PRE_RELEASE_STATUS.md
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          warning = '> [!WARNING]\n> **PRELIMINARY / TESTING:** v0.2.x is not stable. Disable BindHosts, reboot, and only then enable DNSCrypt Manager. Running both can cause loss of connectivity or bootloop. KernelSU Next may require Hybrid Mount + reboot. Stable status begins at v1.0.0.\n\n'
+          text = p.read_text(encoding='utf-8')
+          if 'PRELIMINARY / TESTING' not in text:
+              p.write_text(warning + text, encoding='utf-8')
+          PY
+          git add README.md docs/PRE_RELEASE_STATUS.md
+          git commit -m 'docs(rc2.2): mark preliminary status and BindHosts bootloop warning'
+          git push --force-with-lease origin HEAD:refs/heads/pre-release/v0.2.0-rc2.2
+
+      - name: Test and build v0.2.0-RC2.2
+        run: |
+          set -euo pipefail
+          bash tests/run-syntax-checks.sh
+          bash tests/smoke-test-cli.sh
+          bash tests/smoke-test-catalog.sh
+          bash tests/smoke-test-environment-v030.sh
+          mkdir -p "$RUNNER_TEMP/releases"
+          DCM_SKIP_TESTS=1 DCM_OUTPUT="$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" bash tools/build-module.sh
+          sha256sum "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" > "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256"
+          cp /tmp/rc22.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch"
+          cp AUDIT_REPORT.md "$RUNNER_TEMP/releases/AUDIT_REPORT_RC2.2.md"
+
+      - name: Reconstruct v0.3.0 Checkpoint A branch
+        run: |
+          set -euo pipefail
+          git checkout -B feature/v0.3.0-rc1 pre-release/v0.2.0-rc2.2
+          git am -3 /tmp/v03.patch
+          sed -i 's/^version=.*/version=v0.3.0-RC1-WIP-A/' module.prop
+          sed -i 's/^versionCode=.*/versionCode=300/' module.prop
+          sed -i 's/^description=.*/description=PREVIEW en pruebas: WebUI SPA e i18n sobre RC2.2. BindHosts debe estar desactivado; estable desde v1.0.0. KernelSU Next puede requerir Hybrid Mount./' module.prop
+          cp "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_V03.md" docs/PRE_RELEASE_STATUS.md
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          warning = '> [!CAUTION]\n> **v0.3.0-RC1-WIP-A is a development preview.** Disable BindHosts and reboot before enabling DNSCrypt Manager; running both can cause connectivity loss or bootloop. KernelSU Next may require Hybrid Mount + reboot. This project remains under test until v1.0.0.\n\n'
+          text = p.read_text(encoding='utf-8')
+          if 'v0.3.0-RC1-WIP-A is a development preview' not in text:
+              p.write_text(warning + text, encoding='utf-8')
+          PY
+          git add module.prop README.md docs/PRE_RELEASE_STATUS.md
+          git commit -m 'chore(v0.3): publish Checkpoint A as preliminary preview'
+          git push --force-with-lease origin HEAD:refs/heads/feature/v0.3.0-rc1
+
+      - name: Test and build v0.3.0-RC1-WIP-A
+        run: |
+          set -euo pipefail
+          bash tests/run-syntax-checks.sh
+          bash tests/smoke-test-webui.sh
+          bash tests/smoke-test-i18n.sh
+          node tests/smoke-test-webui-v030.cjs
+          DCM_SKIP_TESTS=1 DCM_OUTPUT="$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" bash tools/build-module.sh
+          sha256sum "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" > "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256"
+          cp /tmp/v03.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch"
+          cp WORK_PROGRESS_v0.3.md "$RUNNER_TEMP/releases/"
+
+      - name: Publish or update preliminary releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git tag -f v0.2.0-rc2.2 pre-release/v0.2.0-rc2.2
+          git tag -f v0.3.0-rc1-wip-a feature/v0.3.0-rc1
+          git push --force origin refs/tags/v0.2.0-rc2.2 refs/tags/v0.3.0-rc1-wip-a
+          if gh release view v0.2.0-rc2.2 >/dev/null 2>&1; then
+            gh release edit v0.2.0-rc2.2 --title 'DNSCrypt Manager v0.2.0-RC2.2 (Preliminary)' --notes-file "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_RC22.md" --prerelease
+          else
+            gh release create v0.2.0-rc2.2 --title 'DNSCrypt Manager v0.2.0-RC2.2 (Preliminary)' --notes-file "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_RC22.md" --prerelease
+          fi
+          gh release upload v0.2.0-rc2.2 "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256" "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch" "$RUNNER_TEMP/releases/AUDIT_REPORT_RC2.2.md" --clobber
+          if gh release view v0.3.0-rc1-wip-a >/dev/null 2>&1; then
+            gh release edit v0.3.0-rc1-wip-a --title 'DNSCrypt Manager v0.3.0-RC1-WIP-A (Preview)' --notes-file "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_V03.md" --prerelease
+          else
+            gh release create v0.3.0-rc1-wip-a --title 'DNSCrypt Manager v0.3.0-RC1-WIP-A (Preview)' --notes-file "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_V03.md" --prerelease
+          fi
+          gh release upload v0.3.0-rc1-wip-a "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256" "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch" "$RUNNER_TEMP/releases/WORK_PROGRESS_v0.3.md" --clobber
