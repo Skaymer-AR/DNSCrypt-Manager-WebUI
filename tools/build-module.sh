@@ -193,6 +193,9 @@ STAGE="$(mktemp -d /tmp/dcm-build-stage.XXXXXX)"
 ZIP_LOG="$STAGE/.ziplog"
 cp -a "$ROOT/." "$STAGE/"
 rm -rf "$STAGE/tests" "$STAGE/tools" "$STAGE/dist" "$STAGE/.git"
+# Artefactos de desarrollo que NUNCA deben ir en el ZIP instalable.
+rm -f "$STAGE"/WORK_PROGRESS*.md "$STAGE"/*.bundle "$STAGE"/*.patch "$STAGE"/*.sha256 "$STAGE"/*.rc2bak 2>/dev/null
+find "$STAGE" -maxdepth 2 -name '*.rc2bak' -delete 2>/dev/null
 find "$STAGE" -name 'COLOCAR_BINARIO_AQUI.md' -delete 2>/dev/null
 find "$STAGE" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
 
