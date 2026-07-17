@@ -61,6 +61,52 @@ FIRST=$(inlib "cat_enabled_ordered" 2>/dev/null | head -1)
 
 # =====================================================================
 echo "== J. Pipeline: lock / huerfano / cancelacion / timeout / progreso =="
+# descendants: recorre /proc por PPID desde un PID raiz (para rastrear subarbol).
+descendants() {
+  _root="$1"; [ -n "$_root" ] || return 0; _pending="$_root"; _acc=""
+  while [ -n "$_pending" ]; do
+    _next=""
+    for _p in $_pending; do
+      for _st in /proc/[0-9]*/stat; do
+        [ -r "$_st" ] || continue
+        set -- $(sed 's/([^)]*)/X/' "$_st" 2>/dev/null)
+        if [ "${4:-}" = "$_p" ]; then _acc="$_acc $1"; _next="$_next $1"; fi
+      done
+    done
+    _pending="$_next"
+  done
+  echo $_acc
+}
+# starttime (campo 22 de /proc/PID/stat, tras neutralizar (comm)) para detectar
+# reutilizacion de PID: si cambia, el PID ya no es el proceso que registramos.
+pid_starttime() {
+  [ -r "/proc/$1/stat" ] || { echo ""; return; }
+  set -- $(sed 's/([^)]*)/X/' "/proc/$1/stat" 2>/dev/null); echo "${22:-}"
+}
+# Registro tecnico de procesos del test (evidencia, no se commitea).
+REG_TSV="$TR/process-registry.tsv"
+printf 'phase\tpid\tppid\tpgid\tstarttime\tcmd\n' > "$REG_TSV"
+reg_row() {
+  _p="$1"; _ph="$2"; [ -d "/proc/$_p" ] || return 0
+  _ppid=$(awk '/^PPid:/{print $2}' "/proc/$_p/status" 2>/dev/null)
+  _pgid=$(ps -o pgid= -p "$_p" 2>/dev/null | tr -d ' ')
+  _cmd=$(tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_ph" "$_p" "${_ppid:-?}" "${_pgid:-?}" "$(pid_starttime "$_p")" "$_cmd" >> "$REG_TSV"
+}
+# KIDS: lista "pid:starttime" del hijo pesado que el motor anota en el lock y de
+# su subarbol, capturada ANTES de cancel/timeout/PANIC.
+KIDS=""
+reg_kids() {
+  _phase="${1:-run}"
+  _c=$(cat "$DATA/run/catalog.compile.lock/child" 2>/dev/null)
+  [ -n "$_c" ] || return 0
+  for _p in $_c $(descendants "$_c"); do
+    [ -n "$_p" ] || continue
+    _st=$(pid_starttime "$_p")
+    KIDS="$KIDS $_p:$_st"
+    reg_row "$_p" "$_phase-before"
+  done
+}
 # J1 exito + status=done (stub rapido, SLEEP no seteado)
 cli catalog compile > "$TR/c" 2>&1
 grep -q "OK: compilacion terminada" "$TR/c" && ok "J1 compilacion exitosa (hook)" || bad "J1 compile ($(cat $TR/c))"
@@ -71,6 +117,7 @@ grep -q "estado    : inactiva" "$TR/cs" && grep -q "progreso  : done" "$TR/cs" &
 # J4 lock ocupado: una compilacion lenta en curso -> la segunda se rechaza
 DNSCRYPT_TEST_COMPILE_SLEEP=6 cli catalog compile > "$TR/cbg" 2>&1 & BGP=$!
 _tries=0; while [ ! -d "$DATA/run/catalog.compile.lock" ] && [ $_tries -lt 50 ]; do sleep 0.1; _tries=$((_tries+1)); done
+sleep 0.3; reg_kids cancel   # anotar hijo pesado (se cancelara en J5)
 cli catalog compile > "$TR/c2" 2>&1
 grep -q "ya hay una compilacion en curso" "$TR/c2" && ok "J4 lock ocupado: segunda compilacion rechazada" || bad "J4 no rechazo ($(cat $TR/c2))"
 
@@ -96,14 +143,17 @@ kill -9 "$ALIEN" 2>/dev/null; STRAY_SLEEPS=""
 
 # J10 timeout: SLEEP largo con timeout corto -> aborta y conserva lista
 LSHA=$(sha256sum "$DATA/security/active/blocked-names.txt" 2>/dev/null | cut -d' ' -f1)
-DNSCRYPT_TEST_COMPILE_SLEEP=8 CAT_COMPILE_TIMEOUT=2 cli catalog compile > "$TR/c5" 2>&1
+DNSCRYPT_TEST_COMPILE_SLEEP=8 CAT_COMPILE_TIMEOUT=2 cli catalog compile > "$TR/c5" 2>&1 & BGT=$!
+_tries=0; while [ ! -d "$DATA/run/catalog.compile.lock" ] && [ $_tries -lt 50 ]; do sleep 0.1; _tries=$((_tries+1)); done
+sleep 0.3; reg_kids timeout   # anotar hijo pesado del timeout
+wait "$BGT" 2>/dev/null
 grep -q "timeout" "$TR/c5" && ok "J10 timeout aborta la compilacion" || bad "J10 timeout ($(cat $TR/c5))"
 [ ! -d "$DATA/run/catalog.compile.lock" ] && ok "J11 lock liberado tras timeout" || bad "J11 lock tras timeout"
-sleep 1  # settle breve; kill_tree ya debe haber matado el stub del timeout
 
 # J12 PANIC cancela compilacion en curso sin borrar catalogos
 DNSCRYPT_TEST_COMPILE_SLEEP=6 cli catalog compile >/dev/null 2>&1 & BGP2=$!
 _tries=0; while [ ! -d "$DATA/run/catalog.compile.lock" ] && [ $_tries -lt 50 ]; do sleep 0.1; _tries=$((_tries+1)); done
+sleep 0.3; reg_kids panic   # anotar hijo pesado (PANIC lo cancela)
 ENABLED_BEFORE=$(wc -l < "$DATA/catalog/enabled.txt" 2>/dev/null | tr -d ' ')
 cli panic >/dev/null 2>&1
 wait "$BGP2" 2>/dev/null
@@ -112,34 +162,47 @@ ENABLED_AFTER=$(wc -l < "$DATA/catalog/enabled.txt" 2>/dev/null | tr -d ' ')
 [ "$ENABLED_BEFORE" = "$ENABLED_AFTER" ] && [ -f "$DATA/catalog/blocklists.index.tsv" ] && ok "J14 PANIC no borra catalogo/fuentes/config" || bad "J14 PANIC borro datos"
 cli enable >/dev/null 2>&1  # revertir el disable del panic
 
-# residuales: SOLO procesos descendientes de este harness (no del host).
-# descendants: walk /proc por PPID desde un PID raiz.
-descendants() {
-  _root="$1"; _pending="$_root"; _acc=""
-  while [ -n "$_pending" ]; do
-    _next=""
-    for _p in $_pending; do
-      for _st in /proc/[0-9]*/stat; do
-        [ -r "$_st" ] || continue
-        set -- $(sed 's/([^)]*)/X/' "$_st" 2>/dev/null)
-        if [ "${4:-}" = "$_p" ]; then _acc="$_acc $1"; _next="$_next $1"; fi
-      done
-    done
-    _pending="$_next"
-  done
-  echo $_acc
-}
-sleep 1  # dar tiempo a que kill_tree/trap propaguen tras cancel/timeout/PANIC
+# ---------------------------------------------------------------------------
+# J15 residuales — DETERMINISTA, race-safe y sin tocar procesos ajenos.
+# Criterios, ambos acotados exclusivamente a ESTE test:
+#   (a) los PIDs hijos que el motor registro en el lock (pid:starttime), con
+#       ESPERA ACOTADA (<=2 s, polling 100 ms) a que desaparezcan. Un PID cuenta
+#       como residual REAL solo si sigue vivo, con el MISMO starttime (no fue
+#       reutilizado) y en estado activo (no zombie) al agotar la espera.
+#   (b) cualquier proceso cuya cmdline contenga el TEST_ROOT unico ($TR): no debe
+#       quedar ninguno (drivers/subshells del modulo bajo $TR).
+# Los PIDs de fondo (BGP/BGP2/BGT) ya fueron 'wait'eados.
 STRAY=""
-for _p in $(descendants $$); do
-  [ "$_p" = "$WD" ] && continue                 # el watchdog del harness no cuenta
-  _cl=$(tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null)
-  case "$_cl" in
-    *"catalog compile"*) STRAY="$STRAY $_p" ;;   # driver de compilacion vivo
-    "sleep 6 "*|"sleep 8 "*|*" sleep 6"|*" sleep 8") STRAY="$STRAY $_p" ;;  # sleep del stub
-  esac
+_iter=0
+while :; do
+  STRAY=""
+  # (a) PIDs hijos concretos registrados por el motor
+  for _e in $KIDS; do
+    _p=${_e%%:*}; _s0=${_e#*:}
+    [ -n "$_p" ] || continue
+    [ -d "/proc/$_p" ] || continue                    # desaparecio -> OK
+    _s1=$(pid_starttime "$_p")
+    [ "$_s1" != "$_s0" ] && continue                  # starttime distinto -> PID reutilizado, no es nuestro
+    _stt=$(awk '/^State:/{print $2}' "/proc/$_p/status" 2>/dev/null)
+    [ "$_stt" = "Z" ] && continue                     # zombie -> se recolectara, no es residual real
+    STRAY="$STRAY $_p"
+  done
+  [ -z "$STRAY" ] && break
+  [ "$_iter" -ge 20 ] && break                         # ~2 s
+  _iter=$((_iter+1)); sleep 0.1
 done
-[ -z "$STRAY" ] && ok "J15 sin procesos de compilacion residuales (solo descendientes del harness)" || { bad "J15 residuales: $STRAY"; for p in $STRAY; do kill -9 "$p" 2>/dev/null; done; }
+# registrar estado final de los KIDS para evidencia
+for _e in $KIDS; do _p=${_e%%:*}; [ -d "/proc/$_p" ] && reg_row "$_p" "final-alive"; done
+# (b) procesos que referencian el TEST_ROOT unico (no pueden ser del host)
+for _cf in /proc/[0-9]*/cmdline; do
+  _pid=${_cf#/proc/}; _pid=${_pid%/cmdline}
+  [ "$_pid" = "$$" ] && continue
+  _cl=$(tr '\0' ' ' < "$_cf" 2>/dev/null)
+  case "$_cl" in *"$TR"*) STRAY="$STRAY $_pid"; reg_row "$_pid" "final-testroot" ;; esac
+done
+STRAY=$(echo $STRAY | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')
+if [ -n "$STRAY" ]; then for _p in $STRAY; do echo "  [DIAG] stray=$_p state=$(awk '/^State:/{print $2}' /proc/$_p/status 2>/dev/null) start=$(pid_starttime $_p) ppid=$(awk '/^PPid:/{print $2}' /proc/$_p/status 2>/dev/null) cmd=[$(tr '\0' ' ' </proc/$_p/cmdline 2>/dev/null)]" >&2; done; fi
+[ -z "$STRAY" ] && ok "J15 sin procesos residuales del test (hijos registrados race-safe + cmdline con TEST_ROOT)" || { bad "J15 residuales: $STRAY"; for p in $STRAY; do kill -9 "$p" 2>/dev/null; done; }
 
 echo ""
 echo "Resumen compile+stats: $PASS OK, $FAILN FAIL"
