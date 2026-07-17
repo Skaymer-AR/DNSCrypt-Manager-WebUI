@@ -429,7 +429,11 @@ _cat_pid_is_ours() {
 _cat_kill_tree() {
   _root="$1"; _sig="${2:-TERM}"
   [ -n "$_root" ] || return 0
-  # recolectar descendientes (BFS) antes de matar, para no perder la cadena
+  # Congelar el root ANTES de recolectar: asi no puede salir (y reparentar sus
+  # hijos a init) ni forkear nuevos procesos mientras armamos el subarbol. Es la
+  # clave para no perder un hijo (p.ej. el proceso pesado) por una carrera.
+  kill -STOP "$_root" 2>/dev/null
+  # Recolectar TODO el subarbol (BFS por PPID) antes de matar nada.
   _pending="$_root"; _all=""
   while [ -n "$_pending" ]; do
     _next=""
@@ -445,7 +449,11 @@ _cat_kill_tree() {
     done
     _pending="$_next"
   done
+  # Señalar por PID todo lo recolectado (si algo se reparentó despues de la
+  # recoleccion, igual lo alcanzamos porque su PID no cambia).
   for _p in $_all; do kill -"$_sig" "$_p" 2>/dev/null; done
+  # Descongelar el root para que procese la señal pendiente (TERM/KILL) y muera.
+  kill -CONT "$_root" 2>/dev/null
 }
 
 cat_progress_set() {
@@ -521,9 +529,9 @@ cat_compile() {
   echo "$_child" > "$CAT_COMPILE_LOCK/child" 2>/dev/null
   # Watchdog de timeout: mata el grupo del hijo registrado Y su subarbol.
   ( sleep "$_to"
-    kill -TERM "-$_child" 2>/dev/null; _cat_kill_tree "$_child" TERM
+    _cat_kill_tree "$_child" TERM; kill -TERM "-$_child" 2>/dev/null
     sleep 3
-    kill -KILL "-$_child" 2>/dev/null; _cat_kill_tree "$_child" KILL ) &
+    _cat_kill_tree "$_child" KILL; kill -KILL "-$_child" 2>/dev/null ) &
   _wd=$!
   wait "$_child" 2>/dev/null; _rc=$?
   kill "$_wd" 2>/dev/null; wait "$_wd" 2>/dev/null
@@ -584,9 +592,9 @@ cat_compile_cancel() {
   _drv=$(cat "$CAT_COMPILE_LOCK/pid" 2>/dev/null)
   _killed=0
   if _cat_pid_is_ours "$_child"; then
-    kill -TERM "-$_child" 2>/dev/null; _cat_kill_tree "$_child" TERM
+    _cat_kill_tree "$_child" TERM; kill -TERM "-$_child" 2>/dev/null
     sleep 1
-    kill -KILL "-$_child" 2>/dev/null; _cat_kill_tree "$_child" KILL
+    _cat_kill_tree "$_child" KILL; kill -KILL "-$_child" 2>/dev/null
     _killed=1
   fi
   # El driver liberara el lock via su trap; si el driver ya no existe, limpiar.
