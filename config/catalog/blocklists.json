@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated": "2026-07-15",
   "generator": "tools/build-catalog.py",
-  "count": 70,
+  "count": 71,
   "entries": [
     {
       "family_id": "1hosts",
@@ -1494,6 +1494,37 @@
       "name": "Turtlecute d3host"
     },
     {
+      "family_id": "nocoin",
+      "maintainer": "hoshsadiq",
+      "homepage": "https://github.com/hoshsadiq/adblock-nocoin-list",
+      "description_es": "NoCoin (hoshsadiq): bloquea mineros de cripto conocidos. Reemplaza a CoinBlockerLists (404).",
+      "categories": [
+        "cryptojacking"
+      ],
+      "coverage": "Bloqueo de mineros de criptomonedas en el navegador (NoCoin).",
+      "aggressiveness": "medium",
+      "format": "hosts",
+      "primary_url": "https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt",
+      "mirrors": [],
+      "license": "MIT",
+      "upstream_status": "unverified",
+      "recommended": false,
+      "mobile_suitability": "good",
+      "known_side_effects": [],
+      "known_required_allowlist": [],
+      "supersedes": [
+        "rc1_coinblocker"
+      ],
+      "contained_by": [],
+      "overlaps_with": [],
+      "conflicts_with": [],
+      "archived": false,
+      "last_verified": "2026-07-15",
+      "notes": "Reemplazo de CoinBlockerLists. NO bloquea toda la criptomineria existente; cubre mineros conocidos en formato hosts. upstream_status unverified: se marca verified solo tras descarga+validacion en el equipo.",
+      "id": "nocoin_hosts",
+      "name": "NoCoin hosts"
+    },
+    {
       "family_id": "oisd",
       "maintainer": "OISD",
       "homepage": "https://oisd.nl/",
@@ -1961,7 +1992,7 @@
       "family_id": "rc1",
       "maintainer": "ZeroDot1",
       "homepage": "https://gitlab.com/ZeroDot1/CoinBlockerLists",
-      "description_es": "CoinBlockerLists: cryptojacking. Fuente de criptomineria de RC1.",
+      "description_es": "CoinBlockerLists (ROTA): la URL devuelve 404 permanente. Reemplazada por NoCoin (nocoin_hosts).",
       "categories": [
         "cryptojacking"
       ],
@@ -1971,7 +2002,7 @@
       "primary_url": "https://raw.githubusercontent.com/ZeroDot1/CoinBlockerLists/master/list.txt",
       "mirrors": [],
       "license": "GPL-3.0",
-      "upstream_status": "unverified",
+      "upstream_status": "broken",
       "recommended": false,
       "mobile_suitability": "good",
       "known_side_effects": [],
@@ -1982,7 +2013,7 @@
       "conflicts_with": [],
       "archived": false,
       "last_verified": "2026-07-15",
-      "notes": "cryptojacking (NO es publicidad de cripto).",
+      "notes": "URL da HTTP 404 permanente (el repo movio/quito el archivo). No se descarga; se conserva en metadatos historicos. Reemplazada por nocoin_hosts.",
       "id": "rc1_coinblocker",
       "name": "CoinBlockerLists (ZeroDot1)"
     },
@@ -1990,7 +2021,7 @@
       "family_id": "rc1",
       "maintainer": "The Firebog",
       "homepage": "https://firebog.net/",
-      "description_es": "EasyPrivacy via Firebog. Fuente de rastreadores de RC1.",
+      "description_es": "EasyPrivacy via Firebog (LEGACY/degradada). Preferir ray_easyprivacy_3rdparty o ray_easyprivacy_specific.",
       "categories": [
         "trackers"
       ],
@@ -2000,7 +2031,7 @@
       "primary_url": "https://v.firebog.net/hosts/Easyprivacy.txt",
       "mirrors": [],
       "license": "GPL-3.0",
-      "upstream_status": "unverified",
+      "upstream_status": "legacy",
       "recommended": false,
       "mobile_suitability": "good",
       "known_side_effects": [],
@@ -2011,7 +2042,7 @@
       "conflicts_with": [],
       "archived": false,
       "last_verified": "2026-07-15",
-      "notes": "",
+      "notes": "Firebog es un mirror; se degrada a legacy para instalaciones nuevas (se conserva metadata e historial). Alternativas mantenidas ya en el catalogo con cobertura DNS equivalente de rastreadores: ray_easyprivacy_3rdparty, ray_easyprivacy_specific, ray_adguard_tracking. Native Tracker (hagezi_native_tracker) NO es equivalente exacto de EasyPrivacy.",
       "id": "rc1_easyprivacy_firebog",
       "name": "EasyPrivacy (Firebog)"
     },

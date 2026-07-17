@@ -512,16 +512,37 @@ ENTRIES += [
     E("rc1_coinblocker", "CoinBlockerLists (ZeroDot1)", family_id="rc1", maintainer="ZeroDot1",
       format="domains", homepage="https://gitlab.com/ZeroDot1/CoinBlockerLists", license="GPL-3.0",
       categories=["cryptojacking"], aggressiveness="medium",
+      upstream_status="broken", recommended=False,
       coverage="Mineria de criptomonedas en el navegador (cryptojacking).",
       primary_url="https://raw.githubusercontent.com/ZeroDot1/CoinBlockerLists/master/list.txt",
-      notes="cryptojacking (NO es publicidad de cripto).",
-      description_es="CoinBlockerLists: cryptojacking. Fuente de criptomineria de RC1."),
+      notes="URL da HTTP 404 permanente (el repo movio/quito el archivo). No se "
+            "descarga; se conserva en metadatos historicos. Reemplazada por nocoin_hosts.",
+      description_es="CoinBlockerLists (ROTA): la URL devuelve 404 permanente. "
+                     "Reemplazada por NoCoin (nocoin_hosts)."),
+    E("nocoin_hosts", "NoCoin hosts", family_id="nocoin", maintainer="hoshsadiq",
+      format="hosts", homepage="https://github.com/hoshsadiq/adblock-nocoin-list",
+      license="MIT", categories=["cryptojacking"], aggressiveness="medium",
+      recommended=False, supersedes=["rc1_coinblocker"],
+      coverage="Bloqueo de mineros de criptomonedas en el navegador (NoCoin).",
+      primary_url="https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt",
+      notes="Reemplazo de CoinBlockerLists. NO bloquea toda la criptomineria "
+            "existente; cubre mineros conocidos en formato hosts. upstream_status "
+            "unverified: se marca verified solo tras descarga+validacion en el equipo.",
+      description_es="NoCoin (hoshsadiq): bloquea mineros de cripto conocidos. "
+                     "Reemplaza a CoinBlockerLists (404)."),
     E("rc1_easyprivacy_firebog", "EasyPrivacy (Firebog)", family_id="rc1", maintainer="The Firebog",
       format="domains", homepage="https://firebog.net/", license="GPL-3.0",
       categories=["trackers"], aggressiveness="high",
+      upstream_status="legacy", recommended=False,
       coverage="Rastreadores (EasyPrivacy, empaquetada por Firebog).",
       primary_url="https://v.firebog.net/hosts/Easyprivacy.txt",
-      description_es="EasyPrivacy via Firebog. Fuente de rastreadores de RC1."),
+      notes="Firebog es un mirror; se degrada a legacy para instalaciones nuevas "
+            "(se conserva metadata e historial). Alternativas mantenidas ya en el "
+            "catalogo con cobertura DNS equivalente de rastreadores: "
+            "ray_easyprivacy_3rdparty, ray_easyprivacy_specific, ray_adguard_tracking. "
+            "Native Tracker (hagezi_native_tracker) NO es equivalente exacto de EasyPrivacy.",
+      description_es="EasyPrivacy via Firebog (LEGACY/degradada). Preferir "
+                     "ray_easyprivacy_3rdparty o ray_easyprivacy_specific."),
 ]
 
 # ---- J. Fuentes heredadas del usuario (validadas; NO auto-activadas) ------

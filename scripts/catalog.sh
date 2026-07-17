@@ -317,6 +317,15 @@ srcst_clear() {
 cat_update_one() {
   _id="$1"
   cat_exists "$_id" || { echo "ERROR: id desconocido en el catalogo: '$_id'" >&2; return 1; }
+  # Fuentes marcadas broken/archived NO se descargan (evita reintentar un 404
+  # permanente como si fuera temporal). Se conserva la ultima copia valida.
+  _decl=$(cat_field "$_id" 10)
+  case "$_decl" in
+    broken|archived)
+      srcst_write "$_id" download_failed "-" 0 "" 0 0 0 0 "fuente $_decl: no se descarga (broken/archived)" "$(cat_field "$_id" 8)" 0
+      echo "OMITIDA ($_id): fuente $_decl; no se descarga. Se conserva la ultima copia valida si existe." >&2
+      return 1 ;;
+  esac
   _url=$(cat_field "$_id" 8)
   _fmt=$(cat_field "$_id" 7)
   case "$_url" in https://*|file://*) : ;; *) echo "ERROR ($_id): url invalida" >&2; return 1 ;; esac
