@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
@@ -32,7 +32,10 @@
   </div>
 
   <!-- ============================ PANEL PRINCIPAL ============================ -->
-  <section class="card">
+    <main id="views" class="views">
+  <div class="route" id="route-status" data-route="status">
+
+<section class="card">
     <h2>Panel principal</h2>
 
     <div class="status-row">
@@ -59,9 +62,11 @@
     <div id="testDnsOutput" class="hint" style="margin-top:12px;"></div>
   </section>
 
-  <!-- ============================== SERVIDORES ================================ -->
-  <section class="card">
-    <h2>Servidores</h2>
+  </div>
+  <div class="route" id="route-dns" data-route="dns" hidden>
+
+<section class="card">
+    <h2 data-i18n="dns.resolver">Servidores</h2>
 
     <p class="hint" style="margin:0 0 10px;">Proveedores preestablecidos (stamp con IP embebida):</p>
     <div class="btn-row" style="margin-bottom:16px;">
@@ -80,9 +85,8 @@
     <p class="hint">Cambiar de servidor requiere reiniciar el servicio para tomar efecto.</p>
   </section>
 
-  <!-- ============================== REDIRECCION ================================ -->
-  <section class="card">
-    <h2>Redireccion DNS</h2>
+<section class="card">
+    <h2 data-i18n="status.redirect">Redireccion DNS</h2>
 
     <div class="status-row">
       <span id="redirectDot" class="dot dot-amber"></span>
@@ -115,8 +119,7 @@
     </p>
   </section>
 
-  <!-- ============================ PROTECCION WEB ============================== -->
-  <section class="card">
+<section class="card">
     <h2>Proteccion web</h2>
     <p class="hint" style="margin-top:0;">
       Bloqueo de dominios por categoria. Malware, phishing y estafas vienen
@@ -129,25 +132,16 @@
     <div id="protectionTotal" class="hint" style="margin-top:8px;"></div>
   </section>
 
-  <!-- ========================= PERFILES DE SEGURIDAD ========================== -->
-  <section class="card">
-    <h2>Perfiles de seguridad</h2>
-    <p class="hint" style="margin-top:0;">Perfil aplicado: <span id="profileCurrent">—</span></p>
-    <div class="btn-row" style="margin-bottom:10px;">
-      <button data-profile="balanced">Equilibrado</button>
-      <button data-profile="strict" class="danger">Estricto</button>
-      <button data-profile="privacy">Privacidad</button>
-    </div>
-    <div id="profilePlan" class="hint" style="white-space:pre-wrap;"></div>
-    <p class="hint">
-      El perfil <strong>Estricto</strong> activa fail-closed: si DNSCrypt deja de
-      funcionar, el telefono puede quedarse sin resolucion DNS hasta restaurar la
-      red manualmente. Se te pedira confirmacion.
-    </p>
-  </section>
+<details class="card">
+    <summary>Diagnostico — Private DNS de Android</summary>
+    <button id="btnPrivateDns" class="small" style="margin-bottom:10px;">Verificar Private DNS</button>
+    <div id="privateDnsText" class="hint">Toca el boton para consultar.</div>
+  </details>
 
-  <!-- ============================ LISTAS / UPDATES ============================ -->
-  <section class="card">
+  </div>
+  <div class="route" id="route-lists" data-route="lists" hidden>
+
+<section class="card">
     <h2>Listas de bloqueo</h2>
     <div class="btn-row" style="margin-bottom:12px;">
       <button id="btnBlocklistsUpdate" class="primary">Actualizar activas</button>
@@ -161,9 +155,8 @@
     </p>
   </section>
 
-  <!-- ================================ ALLOWLIST =============================== -->
-  <section class="card">
-    <h2>Allowlist</h2>
+<section class="card">
+    <h2 data-i18n="lists.allowlist">Allowlist</h2>
     <p class="hint" style="margin-top:0;">Dominios que nunca se bloquean.</p>
     <div class="field">
       <label for="allowInput">Dominio</label>
@@ -185,9 +178,8 @@
     <div id="allowList" class="hint">—</div>
   </section>
 
-  <!-- ========================= EXCEPCIONES TEMPORALES ========================= -->
-  <section class="card">
-    <h2>Excepciones temporales</h2>
+<section class="card">
+    <h2 data-i18n="lists.exceptions">Excepciones temporales</h2>
     <p class="hint" style="margin-top:0;">Permitir un dominio por un rato, sin quitarlo del bloqueo permanente.</p>
     <div class="field">
       <label for="tempInput">Dominio</label>
@@ -212,9 +204,81 @@
     <div id="tempList" class="hint">—</div>
   </section>
 
-  <!-- =========================== AUDITORIA DE FUGAS =========================== -->
-  <section class="card">
-    <h2>Auditoria de fugas DNS</h2>
+<section class="card">
+    <h2 data-i18n="lists.catalog">Catalogo de listas</h2>
+    <p class="hint" style="margin-top:0;">
+      Motor por metadatos. Activar una fuente la descarga, valida y recompila.
+      Estado: <code>verified</code> (descargada y validada en este equipo),
+      <code>unverified</code> (URL oficial, aun no descargada), <code>legacy</code>,
+      <code>archived</code>, <code>broken</code>.
+    </p>
+    <div class="field">
+      <label for="catSearch">Buscar (nombre, id, categoria)</label>
+      <input type="text" id="catSearch" placeholder="ej: hagezi, malware, ads" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="btn-row" style="margin-bottom:8px;">
+      <button id="btnCatRecommended" class="small">Recomendadas</button>
+      <button id="btnCatEnabled" class="small">Activas</button>
+      <button id="btnCatAll" class="small">Todas</button>
+    </div>
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button id="btnCatUpdate" class="primary">Actualizar activas</button>
+      <button id="btnCatCompile">Compilar</button>
+      <button id="btnCatConflicts" class="small">Conflictos</button>
+    </div>
+    <div id="catResults" class="hint">Escribi una busqueda o toca “Recomendadas”.</div>
+    <div id="catPager" class="btn-row" style="margin-top:8px;"></div>
+    <div id="catConflicts" class="hint" style="margin-top:8px;"></div>
+  </section>
+
+<section class="card">
+    <h2 data-i18n="lists.custom">Fuentes personalizadas</h2>
+    <div class="field">
+      <label for="customUrl">URL (https://)</label>
+      <input type="text" id="customUrl" placeholder="https://ejemplo.net/lista.txt" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="err" id="customError"></div>
+    </div>
+    <div class="field">
+      <label for="customName">Nombre (opcional)</label>
+      <input type="text" id="customName" placeholder="Mi lista" maxlength="60" autocapitalize="off" spellcheck="false">
+    </div>
+    <button id="btnCustomAdd" class="wide primary" style="margin-bottom:12px;">Agregar fuente</button>
+    <div id="customList" class="hint">—</div>
+  </section>
+
+<section class="card">
+    <h2 data-i18n="lists.bindhosts">Importar BindHosts</h2>
+    <p class="hint" style="margin-top:0;">
+      Analiza <code>sources.txt</code>, <code>blacklist.txt</code>,
+      <code>whitelist.txt</code> y <code>custom.txt</code> de un directorio.
+      El analisis no modifica nada.
+    </p>
+    <div class="field">
+      <label for="bhDir">Directorio (ruta absoluta)</label>
+      <input type="text" id="bhDir" placeholder="/data/adb/bindhosts" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="err" id="bhError"></div>
+    </div>
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button id="btnBhAnalyze" class="primary">Analizar (dry-run)</button>
+      <button id="btnBhImport" class="danger">Importar</button>
+    </div>
+    <div id="bhResults" class="hint" style="white-space:pre-wrap;">—</div>
+  </section>
+
+<section class="card">
+    <h2 data-i18n="lists.services">Controles de servicio</h2>
+    <p class="hint" style="margin-top:0;">
+      Controles experimentales de mejor esfuerzo. No garantizan privacidad
+      perfecta y pueden afectar funciones del servicio.
+    </p>
+    <div id="svcList" class="hint">Cargando…</div>
+  </section>
+
+  </div>
+  <div class="route" id="route-activity" data-route="activity" hidden>
+
+<section class="card">
+    <h2 data-i18n="activity.leaks">Auditoria de fugas DNS</h2>
     <div class="btn-row" style="margin-bottom:12px;">
       <button id="btnLeakTest" class="primary">Ejecutar prueba</button>
       <button id="btnLeakCopy" class="small">Copiar diagnostico</button>
@@ -222,9 +286,8 @@
     <div id="leakResults" class="hint">Toca “Ejecutar prueba” para auditar posibles fugas.</div>
   </section>
 
-  <!-- =========================== EVENTOS BLOQUEADOS =========================== -->
-  <section class="card">
-    <h2>Eventos bloqueados</h2>
+<section class="card">
+    <h2 data-i18n="activity.events">Eventos bloqueados</h2>
     <div class="btn-row" style="margin-bottom:10px;">
       <button id="btnEventsRefresh" class="primary">Actualizar</button>
       <button id="btnEventsStats">Estadisticas</button>
@@ -238,9 +301,8 @@
     <div id="eventsList" class="hint">—</div>
   </section>
 
-  <!-- ========================= PRIVACIDAD E HISTORIAL ========================= -->
-  <section class="card">
-    <h2>Privacidad e historial</h2>
+<section class="card">
+    <h2 data-i18n="settings.privacy">Privacidad e historial</h2>
     <div class="field">
       <label for="histModeSelect">Que se registra</label>
       <select id="histModeSelect">
@@ -273,89 +335,7 @@
     </p>
   </section>
 
-  <!-- ========================= CATALOGO DE LISTAS (RC2) ======================= -->
-  <section class="card">
-    <h2>Catalogo de listas</h2>
-    <p class="hint" style="margin-top:0;">
-      Motor por metadatos. Activar una fuente la descarga, valida y recompila.
-      Estado: <code>verified</code> (descargada y validada en este equipo),
-      <code>unverified</code> (URL oficial, aun no descargada), <code>legacy</code>,
-      <code>archived</code>, <code>broken</code>.
-    </p>
-    <div class="field">
-      <label for="catSearch">Buscar (nombre, id, categoria)</label>
-      <input type="text" id="catSearch" placeholder="ej: hagezi, malware, ads" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
-    <div class="btn-row" style="margin-bottom:8px;">
-      <button id="btnCatRecommended" class="small">Recomendadas</button>
-      <button id="btnCatEnabled" class="small">Activas</button>
-      <button id="btnCatAll" class="small">Todas</button>
-    </div>
-    <div class="btn-row" style="margin-bottom:10px;">
-      <button id="btnCatUpdate" class="primary">Actualizar activas</button>
-      <button id="btnCatCompile">Compilar</button>
-      <button id="btnCatConflicts" class="small">Conflictos</button>
-    </div>
-    <div id="catResults" class="hint">Escribi una busqueda o toca “Recomendadas”.</div>
-    <div id="catPager" class="btn-row" style="margin-top:8px;"></div>
-    <div id="catConflicts" class="hint" style="margin-top:8px;"></div>
-  </section>
-
-  <!-- ====================== FUENTES PERSONALIZADAS (RC2) ====================== -->
-  <section class="card">
-    <h2>Fuentes personalizadas</h2>
-    <div class="field">
-      <label for="customUrl">URL (https://)</label>
-      <input type="text" id="customUrl" placeholder="https://ejemplo.net/lista.txt" autocapitalize="off" autocorrect="off" spellcheck="false">
-      <div class="err" id="customError"></div>
-    </div>
-    <div class="field">
-      <label for="customName">Nombre (opcional)</label>
-      <input type="text" id="customName" placeholder="Mi lista" maxlength="60" autocapitalize="off" spellcheck="false">
-    </div>
-    <button id="btnCustomAdd" class="wide primary" style="margin-bottom:12px;">Agregar fuente</button>
-    <div id="customList" class="hint">—</div>
-  </section>
-
-  <!-- ========================= IMPORTAR BINDHOSTS (RC2) ======================= -->
-  <section class="card">
-    <h2>Importar BindHosts</h2>
-    <p class="hint" style="margin-top:0;">
-      Analiza <code>sources.txt</code>, <code>blacklist.txt</code>,
-      <code>whitelist.txt</code> y <code>custom.txt</code> de un directorio.
-      El analisis no modifica nada.
-    </p>
-    <div class="field">
-      <label for="bhDir">Directorio (ruta absoluta)</label>
-      <input type="text" id="bhDir" placeholder="/data/adb/bindhosts" autocapitalize="off" autocorrect="off" spellcheck="false">
-      <div class="err" id="bhError"></div>
-    </div>
-    <div class="btn-row" style="margin-bottom:10px;">
-      <button id="btnBhAnalyze" class="primary">Analizar (dry-run)</button>
-      <button id="btnBhImport" class="danger">Importar</button>
-    </div>
-    <div id="bhResults" class="hint" style="white-space:pre-wrap;">—</div>
-  </section>
-
-  <!-- ======================= CONTROLES DE SERVICIO (RC2) ====================== -->
-  <section class="card">
-    <h2>Controles de servicio</h2>
-    <p class="hint" style="margin-top:0;">
-      Controles experimentales de mejor esfuerzo. No garantizan privacidad
-      perfecta y pueden afectar funciones del servicio.
-    </p>
-    <div id="svcList" class="hint">Cargando…</div>
-  </section>
-
-  <!-- ============================== DIAGNOSTICO ================================ -->
-  <details class="card">
-    <summary>Diagnostico — Private DNS de Android</summary>
-    <button id="btnPrivateDns" class="small" style="margin-bottom:10px;">Verificar Private DNS</button>
-    <div id="privateDnsText" class="hint">Toca el boton para consultar.</div>
-  </details>
-
-  <!-- ================================== LOGS ==================================== -->
-  <details class="card">
+<details class="card">
     <summary>Logs</summary>
     <div class="btn-row" style="margin-bottom:12px;">
       <button id="btnLogs" class="small">Ver logs recientes</button>
@@ -363,6 +343,66 @@
     </div>
     <div id="logsOutput" class="hint"></div>
   </details>
+
+  </div>
+  <div class="route" id="route-settings" data-route="settings" hidden>
+  <section class="card">
+    <h2 data-i18n="settings.language">Language</h2>
+    <div class="field">
+      <label for="langSelect" data-i18n="settings.language">Language</label>
+      <select id="langSelect">
+        <option value="en">English</option>
+        <option value="es">Espanol</option>
+      </select>
+    </div>
+    <p class="hint" data-i18n="common.experimental">Experimental</p>
+  </section>
+
+<section class="card">
+    <h2>Perfiles de seguridad</h2>
+    <p class="hint" style="margin-top:0;">Perfil aplicado: <span id="profileCurrent">—</span></p>
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button data-profile="balanced">Equilibrado</button>
+      <button data-profile="strict" class="danger">Estricto</button>
+      <button data-profile="privacy">Privacidad</button>
+    </div>
+    <div id="profilePlan" class="hint" style="white-space:pre-wrap;"></div>
+    <p class="hint">
+      El perfil <strong>Estricto</strong> activa fail-closed: si DNSCrypt deja de
+      funcionar, el telefono puede quedarse sin resolucion DNS hasta restaurar la
+      red manualmente. Se te pedira confirmacion.
+    </p>
+  </section>
+
+<section class="card about-card">
+    <div class="about-title">DNSCrypt Manager</div>
+    <div class="about-author">Creado por <strong>Skaymer AR</strong></div>
+    <div class="hint" style="margin-top:6px;">
+      dnscrypt-proxy como servicio de sistema · KernelSU / KernelSU Next / APatch / Magisk
+    </div>
+  </section>
+
+  </div>
+  </main>
+
+  <nav class="bottomnav" id="bottomnav" aria-label="Secciones">
+    <a class="navitem" href="#/status" data-nav="status" data-i18n-aria="nav.status">
+      <span class="navicon" aria-hidden="true">&#9635;</span><span class="navlabel" data-i18n="nav.status">Status</span>
+    </a>
+    <a class="navitem" href="#/dns" data-nav="dns" data-i18n-aria="nav.dns">
+      <span class="navicon" aria-hidden="true">&#9670;</span><span class="navlabel" data-i18n="nav.dns">DNS</span>
+    </a>
+    <a class="navitem" href="#/lists" data-nav="lists" data-i18n-aria="nav.lists">
+      <span class="navicon" aria-hidden="true">&#9776;</span><span class="navlabel" data-i18n="nav.lists">Lists</span>
+    </a>
+    <a class="navitem" href="#/activity" data-nav="activity" data-i18n-aria="nav.activity">
+      <span class="navicon" aria-hidden="true">&#9650;</span><span class="navlabel" data-i18n="nav.activity">Activity</span>
+    </a>
+    <a class="navitem" href="#/settings" data-nav="settings" data-i18n-aria="nav.settings">
+      <span class="navicon" aria-hidden="true">&#9881;</span><span class="navlabel" data-i18n="nav.settings">Settings</span>
+    </a>
+  </nav>
+
 
   <!-- ================================ EMERGENCIA ================================= -->
   <section class="card danger">
@@ -375,13 +415,7 @@
   </section>
 
   <!-- ================================ ACERCA DE ================================= -->
-  <section class="card about-card">
-    <div class="about-title">DNSCrypt Manager</div>
-    <div class="about-author">Creado por <strong>Skaymer AR</strong></div>
-    <div class="hint" style="margin-top:6px;">
-      dnscrypt-proxy como servicio de sistema · KernelSU / KernelSU Next / APatch / Magisk
-    </div>
-  </section>
+  
 
   <footer>
     DNSCrypt Manager · Creado por Skaymer AR
@@ -389,6 +423,8 @@
 
   <div id="toast" class="toast"></div>
 
+  <script src="js/i18n.js"></script>
+  <script src="js/router.js"></script>
   <script src="js/validation.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>

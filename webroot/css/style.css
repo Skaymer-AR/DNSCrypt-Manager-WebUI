@@ -287,3 +287,37 @@ footer {
   .kv-grid { grid-template-columns: 1fr; }
   button.wide { flex-basis: auto; }
 }
+
+/* ==========================================================================
+   v0.3.0-RC1 — SPA por secciones: navegacion inferior fija + rutas + safe-area
+   ========================================================================== */
+.views { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+.route[hidden] { display: none !important; }
+.route { animation: dcm-fade .18s ease; }
+@keyframes dcm-fade { from { opacity: .35; } to { opacity: 1; } }
+
+.bottomnav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+  display: flex; justify-content: space-around; align-items: stretch;
+  background: var(--bg-elev, var(--card)); border-top: 1px solid var(--card-brd);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-shadow: 0 -2px 10px rgba(0,0,0,.25);
+}
+.navitem {
+  flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 2px; min-height: 56px; padding: 6px 2px;
+  color: var(--text-faint, var(--text-dim)); text-decoration: none;
+  font: 500 11px/1.1 var(--font-ui); -webkit-tap-highlight-color: transparent;
+  transition: color .15s ease;
+}
+.navitem .navicon { font-size: 18px; line-height: 1; }
+.navitem.active { color: var(--accent); }
+.navitem.active .navicon { transform: translateY(-1px); }
+.navitem:active { background: rgba(255,255,255,.04); }
+.navlabel { letter-spacing: .2px; }
+
+#langSelect {
+  width: 100%; padding: 10px 12px; border-radius: var(--radius-sm, 8px);
+  background: var(--bg); color: var(--text); border: 1px solid var(--card-brd);
+  font: 14px var(--font-ui);
+}
