@@ -1,0 +1,6 @@
+goodone.example
+1.2.3.4
+https://bad.example/path
+*.wild.example
+goodtwo.example
+texto arbitrario con espacios

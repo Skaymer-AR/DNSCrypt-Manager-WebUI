@@ -1,0 +1,11 @@
+# DNSCrypt Manager - fuente de blocklist: phishing
+name=Phishing Army - Extended Blocklist
+category=phishing
+url=https://phishing.army/download/phishing_army_blocklist_extended.txt
+format=domains
+license=CC-BY-NC-4.0
+min_bytes=1024
+max_bytes=26214400
+min_domains=100
+homepage=https://phishing.army/
+notes=Lista anti-phishing en formato de un dominio por linea.

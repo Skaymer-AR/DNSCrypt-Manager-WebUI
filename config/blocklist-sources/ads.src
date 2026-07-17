@@ -1,0 +1,12 @@
+# DNSCrypt Manager - fuente de blocklist: publicidad (ads)
+# DESACTIVADA por defecto: el bloqueo de ads puede romper apps/paginas legitimas.
+name=StevenBlack hosts (ads + malware base)
+category=ads
+url=https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+format=hosts
+license=MIT
+min_bytes=4096
+max_bytes=26214400
+min_domains=1000
+homepage=https://github.com/StevenBlack/hosts
+notes=Lista hosts unificada y muy mantenida. Formato hosts (0.0.0.0 dominio).

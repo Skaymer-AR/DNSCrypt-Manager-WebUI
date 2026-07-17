@@ -1,19 +1,13 @@
-name: Publish GitHub Release
+name: Publish legacy v0.1.0 release (manual only)
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/publish-release.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: dnscrypt-manager-release
+  group: dnscrypt-manager-v010-release
   cancel-in-progress: true
 
 jobs:
@@ -27,6 +21,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Guard against publishing the wrong version
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'version=v0.1.0' module.prop || {
+            echo 'This legacy workflow is restricted to v0.1.0.' >&2
+            echo 'Use a version-specific release workflow after validating v0.2.0 on Android.' >&2
+            exit 1
+          }
 
       - name: Install build dependencies
         shell: bash

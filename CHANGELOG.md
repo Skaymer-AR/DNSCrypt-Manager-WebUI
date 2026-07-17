@@ -1,15 +1,11 @@
 # Changelog
 
-## v0.1.0
+## Estado actual de pruebas
 
-Primera versión pública funcional de **DNSCrypt Manager**, creada por **Skaymer AR**.
+- La serie `v0.2.x` continúa en testeo; la primera versión estable prevista es `v1.0.0`.
+- El ZIP original `v0.2.0-RC2` queda **descartado/roto** y no debe instalarse: la WebUI podía no encontrar la CLI en KernelSU Next.
+- `v0.2.0-RC2.1` es un hotfix de prueba para la resolución de la CLI desde la WebUI.
+- Desde RC2/hotfixes posteriores, BindHosts debe estar desactivado y el dispositivo reiniciado antes de instalar o habilitar DNSCrypt Manager. Ejecutarlos simultáneamente puede provocar superposición de reglas DNS, pérdida de conectividad y riesgo de bootloop.
+- En KernelSU Next puede ser necesario habilitar Hybrid Mount y reiniciar para que la WebUI acceda al módulo.
 
-- WebUI para KernelSU, KernelSU Next y APatch.
-- CLI y botón de Acción para Magisk.
-- dnscrypt-proxy oficial ARM64 2.1.17.
-- Cloudflare, Quad9, AdGuard, Mullvad y NextDNS.
-- Redirección DNS opcional mediante iptables/nftables.
-- Watchdog, rollback automático y modo PANIC.
-- Probado en Moto Edge 40 Pro con Android 16 sin pérdida de conectividad.
-
-La redirección global permanece desactivada por defecto.
+Consultar `docs/RELEASE_STATUS.md` antes de instalar versiones candidatas.

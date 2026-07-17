@@ -115,6 +115,164 @@
     </p>
   </section>
 
+  <!-- ============================ PROTECCION WEB ============================== -->
+  <section class="card">
+    <h2>Proteccion web</h2>
+    <p class="hint" style="margin-top:0;">
+      Bloqueo de dominios por categoria. Malware, phishing y estafas vienen
+      activados; rastreadores, publicidad y criptomineria, desactivados para no
+      romper apps ni paginas legitimas.
+    </p>
+    <div id="protectionList" class="toggle-list">
+      <div class="hint">Cargando…</div>
+    </div>
+    <div id="protectionTotal" class="hint" style="margin-top:8px;"></div>
+  </section>
+
+  <!-- ========================= PERFILES DE SEGURIDAD ========================== -->
+  <section class="card">
+    <h2>Perfiles de seguridad</h2>
+    <p class="hint" style="margin-top:0;">Perfil aplicado: <span id="profileCurrent">—</span></p>
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button data-profile="balanced">Equilibrado</button>
+      <button data-profile="strict" class="danger">Estricto</button>
+      <button data-profile="privacy">Privacidad</button>
+    </div>
+    <div id="profilePlan" class="hint" style="white-space:pre-wrap;"></div>
+    <p class="hint">
+      El perfil <strong>Estricto</strong> activa fail-closed: si DNSCrypt deja de
+      funcionar, el telefono puede quedarse sin resolucion DNS hasta restaurar la
+      red manualmente. Se te pedira confirmacion.
+    </p>
+  </section>
+
+  <!-- ============================ LISTAS / UPDATES ============================ -->
+  <section class="card">
+    <h2>Listas de bloqueo</h2>
+    <div class="btn-row" style="margin-bottom:12px;">
+      <button id="btnBlocklistsUpdate" class="primary">Actualizar activas</button>
+      <button id="btnBlocklistsValidate">Validar</button>
+    </div>
+    <div id="blocklistsTable" class="hint">Toca “Actualizar activas” para descargar y verificar las listas.</div>
+    <p class="hint">
+      Cada actualizacion se descarga a un archivo temporal, se verifica (tamaño,
+      SHA-256, sintaxis), se prueba con dnscrypt-proxy y solo entonces se aplica.
+      Si algo falla, se restaura la version anterior automaticamente.
+    </p>
+  </section>
+
+  <!-- ================================ ALLOWLIST =============================== -->
+  <section class="card">
+    <h2>Allowlist</h2>
+    <p class="hint" style="margin-top:0;">Dominios que nunca se bloquean.</p>
+    <div class="field">
+      <label for="allowInput">Dominio</label>
+      <input type="text" id="allowInput" placeholder="ej: example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="err" id="allowError"></div>
+    </div>
+    <div class="btn-row" style="margin-bottom:12px;">
+      <button id="btnAllowAdd" class="primary">Agregar</button>
+      <button id="btnAllowSearch">Buscar</button>
+    </div>
+    <div class="field">
+      <label for="allowImport">Importar (un dominio por linea, hasta 200)</label>
+      <textarea id="allowImport" rows="3" placeholder="dominio1.com&#10;dominio2.com" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    </div>
+    <div class="btn-row" style="margin-bottom:12px;">
+      <button id="btnAllowImport">Importar lista</button>
+      <button id="btnAllowExport" class="small">Exportar</button>
+    </div>
+    <div id="allowList" class="hint">—</div>
+  </section>
+
+  <!-- ========================= EXCEPCIONES TEMPORALES ========================= -->
+  <section class="card">
+    <h2>Excepciones temporales</h2>
+    <p class="hint" style="margin-top:0;">Permitir un dominio por un rato, sin quitarlo del bloqueo permanente.</p>
+    <div class="field">
+      <label for="tempInput">Dominio</label>
+      <input type="text" id="tempInput" placeholder="ej: example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="err" id="tempError"></div>
+    </div>
+    <div class="field">
+      <label for="tempDuration">Duracion</label>
+      <select id="tempDuration">
+        <option value="5m">5 minutos</option>
+        <option value="15m" selected>15 minutos</option>
+        <option value="1h">1 hora</option>
+        <option value="boot">Hasta reiniciar</option>
+        <option value="perm">Permanente (allowlist)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="tempReason">Motivo (opcional)</label>
+      <input type="text" id="tempReason" placeholder="ej: descarga puntual" maxlength="80" autocapitalize="off" spellcheck="false">
+    </div>
+    <button id="btnTempAdd" class="wide primary" style="margin-bottom:12px;">Crear excepcion</button>
+    <div id="tempList" class="hint">—</div>
+  </section>
+
+  <!-- =========================== AUDITORIA DE FUGAS =========================== -->
+  <section class="card">
+    <h2>Auditoria de fugas DNS</h2>
+    <div class="btn-row" style="margin-bottom:12px;">
+      <button id="btnLeakTest" class="primary">Ejecutar prueba</button>
+      <button id="btnLeakCopy" class="small">Copiar diagnostico</button>
+    </div>
+    <div id="leakResults" class="hint">Toca “Ejecutar prueba” para auditar posibles fugas.</div>
+  </section>
+
+  <!-- =========================== EVENTOS BLOQUEADOS =========================== -->
+  <section class="card">
+    <h2>Eventos bloqueados</h2>
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button id="btnEventsRefresh" class="primary">Actualizar</button>
+      <button id="btnEventsStats">Estadisticas</button>
+      <button id="btnEventsClear" class="small danger">Borrar historial</button>
+    </div>
+    <div class="field">
+      <label for="eventsFilter">Filtrar por dominio</label>
+      <input type="text" id="eventsFilter" placeholder="ej: ejemplo" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div id="eventsStats" class="hint" style="margin-bottom:8px;"></div>
+    <div id="eventsList" class="hint">—</div>
+  </section>
+
+  <!-- ========================= PRIVACIDAD E HISTORIAL ========================= -->
+  <section class="card">
+    <h2>Privacidad e historial</h2>
+    <div class="field">
+      <label for="histModeSelect">Que se registra</label>
+      <select id="histModeSelect">
+        <option value="off">Nada (historial desactivado)</option>
+        <option value="blocked">Solo bloqueos</option>
+        <option value="blocked_errors">Bloqueos y errores</option>
+        <option value="diag">Diagnostico temporal (24 h)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="histDaysSelect">Retencion</label>
+      <select id="histDaysSelect">
+        <option value="1">1 dia</option>
+        <option value="3">3 dias</option>
+        <option value="7">7 dias</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="histMaxInput">Maximo de eventos (50–10000)</label>
+      <input type="number" id="histMaxInput" min="50" max="10000" step="50" value="1000" inputmode="numeric">
+    </div>
+    <div class="btn-row">
+      <button id="btnHistApply" class="primary">Guardar preferencias</button>
+      <button id="btnEventsExport" class="small">Exportar historial</button>
+    </div>
+    <p class="hint">
+      Todo el historial es local: nada sale del telefono, no hay telemetria.
+      DNS cifrado no es una VPN, DNSSEC no vuelve segura una pagina, y bloquear
+      dominios no reemplaza a un antivirus. Detalle en <code>PRIVACY.md</code>.
+    </p>
+  </section>
+
   <!-- ============================== DIAGNOSTICO ================================ -->
   <details class="card">
     <summary>Diagnostico — Private DNS de Android</summary>

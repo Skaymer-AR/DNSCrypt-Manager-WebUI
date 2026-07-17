@@ -37,6 +37,14 @@ if [ -f "$VALIDATE_BIN_LIB" ]; then
   . "$VALIDATE_BIN_LIB"
 fi
 
+# security.sh: capa de seguridad v0.2.0 (blocklists, allowlist, excepciones,
+# perfiles, fail-closed, fugas, eventos, migracion). Mismo patron de carga.
+SECURITY_LIB="${COMMON%/*}/security.sh"
+if [ -f "$SECURITY_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$SECURITY_LIB"
+fi
+
 ##############################################################################
 # TOML helpers
 ##############################################################################
@@ -204,6 +212,7 @@ cmd_start() {
     echo "ERROR: binario dnscrypt-proxy no encontrado." >&2
     echo "  Instalalo con: dnscrypt-manager fetch-binary   (ver ayuda)." >&2
     log_msg "start: binario ausente"
+    command -v sec_on_service_failure >/dev/null 2>&1 && sec_on_service_failure "start-sin-binario"
     return 1
   }
   fix_selinux_bin "$BIN"
@@ -218,6 +227,7 @@ cmd_start() {
   if ! "$BIN" -config "$TOML" -check >/dev/null 2>>"$DAEMON_LOG"; then
     echo "ERROR: la configuracion TOML no valida (-check). Mira: dnscrypt-manager logs" >&2
     log_msg "start: -check fallo"
+    command -v sec_on_service_failure >/dev/null 2>&1 && sec_on_service_failure "start-check"
     return 1
   fi
 
@@ -287,6 +297,7 @@ cmd_start() {
   done
 
   if [ "$_ready" -eq 0 ]; then
+    command -v fc_release >/dev/null 2>&1 && fc_release
     echo "Iniciado (PID $(read_pid)) en $(get_listen)."
     log_msg "start: OK pid $(read_pid), listener+respuesta confirmados"
     return 0
@@ -296,6 +307,7 @@ cmd_start() {
     rm -f "$PIDFILE" 2>/dev/null
     echo "ERROR: el servicio no confirmo PID+listener+respuesta dentro de ~15s. Revisa: dnscrypt-manager logs" >&2
     log_msg "start: timeout (~15s de reloj) esperando PID+listener+respuesta; PID eliminado, pidfile borrado"
+    command -v sec_on_service_failure >/dev/null 2>&1 && sec_on_service_failure "start-timeout"
     return 1
   fi
 }
@@ -314,6 +326,10 @@ cmd_stop() {
     kill -0 "$_pid" 2>/dev/null && kill -9 "$_pid" 2>/dev/null
   fi
   rm -f "$PIDFILE" 2>/dev/null
+  # Parada MANUAL (intencional): se retiran las reglas fail-closed para no
+  # dejar al usuario sin DNS por decision propia; el flag se conserva y
+  # volvera a actuar ante un FALLO real del servicio.
+  command -v fc_release >/dev/null 2>&1 && fc_release
   echo "Detenido."
   log_msg "stop: OK"
 }
@@ -561,8 +577,10 @@ _tdns_fail() {
   if redirect_is_active; then
     [ "$TDNS_QUIET" -eq 1 ] || echo "  -> Retirando redireccion y restaurando la red del sistema..." >&2
     cmd_redirect remove >/dev/null 2>&1
+    command -v sec_on_service_failure >/dev/null 2>&1 && sec_on_service_failure "test-dns"
     log_msg "test-dns: fallo ($1); rollback de redireccion ejecutado"
   else
+    command -v sec_on_service_failure >/dev/null 2>&1 && sec_on_service_failure "test-dns"
     log_msg "test-dns: fallo ($1); sin redireccion activa, nada que revertir"
   fi
   return 1
@@ -733,6 +751,7 @@ cmd_status() {
     printf '%s,' "$(json_kv backend "$_backend")"
     printf '%s,' "$(json_kv ipv6_mode "$_v6mode")"
     printf '"boot_redirect":%s,' "$_bootredir"
+    command -v sec_status_extra_json >/dev/null 2>&1 && sec_status_extra_json
     printf '"no_redirect_flag":%s,' "$_noredir"
     printf '"binary_present":%s,' "$_binpresent"
     printf '"disabled":%s' "$_disabled"
@@ -898,6 +917,8 @@ cmd_panic() {
   echo "!! PANIC: retirando redireccion, deteniendo proxy y restaurando red..."
   cmd_redirect remove 2>/dev/null
   cmd_stop 2>/dev/null
+  set_flag failclosed 0 2>/dev/null
+  command -v fc_release >/dev/null 2>&1 && fc_release
   touch "$DISABLE_FLAG" 2>/dev/null
   echo "OK: modulo DESHABILITADO. Tu DNS volvio al del sistema."
   echo "Para reactivarlo: dnscrypt-manager enable"
@@ -906,6 +927,7 @@ cmd_panic() {
 
 cmd_restore_network() {
   cmd_redirect remove >/dev/null 2>&1
+  command -v fc_release >/dev/null 2>&1 && fc_release
   echo "Red restaurada: sin reglas nuestras, el DNS vuelve al del sistema."
   log_msg "restore-network"
 }
@@ -1037,13 +1059,30 @@ cmd_fix_perms() {
 
 cmd_set_flag() {
   case "$1" in
-    boot_redirect|ipv6_mode|prerouting) : ;;
+    boot_redirect|prerouting)
+      case "$2" in 0|1) : ;; *) echo "ERROR: $1 acepta 0|1" >&2; return 1 ;; esac ;;
+    ipv6_mode)
+      case "$2" in redirect|block) : ;; *) echo "ERROR: ipv6_mode acepta redirect|block" >&2; return 1 ;; esac ;;
+    hist_mode)
+      case "$2" in off|blocked|blocked_errors|diag) : ;; *) echo "ERROR: hist_mode acepta off|blocked|blocked_errors|diag" >&2; return 1 ;; esac
+      # diag es temporal: se auto-revierte a 'blocked' a las 24h.
+      if [ "$2" = "diag" ] && command -v sec_now >/dev/null 2>&1; then
+        set_flag hist_diag_until "$(( $(sec_now) + 86400 ))"
+      fi ;;
+    hist_days)
+      case "$2" in 1|3|7) : ;; *) echo "ERROR: hist_days acepta 1|3|7" >&2; return 1 ;; esac ;;
+    hist_max)
+      case "$2" in ''|*[!0-9]*) echo "ERROR: hist_max debe ser numerico (50..10000)" >&2; return 1 ;; esac
+      { [ "$2" -ge 50 ] && [ "$2" -le 10000 ]; } 2>/dev/null || { echo "ERROR: hist_max fuera de rango (50..10000)" >&2; return 1; } ;;
     *) echo "ERROR: flag no reconocido: $1" >&2
        echo "Flags: boot_redirect {0|1} | ipv6_mode {redirect|block} | prerouting {0|1}" >&2
+       echo "       hist_mode {off|blocked|blocked_errors|diag} | hist_days {1|3|7} | hist_max {50..10000}" >&2
        return 1 ;;
   esac
   set_flag "$1" "$2"
   echo "OK: $1 = $(get_flag "$1")"
+  # Los flags de historial cambian el TOML (log on/off): regenerar si aplica.
+  case "$1" in hist_mode) command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload >/dev/null 2>&1 ;; esac
 }
 
 ##############################################################################
@@ -1089,10 +1128,28 @@ DNSCrypt Manager - comandos
   Mantenimiento:
     fetch-binary [URL SHA256]
     fix-perms
-    set-flag {boot_redirect|ipv6_mode|prerouting} <valor>
+
+  Seguridad (v0.2.0):
+    protection {status [--json]|enable <cat>|disable <cat>}
+    blocklists {status|sources|update [cat|all] [--sha256 H]|rollback <cat>|validate}
+    allowlist {list|add <dom>|remove <dom>|search <q>|clear|export [ruta]|import <ruta>}
+    temporary-allow {add <dom> <5m|15m|1h|boot|perm> [--reason R]|remove <dom>|list|sweep}
+    security-profile {status|balanced|strict [--confirmed]|privacy}
+    failclosed {status|enable [--confirmed]|disable}
+    leak-test [--json]
+    events [list [--limit N] [--filter S] [--json]|clear|export|stats|pause|resume]
+    migrate
+
+    set-flag {boot_redirect|ipv6_mode|prerouting|hist_mode|hist_days|hist_max} <valor>
     get-flag <clave>
     version | help
 EOF
+}
+
+require_seclib() {
+  command -v sec_lib_loaded >/dev/null 2>&1 && return 0
+  echo "ERROR: falta scripts/security.sh (capa de seguridad no cargada)." >&2
+  exit 1
 }
 
 main() {
@@ -1125,6 +1182,16 @@ main() {
     reset-config)     cmd_config_reset "$@" ;;
     fetch-binary)     cmd_fetch_binary "$@" ;;
     fix-perms)        cmd_fix_perms "$@" ;;
+    protection)       require_seclib; cmd_protection "$@" ;;
+    blocklists)       require_seclib; cmd_blocklists "$@" ;;
+    allowlist)        require_seclib; cmd_allowlist "$@" ;;
+    temporary-allow)  require_seclib; cmd_temporary_allow "$@" ;;
+    security-profile) require_seclib; cmd_security_profile "$@" ;;
+    failclosed)       require_seclib; cmd_failclosed "$@" ;;
+    leak-test)        require_seclib; cmd_leak_test "$@" ;;
+    events)           require_seclib; cmd_events "$@" ;;
+    security-regen)   require_seclib; sec_regen_and_reload "$@" ;;
+    migrate)          require_seclib; sec_migrate "$@" ;;
     version)          cmd_get version ;;
     config)
       _sub="$1"; shift 2>/dev/null

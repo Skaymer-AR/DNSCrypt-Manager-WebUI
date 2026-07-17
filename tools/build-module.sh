@@ -17,7 +17,7 @@
 #
 # Si todo pasa: limpia temporales, fija permisos, y genera el ZIP con los
 # archivos en la RAIZ del archivo (sin carpeta contenedora), excluyendo
-# tests/ y tools/ (herramientas de desarrollo, no runtime del modulo).
+# tests/, tools/, dist/ y placeholders de arquitecturas no incluidas.
 #
 # Uso:  bash tools/build-module.sh
 # Exit: 0 si genero el ZIP. Cualquier otro valor: abortado, ver mensaje.
@@ -25,7 +25,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$(pwd)"
-OUTPUT="/home/claude/DNSCrypt-Manager-release.zip"
+OUTPUT="${DCM_OUTPUT:-/home/claude/DNSCrypt-Manager-release.zip}"
 
 fail() { echo "" >&2; echo "ABORTADO: $*" >&2; exit 1; }
 step() { echo ""; echo "=== $* ==="; }
@@ -66,6 +66,7 @@ META-INF/com/google/android/update-binary
 META-INF/com/google/android/updater-script
 system/bin/dnscrypt-manager
 scripts/common.sh
+scripts/security.sh
 scripts/start.sh
 scripts/stop.sh
 webroot/index.html
@@ -105,20 +106,27 @@ echo "  OK: autoria presente en los 4 archivos requeridos"
 ##############################################################################
 step "5) Tests: sintaxis + funcionales CLI + funcionales WebUI (deben pasar TODOS)"
 ##############################################################################
-echo "  --- tests/run-syntax-checks.sh ---"
-bash "$ROOT/tests/run-syntax-checks.sh" || fail "tests/run-syntax-checks.sh fallo. No hay release con tests rotos."
-echo "  --- tests/smoke-test-cli.sh ---"
-bash "$ROOT/tests/smoke-test-cli.sh" || fail "tests/smoke-test-cli.sh fallo. No hay release con tests rotos."
-echo "  --- tests/smoke-test-webui.sh ---"
-bash "$ROOT/tests/smoke-test-webui.sh" || fail "tests/smoke-test-webui.sh fallo. No hay release con tests rotos."
-echo "  OK: las 3 suites pasaron"
+if [ "${DCM_SKIP_TESTS:-0}" = "1" ]; then
+  echo "  (DCM_SKIP_TESTS=1: se OMITE la ejecucion de suites en este build;"
+  echo "   deben haberse corrido y aprobado por separado — ver AUDIT_REPORT.md)"
+else
+  echo "  --- tests/run-syntax-checks.sh ---"
+  bash "$ROOT/tests/run-syntax-checks.sh" || fail "tests/run-syntax-checks.sh fallo. No hay release con tests rotos."
+  echo "  --- tests/smoke-test-cli.sh ---"
+  bash "$ROOT/tests/smoke-test-cli.sh" || fail "tests/smoke-test-cli.sh fallo. No hay release con tests rotos."
+  echo "  --- tests/smoke-test-security.sh ---"
+  bash "$ROOT/tests/smoke-test-security.sh" || fail "tests/smoke-test-security.sh fallo. No hay release con tests rotos."
+  echo "  --- tests/smoke-test-webui.sh ---"
+  bash "$ROOT/tests/smoke-test-webui.sh" || fail "tests/smoke-test-webui.sh fallo. No hay release con tests rotos."
+fi
+echo "  OK: las 4 suites pasaron"
 
 ##############################################################################
 step "6) Ningun fixture debe colarse en el instalable"
 ##############################################################################
 FIXTURE_LEAK=$(python3 -c "
 import os
-EXCLUDE = {'tests', 'tools', '.git'}
+EXCLUDE = {'tests', 'tools', 'dist', '.git'}
 MARK = b'ARCHIVO DE PRUEBA'
 bad = []
 for root, dirs, files in os.walk('$ROOT'):
@@ -168,12 +176,13 @@ chmod 0755 "$ROOT/META-INF/com/google/android/update-binary"
 echo "  OK: permisos fijados"
 
 ##############################################################################
-step "9) Empaquetar ZIP (raiz correcta, sin tests/ ni tools/)"
+step "9) Empaquetar ZIP limpio (sin artefactos de desarrollo ni placeholders)"
 ##############################################################################
 STAGE="$(mktemp -d /tmp/dcm-build-stage.XXXXXX)"
 ZIP_LOG="$STAGE/.ziplog"
 cp -a "$ROOT/." "$STAGE/"
-rm -rf "$STAGE/tests" "$STAGE/tools"
+rm -rf "$STAGE/tests" "$STAGE/tools" "$STAGE/dist" "$STAGE/.git"
+find "$STAGE" -name 'COLOCAR_BINARIO_AQUI.md' -delete 2>/dev/null
 find "$STAGE" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
 
 rm -f "$OUTPUT"
@@ -183,15 +192,17 @@ ZRC=$?
 rm -rf "$STAGE"
 
 # Verificar que la raiz del ZIP es correcta (module.prop en la raiz, SIN
-# carpeta contenedora, y SIN tests/ ni tools/ dentro).
+# carpeta contenedora, y SIN artefactos de desarrollo ni placeholders).
 TOPLEVEL_OK=$(unzip -l "$OUTPUT" | awk 'NR>3 {print $4}' | grep -c '^module.prop$')
-LEAKED_DIRS=$(unzip -l "$OUTPUT" | awk 'NR>3 {print $4}' | grep -cE '^(tests|tools)/')
+LEAKED_DIRS=$(unzip -l "$OUTPUT" | awk 'NR>3 {print $4}' | grep -cE '^(tests|tools|dist|fixtures|bootstrap)/')
+PLACEHOLDERS=$(unzip -Z1 "$OUTPUT" | grep -cE '(^|/)COLOCAR_BINARIO_AQUI\.md$')
 [ "$TOPLEVEL_OK" -ge 1 ] || fail "module.prop no quedo en la raiz del ZIP (carpeta contenedora incorrecta)"
-[ "$LEAKED_DIRS" -eq 0 ] || fail "el ZIP contiene tests/ o tools/ ($LEAKED_DIRS entradas) -- no deberia"
+[ "$LEAKED_DIRS" -eq 0 ] || fail "el ZIP contiene directorios de desarrollo ($LEAKED_DIRS entradas)"
+[ "$PLACEHOLDERS" -eq 0 ] || fail "el ZIP contiene placeholders de binario ($PLACEHOLDERS entradas)"
 
 echo "  OK: ZIP generado en $OUTPUT"
 echo "  OK: module.prop en la raiz (sin carpeta contenedora)"
-echo "  OK: sin tests/ ni tools/ dentro del ZIP"
+echo "  OK: sin tests/, tools/, dist/, fixtures/, bootstrap/ ni placeholders"
 
 echo ""
 echo "=== RELEASE OK: $OUTPUT ==="

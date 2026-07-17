@@ -1,105 +1,36 @@
-# DNSCrypt Manager
+# DNSCrypt Manager WebUI
 
-**Creado por Skaymer AR**
+> ⚠️ **Estado de pruebas:** la serie `v0.2.x` todavía está en validación. La primera versión considerada estable será **v1.0.0**.
+>
+> **No usar el ZIP original `v0.2.0-RC2`: está descartado/roto.** En KernelSU Next la WebUI podía no encontrar la CLI del módulo. Usar únicamente una revisión hotfix posterior.
+>
+> **BindHosts debe estar desactivado y el teléfono reiniciado antes de instalar o habilitar RC2/hotfixes posteriores.** Mantener BindHosts y DNSCrypt Manager activos simultáneamente puede superponer hooks o reglas DNS, provocar pérdida de conectividad y generar riesgo de bootloop.
+>
+> En **KernelSU Next**, si la WebUI indica que `dnscrypt-manager` es inaccesible, activar **Hybrid Mount** y reiniciar.
 
-Módulo root para Android que ejecuta [`dnscrypt-proxy`](https://github.com/DNSCrypt/dnscrypt-proxy) como servicio de sistema, con redirección DNS opcional, WebUI de control, modo seguro anti-bootloop y recuperación por ADB.
+Este repositorio contiene el desarrollo experimental de DNSCrypt Manager para Android root.
 
-Compatible con **KernelSU**, **KernelSU Next**, **APatch** (WebUI completa) y **Magisk** (botón de Acción + CLI, sin WebUI nativa).
+## Estado de las versiones
 
----
+- `v0.1.0`: última release estable heredada.
+- `v0.2.0-RC1`: candidata en pruebas.
+- `v0.2.0-RC2` original: **descartada y no recomendada**.
+- `v0.2.0-RC2.1` WebUI Hotfix: candidata en pruebas.
+- `v1.0.0`: futura primera release estable después de completar validación real.
 
-## Estado del proyecto
+Ver [`docs/RELEASE_STATUS.md`](docs/RELEASE_STATUS.md) para el estado, las advertencias de BindHosts y los requisitos de KernelSU Next.
 
-Esta es la **versión mínima funcional**. Cubre:
+## Regla de seguridad antes de instalar RC2 o posteriores
 
-- Servicio `dnscrypt-proxy` gestionado por una única CLI (`dnscrypt-manager`).
-- Redirección DNS real vía `iptables`/`ip6tables` o `nftables`, con cadenas propias e idempotentes.
-- Cloudflare, Quad9, AdGuard, Mullvad y NextDNS por Configuration ID.
-- Watchdog de arranque con rollback automático si el DNS deja de responder.
-- WebUI para KernelSU/KernelSU Next/APatch.
-- CLI y botón Acción para Magisk.
-- Comandos de emergencia (`panic`, `disable`, `restore-network`).
-- Pruebas aisladas de sintaxis, CLI y WebUI.
+1. Desactivar BindHosts.
+2. Reiniciar el dispositivo.
+3. Verificar que BindHosts continúe desactivado.
+4. Instalar o activar DNSCrypt Manager.
 
-La primera versión fue probada con éxito en un **Motorola Edge 40 Pro con Android 16**, sin pérdida de Wi‑Fi, red móvil ni conectividad durante las pruebas iniciales.
+No se admite ejecutar ambos módulos simultáneamente durante las pruebas por el riesgo de superposición de reglas DNS, pérdida de conectividad y bootloop.
 
-## Descargar
+## Compatibilidad objetivo
 
-El módulo instalable se publica en la sección **Releases** del repositorio:
+KernelSU, KernelSU Next, APatch y Magisk; Android 13–16; ARM64; SELinux Enforcing.
 
-```text
-DNSCrypt-Manager-release.zip
-DNSCrypt-Manager-release.zip.sha256
-```
-
-Verificá siempre el ZIP con el archivo `.sha256` que acompaña a la misma release. El workflow de publicación reconstruye el módulo desde el código fuente, descarga y valida el binario oficial ARM64 de `dnscrypt-proxy` y genera un checksum nuevo para ese build exacto.
-
-## Requisitos
-
-- Android 13, 14, 15 o 16.
-- Arquitectura **arm64-v8a**.
-- KernelSU, KernelSU Next, APatch o Magisk.
-- SELinux Enforcing soportado.
-
-## Instalación
-
-1. Descargá `DNSCrypt-Manager-release.zip` desde **Releases**.
-2. Instalalo desde KernelSU, APatch o Magisk.
-3. Reiniciá el dispositivo.
-4. Abrí la WebUI y ejecutá **Probar DNS**.
-5. Activá la redirección global solo después de verificar que el proxy resuelva correctamente.
-
-Por seguridad, **la redirección global está desactivada por defecto**.
-
-## Recuperación de emergencia
-
-```sh
-su -c dnscrypt-manager panic
-su -c dnscrypt-manager redirect remove
-su -c dnscrypt-manager restore-network
-su -c dnscrypt-manager disable
-```
-
-## Compilar
-
-```sh
-./tools/inject-binary.sh /ruta/al/dnscrypt-proxy
-./tools/build-module.sh
-```
-
-## Pruebas
-
-```sh
-bash tests/run-syntax-checks.sh
-bash tests/smoke-test-cli.sh
-bash tests/smoke-test-webui.sh
-```
-
-## Funciones visuales actuales
-
-- Estado del servicio, PID y listener.
-- Iniciar, detener y reiniciar.
-- Prueba DNS.
-- Cloudflare, Quad9, AdGuard, Mullvad y NextDNS.
-- Aplicar o quitar redirección DNS.
-- Redirección automática al arranque.
-- Modo IPv6.
-- Diagnóstico de Private DNS.
-- Logs.
-- Botón PANIC.
-
-## Documentación
-
-- `BINARY_INFO.md`: procedencia y validación del binario.
-- `AUDIT_REPORT.md`: pruebas, riesgos y limitaciones.
-- `CHANGELOG.md`: historial de versiones públicas.
-
-## Agradecimientos
-
-Parte del desarrollo y la auditoría contó con asistencia de herramientas de IA. La autoría, dirección y responsabilidad del proyecto son de **Skaymer AR**.
-
-## Autor
-
-**Skaymer AR**
-
-Proyecto creado y mantenido por Skaymer AR.
+La compatibilidad definitiva no debe darse por cerrada hasta la publicación de v1.0.0.
