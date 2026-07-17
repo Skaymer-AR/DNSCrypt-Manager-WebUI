@@ -1,9 +1,9 @@
 name: Publish preliminary v0.2.0 and v0.3.0
 
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - publish/previews-2026-07-17
+    branches: [publish/previews-2026-07-17]
     paths:
       - '.github/workflows/publish-preliminary-v020-v030.yml'
       - 'import-assets/**'
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: publish-preliminary-v020-v030
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   publish:
@@ -25,21 +25,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure Git
+      - name: Reconstruct publication inputs
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name 'Skaymer AR'
           git config user.email 'skaymer@users.noreply.github.com'
           git fetch origin main feature/security-v0.2.0 --tags
-          cat import-assets/rc22-part-* > /tmp/rc22.patch
-          cat import-assets/v03-part-* > /tmp/v03.patch
+          cat import-assets/rc22-part-*.b64 | base64 --decode > /tmp/rc22.patch
+          cat import-assets/v03-part-*.b64 | base64 --decode > /tmp/v03.patch
+          cp import-assets/RELEASE_NOTES_RC22.md /tmp/RELEASE_NOTES_RC22.md
+          cp import-assets/RELEASE_NOTES_V03.md /tmp/RELEASE_NOTES_V03.md
+          test -s /tmp/rc22.patch
+          test -s /tmp/v03.patch
+          grep -q 'fix(catalog): repair the three broken RC1 sources' /tmp/rc22.patch
+          grep -q 'feat(i18n): English/Spanish i18n system' /tmp/v03.patch
 
       - name: Reconstruct v0.2.0-RC2.2 branch
+        shell: bash
         run: |
           set -euo pipefail
           git checkout -B pre-release/v0.2.0-rc2.2 origin/feature/security-v0.2.0
           git am -3 /tmp/rc22.patch
           mkdir -p docs
-          cp "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_RC22.md" docs/PRE_RELEASE_STATUS.md
+          cp /tmp/RELEASE_NOTES_RC22.md docs/PRE_RELEASE_STATUS.md
           python3 - <<'PY'
           from pathlib import Path
           p = Path('README.md')
@@ -49,10 +58,12 @@ jobs:
               p.write_text(warning + text, encoding='utf-8')
           PY
           git add README.md docs/PRE_RELEASE_STATUS.md
-          git commit -m 'docs(rc2.2): mark preliminary status and BindHosts bootloop warning'
-          git push --force-with-lease origin HEAD:refs/heads/pre-release/v0.2.0-rc2.2
+          git commit -m 'docs(rc2.2): mark preliminary status and BindHosts warning'
+          echo "RC22_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git push --force origin HEAD:refs/heads/pre-release/v0.2.0-rc2.2
 
       - name: Test and build v0.2.0-RC2.2
+        shell: bash
         run: |
           set -euo pipefail
           bash tests/run-syntax-checks.sh
@@ -66,14 +77,16 @@ jobs:
           cp AUDIT_REPORT.md "$RUNNER_TEMP/releases/AUDIT_REPORT_RC2.2.md"
 
       - name: Reconstruct v0.3.0 Checkpoint A branch
+        shell: bash
         run: |
           set -euo pipefail
-          git checkout -B feature/v0.3.0-rc1 pre-release/v0.2.0-rc2.2
+          git checkout -B feature/v0.3.0-rc1 "$RC22_SHA"
           git am -3 /tmp/v03.patch
           sed -i 's/^version=.*/version=v0.3.0-RC1-WIP-A/' module.prop
           sed -i 's/^versionCode=.*/versionCode=300/' module.prop
-          sed -i 's/^description=.*/description=PREVIEW en pruebas: WebUI SPA e i18n sobre RC2.2. BindHosts debe estar desactivado; estable desde v1.0.0. KernelSU Next puede requerir Hybrid Mount./' module.prop
-          cp "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_V03.md" docs/PRE_RELEASE_STATUS.md
+          sed -i 's|^description=.*|description=PREVIEW en pruebas: WebUI SPA e i18n sobre RC2.2. BindHosts debe estar desactivado; estable desde v1.0.0. KernelSU Next puede requerir Hybrid Mount.|' module.prop
+          mkdir -p docs
+          cp /tmp/RELEASE_NOTES_V03.md docs/PRE_RELEASE_STATUS.md
           python3 - <<'PY'
           from pathlib import Path
           p = Path('README.md')
@@ -84,9 +97,11 @@ jobs:
           PY
           git add module.prop README.md docs/PRE_RELEASE_STATUS.md
           git commit -m 'chore(v0.3): publish Checkpoint A as preliminary preview'
-          git push --force-with-lease origin HEAD:refs/heads/feature/v0.3.0-rc1
+          echo "V03_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git push --force origin HEAD:refs/heads/feature/v0.3.0-rc1
 
       - name: Test and build v0.3.0-RC1-WIP-A
+        shell: bash
         run: |
           set -euo pipefail
           bash tests/run-syntax-checks.sh
@@ -98,23 +113,24 @@ jobs:
           cp /tmp/v03.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch"
           cp WORK_PROGRESS_v0.3.md "$RUNNER_TEMP/releases/"
 
-      - name: Publish or update preliminary releases
+      - name: Publish preliminary releases
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          git tag -f v0.2.0-rc2.2 pre-release/v0.2.0-rc2.2
-          git tag -f v0.3.0-rc1-wip-a feature/v0.3.0-rc1
+          git tag -f v0.2.0-rc2.2 "$RC22_SHA"
+          git tag -f v0.3.0-rc1-wip-a "$V03_SHA"
           git push --force origin refs/tags/v0.2.0-rc2.2 refs/tags/v0.3.0-rc1-wip-a
           if gh release view v0.2.0-rc2.2 >/dev/null 2>&1; then
-            gh release edit v0.2.0-rc2.2 --title 'DNSCrypt Manager v0.2.0-RC2.2 (Preliminary)' --notes-file "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_RC22.md" --prerelease
+            gh release edit v0.2.0-rc2.2 --title 'DNSCrypt Manager v0.2.0-RC2.2 (Preliminary)' --notes-file /tmp/RELEASE_NOTES_RC22.md --prerelease
           else
-            gh release create v0.2.0-rc2.2 --title 'DNSCrypt Manager v0.2.0-RC2.2 (Preliminary)' --notes-file "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_RC22.md" --prerelease
+            gh release create v0.2.0-rc2.2 --title 'DNSCrypt Manager v0.2.0-RC2.2 (Preliminary)' --notes-file /tmp/RELEASE_NOTES_RC22.md --prerelease
           fi
           gh release upload v0.2.0-rc2.2 "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256" "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch" "$RUNNER_TEMP/releases/AUDIT_REPORT_RC2.2.md" --clobber
           if gh release view v0.3.0-rc1-wip-a >/dev/null 2>&1; then
-            gh release edit v0.3.0-rc1-wip-a --title 'DNSCrypt Manager v0.3.0-RC1-WIP-A (Preview)' --notes-file "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_V03.md" --prerelease
+            gh release edit v0.3.0-rc1-wip-a --title 'DNSCrypt Manager v0.3.0-RC1-WIP-A (Preview)' --notes-file /tmp/RELEASE_NOTES_V03.md --prerelease
           else
-            gh release create v0.3.0-rc1-wip-a --title 'DNSCrypt Manager v0.3.0-RC1-WIP-A (Preview)' --notes-file "$GITHUB_WORKSPACE/import-assets/RELEASE_NOTES_V03.md" --prerelease
+            gh release create v0.3.0-rc1-wip-a --title 'DNSCrypt Manager v0.3.0-RC1-WIP-A (Preview)' --notes-file /tmp/RELEASE_NOTES_V03.md --prerelease
           fi
           gh release upload v0.3.0-rc1-wip-a "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256" "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch" "$RUNNER_TEMP/releases/WORK_PROGRESS_v0.3.md" --clobber
