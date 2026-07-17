@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - publish/final-source-releases
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/inspect-existing-bootstrap.yml'
   workflow_dispatch:
 
 permissions:
