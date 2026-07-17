@@ -8,32 +8,29 @@
 >
 > En **KernelSU Next**, si la WebUI indica que `dnscrypt-manager` es inaccesible, activar **Hybrid Mount** y reiniciar.
 
-Gestor de `dnscrypt-proxy` para Android root con CLI, WebUI, redirección DNS opcional, blocklists, rollback y herramientas de diagnóstico.
+Este repositorio contiene el desarrollo experimental de DNSCrypt Manager para Android root.
 
-## Estado publicado
+## Estado de las versiones
 
-- `v0.1.0`: release estable heredada.
-- `v0.2.0-RC1`: candidata de prueba.
-- `v0.2.0-RC2` original: **descartada; no instalar**.
-- `v0.2.0-RC2.1` WebUI Hotfix: candidata de prueba; puede requerir Hybrid Mount en KernelSU Next.
-- `v1.0.0`: futura primera release estable.
+- `v0.1.0`: última release estable heredada.
+- `v0.2.0-RC1`: candidata en pruebas.
+- `v0.2.0-RC2` original: **descartada y no recomendada**.
+- `v0.2.0-RC2.1` WebUI Hotfix: candidata en pruebas.
+- `v1.0.0`: futura primera release estable después de completar validación real.
 
-La explicación completa está en [`docs/RELEASE_STATUS.md`](docs/RELEASE_STATUS.md).
+Ver [`docs/RELEASE_STATUS.md`](docs/RELEASE_STATUS.md) para el estado, las advertencias de BindHosts y los requisitos de KernelSU Next.
 
-## Instalación segura de v0.2.x
+## Regla de seguridad antes de instalar RC2 o posteriores
 
 1. Desactivar BindHosts.
 2. Reiniciar el dispositivo.
-3. Confirmar que BindHosts sigue desactivado.
-4. Instalar o actualizar DNSCrypt Manager.
-5. Mantener redirección global y fail-closed apagados hasta comprobar conectividad.
-6. Conservar acceso a `PANIC` y `restore-network` durante las pruebas.
+3. Verificar que BindHosts continúe desactivado.
+4. Instalar o activar DNSCrypt Manager.
+
+No se admite ejecutar ambos módulos simultáneamente durante las pruebas por el riesgo de superposición de reglas DNS, pérdida de conectividad y bootloop.
 
 ## Compatibilidad objetivo
 
-- KernelSU / KernelSU Next / APatch / Magisk.
-- Android 13–16.
-- ARM64.
-- SELinux Enforcing.
+KernelSU, KernelSU Next, APatch y Magisk; Android 13–16; ARM64; SELinux Enforcing.
 
-La compatibilidad final no debe darse por cerrada hasta completar el plan de pruebas en Android y publicar v1.0.0.
+La compatibilidad definitiva no debe darse por cerrada hasta la publicación de v1.0.0.
