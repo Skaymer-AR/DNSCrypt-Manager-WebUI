@@ -91,13 +91,25 @@ actualización; el HEAD final exacto se entrega fuera del repositorio (bundle/pa
 y en la respuesta de cierre), para no auto-referenciar un hash que cambia al
 commitear este archivo.
 
+### Corrección de fuga de proceso (timeout) — CASO B
+Al endurecer la verificación de residuos (J15, ahora race-safe con starttime como
+identidad) se **destapó una fuga real**: en el camino de **timeout**, el worker
+pesado (hijo del subshell; `sleep` stub en tests) sobrevivía porque el kill de
+**grupo** corría **antes** de `_cat_kill_tree` y reparentaba el worker a init antes
+de recolectarlo. **Fuga real, no falso positivo.** Fix en `scripts/catalog.sh`:
+`_cat_kill_tree` congela el root con SIGSTOP antes de recolectar el subárbol (+
+SIGCONT tras señalar por PID), y watchdog/cancel llaman a `_cat_kill_tree` ANTES
+del kill de grupo (que queda como respaldo). Test `tests/smoke-test-compile.sh`:
+J15 race-safe + `process-registry.tsv`. Verificado: cancel/PANIC/timeout no dejan
+hijo ni worker vivos. Detalle: `docs/PROCESS_RESIDUAL_DIAGNOSIS.md`.
+
+### Resultados estables tras el fix
+- `smoke-test-compile.sh`: **19/19** en **3 corridas seguidas**.
+- `scale-test-compile.sh` (100k): **24/24** en **2 corridas seguidas** (subió de 21
+  a 24 por las sub-aserciones deterministas de poco espacio 4.7b/c/d).
+- `run-syntax-checks.sh`: OK. Suite base previa: 210/210 (pendiente corrida final).
+
 ### Pendientes reales de RC2 (orden)
-1. Docs de capacidad restantes: CATALOG_SCHEMA.md, BLOCKLIST_CONFLICTS.md,
-   BINDHOSTS_IMPORT.md, SERVICE_CONTROLS.md, ANDROID_TEST_PLAN_v0.2.0.md;
-   actualizar README/CHANGELOG/AUDIT_REPORT. 2. `module.prop` → v0.2.0-RC2 /
-   versionCode=202 (mantener author=Skaymer AR). 3. Suite completa una sola vez.
-   4. Build limpio + `unzip -t` + auditoría de contenido + verificación binario
-   ARM64 + SHA-256 final. **Sin** reemplazar RC1.
 
 ### Próximo paso exacto
 Escribir las docs de capacidad restantes; luego cambiar module.prop a RC2, correr
