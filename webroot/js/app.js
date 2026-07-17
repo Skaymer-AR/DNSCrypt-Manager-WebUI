@@ -1213,10 +1213,27 @@ async function initCatalogRC2() {
 }
 
 function init() {
+  // Navegacion (SPA) e idioma se inicializan SIEMPRE, haya o no puente ksu.
+  if (typeof Router !== 'undefined' && Router.init) {
+    try { Router.init(); } catch (_) {}
+  }
+  if (typeof I18N !== 'undefined' && I18N.init) {
+    try {
+      I18N.init().then(function () {
+        const sel = $('langSelect');
+        if (sel) {
+          sel.value = I18N.current();
+          sel.addEventListener('change', function () {
+            if (I18N.setLang) I18N.setLang(sel.value);
+          });
+        }
+      });
+    } catch (_) {}
+  }
   if (!DCM.available()) {
     const b = $('ksuBanner');
     if (b) { b.textContent = STR.noKsu; b.classList.remove('hidden'); }
-    // Sin puente ksu no hay nada mas para hacer: no arrancamos el polling.
+    // Sin puente ksu no hay backend: navegacion/idioma siguen, pero no hay polling.
     return;
   }
   wireServiceButtons();
