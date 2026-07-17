@@ -1182,7 +1182,74 @@ require_catlib() {
 
 main() {
   _cmd="$1"; shift 2>/dev/null
+# ---------------------------------------------------------------------------
+# environment status: informa la visibilidad del modulo/CLI y detecta Hybrid
+# Mount (KernelSU Next). Basado en evidencia; 'unknown' cuando no es verificable.
+# Bajo TEST_MODE se pueden forzar las sondas para tests deterministas.
+# ---------------------------------------------------------------------------
+_env_probe() {  # $1=nombre de var TEST override  $2=comando-condicion (eval-free)
+  case "$1" in
+    systemless) if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && [ -n "${DNSCRYPT_TEST_SYSTEMLESS_CLI:-}" ]; then [ "$DNSCRYPT_TEST_SYSTEMLESS_CLI" = 1 ]; return; fi; [ -x /system/bin/dnscrypt-manager ] ;;
+    direct)     if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && [ -n "${DNSCRYPT_TEST_DIRECT_CLI:-}" ]; then [ "$DNSCRYPT_TEST_DIRECT_CLI" = 1 ]; return; fi; [ -f "$MODDIR/system/bin/dnscrypt-manager" ] ;;
+  esac
+}
+_env_manager() {
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && [ -n "${DNSCRYPT_TEST_MANAGER:-}" ]; then printf '%s' "$DNSCRYPT_TEST_MANAGER"; return; fi
+  # Evidencia en disco (sin ejecutar binarios ajenos).
+  if [ -d /data/adb/ap ] || [ -d /data/adb/apd ] || [ -f /data/adb/ap/apd ]; then printf apatch; return; fi
+  if [ -d /data/adb/ksu ] || [ -f /data/adb/ksud ] || [ -f /data/adb/ksu/bin/ksud ]; then
+    # KernelSU: intentar distinguir Next por marcadores (best-effort).
+    if [ -f /data/adb/ksu/bin/ksud ] && grep -qai "next" /data/adb/ksu/bin/ksud 2>/dev/null; then printf kernelsu_next; return; fi
+    if [ -d /data/adb/ksu/modules ] && [ -e /data/adb/.ksu_next ]; then printf kernelsu_next; return; fi
+    printf kernelsu; return
+  fi
+  if [ -d /data/adb/magisk ] || command -v magisk >/dev/null 2>&1; then printf magisk; return; fi
+  printf unknown
+}
+_env_selinux() {
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && [ -n "${DNSCRYPT_TEST_SELINUX:-}" ]; then printf '%s' "$DNSCRYPT_TEST_SELINUX"; return; fi
+  if command -v getenforce >/dev/null 2>&1; then getenforce 2>/dev/null | tr 'A-Z' 'a-z'; else printf unknown; fi
+}
+cmd_environment() {
+  _sub="${1:-status}"
+  [ "$_sub" = "status" ] || { echo "Uso: dnscrypt-manager environment status" >&2; return 1; }
+  _mgr=$(_env_manager)
+  _sysless=no; _env_probe systemless && _sysless=yes
+  _direct=no;  _env_probe direct && _direct=yes
+  _sel=$(_env_selinux)
+  _ctx="uid=$(id -u 2>/dev/null || echo '?')"
+  # hybrid_mount_required: solo KernelSU Next lo requiere; en otros managers no aplica.
+  case "$_mgr" in
+    kernelsu_next) _req=yes ;;
+    magisk|apatch) _req=no ;;
+    *) _req=unknown ;;
+  esac
+  # hybrid_mount_detected: no afirmar solo porque /system funciona.
+  if [ "$_sysless" = yes ]; then
+    case "$_mgr" in kernelsu_next) _det=yes ;; *) _det=unknown ;; esac
+  elif [ "$_direct" = yes ]; then
+    _det=no          # el modulo esta instalado pero NO expuesto a /system
+  else
+    _det=unknown
+  fi
+  echo "manager                : $_mgr"
+  echo "module_path            : $MODDIR"
+  echo "systemless_cli_visible : $_sysless"
+  echo "direct_module_cli_visible : $_direct"
+  echo "hybrid_mount_required  : $_req"
+  echo "hybrid_mount_detected  : $_det"
+  echo "selinux                : $_sel"
+  echo "execution_context      : $_ctx"
+  # Mensaje accionable solo en el caso concreto (KSU Next, instalado pero no expuesto).
+  if [ "$_mgr" = kernelsu_next ] && [ "$_direct" = yes ] && [ "$_sysless" = no ]; then
+    echo ""
+    echo "KernelSU Next no expone el modulo a esta WebUI. Activa Hybrid Mount, reinicia el dispositivo y volve a abrir la interfaz."
+  fi
+  return 0
+}
+
   case "$_cmd" in
+    environment|env)  cmd_environment "$@" ;;
     start)            cmd_start "$@" ;;
     stop)             cmd_stop "$@" ;;
     restart)          cmd_restart "$@" ;;
