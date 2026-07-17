@@ -2,12 +2,6 @@ name: Publish preliminary v0.2.0 and v0.3.0
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - publish/previews-2026-07-17
-    paths:
-      - '.github/workflows/publish-preliminary-v020-v030.yml'
-      - 'import-assets/**'
   pull_request:
     branches:
       - main
@@ -21,12 +15,13 @@ permissions:
 
 concurrency:
   group: publish-preliminary-v020-v030
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout publication branch
@@ -34,7 +29,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct source inputs
+      - name: Reconstruct and verify source inputs
         shell: bash
         run: |
           set -euo pipefail
@@ -42,23 +37,37 @@ jobs:
           git config user.email 'skaymer@users.noreply.github.com'
           git fetch origin main feature/security-v0.2.0 --tags
 
+          cat import-assets/wip3gz-part-* | base64 --decode | gzip -dc > /tmp/wip3.patch
           cat import-assets/rc22-part-* | base64 --decode > /tmp/rc22.patch
           cat import-assets/v03-part-*  | base64 --decode > /tmp/v03.patch
 
           cp import-assets/RELEASE_NOTES_RC22.md /tmp/RELEASE_NOTES_RC22.md
           cp import-assets/RELEASE_NOTES_V03.md /tmp/RELEASE_NOTES_V03.md
+          cp import-assets/AUDIT_RC2.2.md /tmp/AUDIT_SOURCE_RC2.2.md
+          cp import-assets/TEST_RESULTS_RC2.2.md /tmp/TEST_RESULTS_RC2.2.md
 
+          test -s /tmp/wip3.patch
           test -s /tmp/rc22.patch
           test -s /tmp/v03.patch
-          grep -q '^From ' /tmp/rc22.patch
-          grep -q '^From ' /tmp/v03.patch
+          test "$(grep -c '^From [0-9a-f]\{40\} ' /tmp/wip3.patch)" -eq 21
+          test "$(grep -c '^From [0-9a-f]\{40\} ' /tmp/rc22.patch)" -eq 3
+          test "$(grep -c '^From [0-9a-f]\{40\} ' /tmp/v03.patch)" -eq 4
+
+          echo '8ed021ed038d7dd7f0c0c8f5a55ff1ffbbc365087242051ded8592c7ab53efae  /tmp/wip3.patch' | sha256sum -c -
+          echo '70e9b4a8fcbc7992575219f01c1b9ee9beae548161603ba7ce9b4eccbca4bb86  /tmp/rc22.patch' | sha256sum -c -
+          echo 'a6fb245395ebb4d93e4d46bfb26879b95def90a77b0751330affe9f03e0c869a  /tmp/v03.patch' | sha256sum -c -
 
       - name: Reconstruct v0.2.0-RC2.2 branch
         shell: bash
         run: |
           set -euo pipefail
-          git checkout -B pre-release/v0.2.0-rc2.2 origin/feature/security-v0.2.0
+          git checkout -B pre-release/v0.2.0-rc2.2 bd2e0ab28922b3ed067f4a3c183a77fca714c243
+          git am -3 /tmp/wip3.patch
           git am -3 /tmp/rc22.patch
+
+          grep -qx 'version=v0.2.0-RC2.2' module.prop
+          grep -qx 'versionCode=204' module.prop
+          grep -qx 'author=Skaymer AR' module.prop
 
           mkdir -p docs
           cp /tmp/RELEASE_NOTES_RC22.md docs/PRE_RELEASE_STATUS.md
@@ -79,8 +88,10 @@ jobs:
           PY
 
           git add README.md docs/PRE_RELEASE_STATUS.md
-          git commit -m 'docs(rc2.2): mark preliminary status and BindHosts bootloop warning'
-          git push --force-with-lease origin HEAD:refs/heads/pre-release/v0.2.0-rc2.2
+          if ! git diff --cached --quiet; then
+            git commit -m 'docs(rc2.2): mark preliminary status and BindHosts bootloop warning'
+          fi
+          git push --force origin HEAD:refs/heads/pre-release/v0.2.0-rc2.2
 
       - name: Test and build v0.2.0-RC2.2
         shell: bash
@@ -96,10 +107,27 @@ jobs:
             DCM_OUTPUT="$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" \
             bash tools/build-module.sh
 
+          unzip -t "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip"
+          unzip -p "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" module.prop | grep -qx 'version=v0.2.0-RC2.2'
+          unzip -p "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" module.prop | grep -qx 'versionCode=204'
+
           sha256sum "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" \
             > "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256"
           cp /tmp/rc22.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch"
-          cp AUDIT_REPORT.md "$RUNNER_TEMP/releases/AUDIT_REPORT_RC2.2.md"
+          cp /tmp/AUDIT_SOURCE_RC2.2.md "$RUNNER_TEMP/releases/AUDIT_SOURCE_RC2.2.md"
+          cp /tmp/TEST_RESULTS_RC2.2.md "$RUNNER_TEMP/releases/TEST_RESULTS_RC2.2.md"
+
+          {
+            echo 'DNSCrypt Manager v0.2.0-RC2.2 release build audit'
+            echo
+            cat "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256"
+            echo 'unzip_test=ok'
+            echo 'module_version=v0.2.0-RC2.2'
+            echo 'module_version_code=204'
+            echo 'release_status=prerelease_testing'
+            echo 'bindhosts_must_be_disabled=true'
+            echo 'stable_target=v1.0.0'
+          } > "$RUNNER_TEMP/releases/AUDIT_RELEASE_RC2.2.txt"
 
       - name: Reconstruct v0.3.0 Checkpoint A branch
         shell: bash
@@ -131,8 +159,10 @@ jobs:
           PY
 
           git add module.prop README.md docs/PRE_RELEASE_STATUS.md
-          git commit -m 'chore(v0.3): publish Checkpoint A as preliminary preview'
-          git push --force-with-lease origin HEAD:refs/heads/feature/v0.3.0-rc1
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore(v0.3): publish Checkpoint A as preliminary preview'
+          fi
+          git push --force origin HEAD:refs/heads/feature/v0.3.0-rc1
 
       - name: Test and build v0.3.0-RC1-WIP-A
         shell: bash
@@ -147,12 +177,28 @@ jobs:
             DCM_OUTPUT="$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" \
             bash tools/build-module.sh
 
+          unzip -t "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip"
+          unzip -p "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" module.prop | grep -qx 'version=v0.3.0-RC1-WIP-A'
+          unzip -p "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" module.prop | grep -qx 'versionCode=300'
+
           sha256sum "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" \
             > "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256"
           cp /tmp/v03.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch"
           cp WORK_PROGRESS_v0.3.md "$RUNNER_TEMP/releases/WORK_PROGRESS_v0.3.md"
 
-      - name: Publish or update preliminary releases
+          {
+            echo 'DNSCrypt Manager v0.3.0-RC1-WIP-A release build audit'
+            echo
+            cat "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256"
+            echo 'unzip_test=ok'
+            echo 'module_version=v0.3.0-RC1-WIP-A'
+            echo 'module_version_code=300'
+            echo 'release_status=development_preview'
+            echo 'bindhosts_must_be_disabled=true'
+            echo 'stable_target=v1.0.0'
+          } > "$RUNNER_TEMP/releases/AUDIT_RELEASE_V03_WIP_A.txt"
+
+      - name: Publish and verify preliminary releases
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -179,7 +225,9 @@ jobs:
             "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" \
             "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256" \
             "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch" \
-            "$RUNNER_TEMP/releases/AUDIT_REPORT_RC2.2.md" \
+            "$RUNNER_TEMP/releases/AUDIT_SOURCE_RC2.2.md" \
+            "$RUNNER_TEMP/releases/AUDIT_RELEASE_RC2.2.txt" \
+            "$RUNNER_TEMP/releases/TEST_RESULTS_RC2.2.md" \
             --clobber
 
           if gh release view v0.3.0-rc1-wip-a >/dev/null 2>&1; then
@@ -199,7 +247,26 @@ jobs:
             "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256" \
             "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch" \
             "$RUNNER_TEMP/releases/WORK_PROGRESS_v0.3.md" \
+            "$RUNNER_TEMP/releases/AUDIT_RELEASE_V03_WIP_A.txt" \
             --clobber
+
+          gh release view v0.2.0-rc2.2 --json url,isPrerelease,assets > "$RUNNER_TEMP/releases/VERIFY_RELEASE_RC2.2.json"
+          gh release view v0.3.0-rc1-wip-a --json url,isPrerelease,assets > "$RUNNER_TEMP/releases/VERIFY_RELEASE_V03.json"
+
+          python3 - <<'PY'
+          import json, os
+          root = os.environ['RUNNER_TEMP'] + '/releases/'
+          checks = [
+              ('VERIFY_RELEASE_RC2.2.json', 'DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip'),
+              ('VERIFY_RELEASE_V03.json', 'DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip'),
+          ]
+          for meta_name, asset_name in checks:
+              meta = json.load(open(root + meta_name, encoding='utf-8'))
+              assert meta['isPrerelease'] is True, meta
+              assets = {a['name'] for a in meta['assets']}
+              assert asset_name in assets, (asset_name, assets)
+              print(meta['url'])
+          PY
 
       - name: Preserve build outputs as workflow artifact
         if: always()
