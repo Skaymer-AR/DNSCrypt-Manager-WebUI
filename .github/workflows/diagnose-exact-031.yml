@@ -1,0 +1,39 @@
+name: Diagnose exact WIP3 segment 03-1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-exact-031.yml'
+      - 'import-assets/repair-03-1-part-*.b64'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Hash exact chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/report
+          {
+            for f in import-assets/repair-03-1-part-*.b64; do
+              wc -c "$f"
+              sha256sum "$f"
+            done
+            cat import-assets/repair-03-1-part-*.b64 > /tmp/report/combined.b64
+            wc -c /tmp/report/combined.b64
+            sha256sum /tmp/report/combined.b64
+          } | tee /tmp/report/hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-031-diagnostic
+          path: /tmp/report
+          if-no-files-found: error
