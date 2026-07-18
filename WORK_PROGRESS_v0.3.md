@@ -9,6 +9,37 @@ Estado: **CHECKPOINT A completado**. No borra RC1/RC2. Mismo module id.
 > estado hasta el commit anterior al de su propia actualización; el HEAD exacto se
 > entrega fuera del repositorio.
 
+## CHECKPOINT A1 — en progreso (correcciones de campo antes de B)
+Incorporado a v0.3 (cherry-pick selectivo del hotfix RC2.2, **sin** module.prop/
+branding RC2.2) + trabajo nuevo:
+- **Fuentes (catálogo)**: CoinBlockerLists→broken (no se descarga), NoCoin agregada
+  (supersedes), Firebog→legacy; Phishing Army conservada. 71 fuentes, reproducible.
+- **Fuentes antiguas (.src de security.sh)**: cryptomining→NoCoin (hosts),
+  trackers→EasyPrivacy 3rd Party (r-a-y, hosts) con Firebog legacy, phishing
+  conservada (curl 6 = fallo DNS, no 404).
+- **CLI resolver central** en `api.js`: eliminadas las constantes fijas duplicadas
+  (`api.js`/`app.js`); 3 rutas de allowlist, probe fijo, solo acepta allowlist; si
+  no resuelve → mensaje claro (no rc=127). `runEnvironmentStatus`/`cli()`/etc.
+- **environment status** (Hybrid Mount, evidencia, `bindhosts_active`) + tarjeta de
+  entorno en la WebUI.
+- **BindHosts**: advertencia obligatoria en instalación (`customize.sh`), WebUI
+  (barra) y `environment status`; + "en pruebas / v1.0.0". No lo desactiva.
+- **i18n**: +env.*/bindhosts.*/app.testing/src.state.*/src.action.*/src.msg.* (114
+  claves EN/ES, paridad).
+
+### Tests A1 (verdes)
+- `smoke-test-cli-resolver-v030.cjs`: **6/6**
+- `smoke-test-environment-v030.sh`: **19/19**
+- Regresión: `smoke-test-webui.sh` **23/23**, `smoke-test-webui-v030.cjs` **15/15**,
+  `smoke-test-i18n.sh` **5/5**, `smoke-test-catalog.sh` **41/41**,
+  `smoke-test-security.sh` **61/61**, `run-syntax-checks.sh` OK.
+
+### Pendiente para cerrar A1 (próximo sub-paso, NO es B)
+`dcm_fetch_url` común + `source doctor` (failure_class) + resolución bootstrap
+aislada (bloqueo circular) + auditoría DNS `not_verifiable` multi-señal + UX de
+errores por fuente en la WebUI (claves i18n ya presentes) + sus tests
+(source-doctor/source-fetch/bindhosts-warning/dns-audit). Recién luego CHECKPOINT B.
+
 ## Confirmaciones de base
 - ODoH y Anonymized DNSCrypt **soportados por el binario incluido** (verificado por
   strings: `*main.ODoHTargetConfig`, `*main.ODoHRelay`, `/.well-known/odohconfigs`,
