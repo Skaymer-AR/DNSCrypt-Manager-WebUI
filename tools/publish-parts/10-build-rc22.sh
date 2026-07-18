@@ -60,3 +60,8 @@ sha256sum "$ZIP" > "$ZIP.sha256"
 cp /tmp/rc22.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch"
 cp /tmp/AUDIT_RC2.2.md "$RUNNER_TEMP/releases/AUDIT_RC2.2.md"
 cp /tmp/TEST_RESULTS_RC2.2.md "$RUNNER_TEMP/releases/TEST_RESULTS_RC2.2.md"
+
+# The catalog tests intentionally touch runtime/source files. Restore the exact
+# committed RC2.2 tree before switching to the independent v0.3 branch.
+git reset --hard "$RC22_HEAD"
+git clean -fd
