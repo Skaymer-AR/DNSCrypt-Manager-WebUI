@@ -9,7 +9,7 @@ Estado: **CHECKPOINT A completado**. No borra RC1/RC2. Mismo module id.
 > estado hasta el commit anterior al de su propia actualización; el HEAD exacto se
 > entrega fuera del repositorio.
 
-## CHECKPOINT A2 — cierre de correcciones de campo (en progreso)
+## CHECKPOINT A2 — COMPLETO (correcciones de campo cerradas)
 - **A2.1 `dcm_fetch_url`** (`scripts/fetch.sh`, sourced por la CLI): descargador
   común HTTPS-only (petición y redirects), TLS verificado (nunca `-k`), sin HTTP
   fallback, sin DNS público hardcodeado, sin eval/`sh -c` con la URL; valida URL y
@@ -32,13 +32,23 @@ Estado: **CHECKPOINT A completado**. No borra RC1/RC2. Mismo module id.
 `smoke-test-dns-audit-v030.sh` **6/6**. Regresión: CLI 48/48, seguridad 61/61,
 catálogo 41/41, WebUI 23/23, syntax OK.
 
-### Pendiente de A2 (documentado, próximo sub-paso)
-- **A2.3 bootstrap aislado**: instancia temporal de dnscrypt-proxy con blocklist
-  desactivada sólo ahí + `curl --resolve` (el hook `DCM_FETCH_RESOLVE` ya existe en
-  `dcm_fetch_url`); estructura lista, falta el orquestador y su test.
-- **A2.5 UX de errores por fuente en la WebUI**: estados sin_lista/ultima_valida/…
-  + botones Reintentar/Diagnosticar/Usar-reemplazo/Revertir/Copiar. Las claves i18n
-  ya están (`src.*`); falta cablear la vista de listas al `source doctor`.
+### A2.3 (bootstrap aislado) — COMPLETO
+`dcm_bootstrap_fetch`: ante curl(6)/self_blocked levanta instancia temporal de
+dnscrypt-proxy con blocklist desactivada sólo ahí (localhost, puerto libre), resuelve
+sólo el hostname, reintenta con `--resolve host:443:IP` (TLS/SNI originales), limpia
+con `_cat_kill_tree` + trap, y preserva la última copia válida ante fallo. 404 y otras
+clases no-DNS no disparan bootstrap. `smoke-test-source-bootstrap.sh` **10/10**.
+
+### A2.5 (UX de errores por fuente) — COMPLETO
+`source doctor` cableado a la WebUI: `failureClassToState` (14 clases → estado humano),
+panel en Lists con badge + campos + detalles expandibles + botones; DOM seguro
+(createElement/textContent). Nunca muestra "0 dominios aplicados" ante fallo.
+`smoke-test-source-ui-v030.cjs` **5/5**, `smoke-test-source-errors-v030.sh` **6/6**.
+
+### Pendiente (próximos checkpoints, NO iniciados)
+CHECKPOINT B (transport.sh/Anonymized/ODoH), C (captive/bypass/monitor), D
+(service-controls declarativos/app-policy/catálogo), E (migración schema 3/WebUI
+final/suite/build 300). Cada uno con su bundle+patch+sha256.
 
 ## CHECKPOINT A1 — en progreso (correcciones de campo antes de B)
 Incorporado a v0.3 (cherry-pick selectivo del hotfix RC2.2, **sin** module.prop/
