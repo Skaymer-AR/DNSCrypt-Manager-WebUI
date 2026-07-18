@@ -74,7 +74,8 @@ jobs:
           cp /tmp/release-check/TEST_RESULTS_v0.3.0-RC1.md /tmp/report/
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: v030-live-release-verification
           path: /tmp/report
-          if-no-files-found: error
+          if-no-files-found: warn
