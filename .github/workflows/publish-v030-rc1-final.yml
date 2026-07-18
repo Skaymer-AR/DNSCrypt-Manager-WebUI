@@ -1,0 +1,213 @@
+name: Publish DNSCrypt Manager v0.3.0-RC1 final
+
+on:
+  push:
+    branches: [release-v030-rc1-final]
+    paths:
+      - '.github/workflows/publish-v030-rc1-final.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-v030-rc1-final
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      BASE_COMMIT: ad8ca6cf5b529f17e16b8c0500c1aafe626f9147
+      EXPECTED_TREE: 89b9d6b804b900eabc73d0ebf69b45ab4d1f3366
+      EXPECTED_B64_SHA: 8c889efcd4fbb14ed21e48ae21a07773227e535ac7f6fd46fdb45d00e38e3b83
+      EXPECTED_GZ_SHA: 8be6ea20bf942a04f3109f66134b9549a0ff61fecd51a429b18ca6a22e75f6f5
+      EXPECTED_PATCH_SHA: 2ba411ec0e0c1f527f8ef8c2435321b7eec77ad391713adab33791c9ced46cd9
+      EXPECTED_BINARY_SHA: 940b650911cfa55cbc0544a9025ceb866101590a88031a90a7e1ca05f5781cbc
+
+    steps:
+      - name: Checkout publication inputs
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify final patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            release-import/v030-final-part-00.b64 \
+            release-import/v030-final-part-01.b64 \
+            release-import/v030-final-part-02.b64 \
+            release-import/v030-final-part-03.b64 \
+            release-import/v030-final-part-04-00.b64 \
+            release-import/v030-final-part-04-01.b64 \
+            release-import/v030-final-part-04-02.b64 \
+            release-import/v030-final-tail-00.b64 \
+            release-import/v030-final-rest-00.b64 \
+            release-import/v030-final-rest-01.b64 \
+            release-import/v030-final-rest-02.b64 \
+            release-import/v030-final-rest-03.b64 \
+            release-import/v030-final-rest-04.b64 \
+            release-import/v030-final-rest-05.b64 \
+            release-import/v030-final-rest-06.b64 \
+            release-import/v030-final-rest-07.b64 \
+            release-import/v030-final-rest-08.b64 \
+            release-import/v030-final-rest-09.b64 \
+            release-import/v030-final-rest-10.b64 \
+            > /tmp/v030-final.b64
+          echo "$EXPECTED_B64_SHA  /tmp/v030-final.b64" | sha256sum -c -
+          base64 --decode /tmp/v030-final.b64 > /tmp/v030-final.patch.gz
+          echo "$EXPECTED_GZ_SHA  /tmp/v030-final.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/v030-final.patch.gz > /tmp/v030-final.patch
+          echo "$EXPECTED_PATCH_SHA  /tmp/v030-final.patch" | sha256sum -c -
+          test "$(grep -c '^From ' /tmp/v030-final.patch)" -eq 23
+          cp release-import/AUDIT_v0.3.0-RC1.md /tmp/AUDIT_v0.3.0-RC1.md
+          cp release-import/TEST_RESULTS_v0.3.0-RC1.md /tmp/TEST_RESULTS_v0.3.0-RC1.md
+
+      - name: Reconstruct exact v0.3.0-RC1 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Skaymer AR'
+          git config user.email 'skaymer@users.noreply.github.com'
+          git checkout -B reconstructed/v0.3.0-rc1 "$BASE_COMMIT"
+          git am -3 /tmp/v030-final.patch
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          grep -qx 'id=dnscrypt_manager' module.prop
+          grep -qx 'version=v0.3.0-RC1' module.prop
+          grep -qx 'versionCode=300' module.prop
+          grep -qx 'author=Skaymer AR' module.prop
+          echo "FINAL_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Run final validation suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/run-syntax-checks.sh
+          for test in \
+            smoke-test-security.sh \
+            smoke-test-catalog.sh \
+            smoke-test-cli.sh \
+            smoke-test-webui.sh \
+            smoke-test-compile.sh \
+            smoke-test-i18n.sh \
+            smoke-test-environment-v030.sh \
+            smoke-test-source-fetch.sh \
+            smoke-test-source-doctor.sh \
+            smoke-test-source-bootstrap.sh \
+            smoke-test-source-errors-v030.sh \
+            smoke-test-dns-audit-v030.sh \
+            smoke-test-transport.sh \
+            smoke-test-anonymized.sh \
+            smoke-test-odoh.sh \
+            smoke-test-captive.sh \
+            smoke-test-bypass.sh \
+            smoke-test-monitor.sh \
+            smoke-test-service-controls.sh \
+            smoke-test-app-policy.sh \
+            smoke-test-catalog-audit.sh \
+            smoke-test-migration-v3.sh; do
+              echo "=== $test ==="
+              bash "tests/$test"
+          done
+          node tests/smoke-test-webui-args.cjs
+          node tests/smoke-test-webui-v030.cjs
+          node tests/smoke-test-cli-resolver-v030.cjs
+          node tests/smoke-test-source-ui-v030.cjs
+          echo "$EXPECTED_BINARY_SHA  bin/arm64/dnscrypt-proxy" | sha256sum -c -
+          file bin/arm64/dnscrypt-proxy | grep -q 'ARM aarch64'
+
+      - name: Build and audit installable ZIP on GitHub
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          ZIP="$RUNNER_TEMP/release/DNSCrypt-Manager-v0.3.0-RC1.zip"
+          DCM_SKIP_TESTS=1 DCM_OUTPUT="$ZIP" bash tools/build-module.sh
+          unzip -tq "$ZIP"
+          unzip -p "$ZIP" module.prop | tr -d '\r' | grep -qx 'version=v0.3.0-RC1'
+          unzip -p "$ZIP" module.prop | tr -d '\r' | grep -qx 'versionCode=300'
+          unzip -p "$ZIP" module.prop | tr -d '\r' | grep -qx 'author=Skaymer AR'
+          if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|fixtures|dist|bootstrap|\.git|release-import)/'; then
+            echo 'Development files leaked into final ZIP' >&2
+            exit 1
+          fi
+          sha256sum "$ZIP" > "$ZIP.sha256"
+          cp /tmp/v030-final.patch "$RUNNER_TEMP/release/DNSCrypt-Manager-v0.3.0-RC1.patch"
+          cp /tmp/AUDIT_v0.3.0-RC1.md "$RUNNER_TEMP/release/AUDIT_v0.3.0-RC1.md"
+          cp /tmp/TEST_RESULTS_v0.3.0-RC1.md "$RUNNER_TEMP/release/TEST_RESULTS_v0.3.0-RC1.md"
+          {
+            echo
+            echo '## Compilación GitHub'
+            echo
+            echo "SHA-256 del ZIP publicado: \`$(sha256sum "$ZIP" | awk '{print $1}')\`"
+            echo "Commit de fuente publicado: \`$FINAL_HEAD\`"
+          } >> "$RUNNER_TEMP/release/AUDIT_v0.3.0-RC1.md"
+
+      - name: Update main, feature branch and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force origin "$FINAL_HEAD":refs/heads/feature/v0.3.0-rc1
+          git push --force origin "$FINAL_HEAD":refs/heads/main
+          git tag -f v0.3.0-rc1 "$FINAL_HEAD"
+          git push --force origin refs/tags/v0.3.0-rc1
+
+      - name: Create and independently verify GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/release-notes.md <<'EOF'
+          # DNSCrypt Manager v0.3.0-RC1
+
+          Release Candidate completa para pruebas, creada por **Skaymer AR**.
+
+          Incluye transporte atómico con rollback, Anonymized DNSCrypt, soporte ODoH honesto, portal cautivo temporal, auditoría de bypass, monitor local heurístico, `source doctor`, bootstrap de fuentes, controles declarativos, políticas por aplicación y migración idempotente a schema 3.
+
+          > **Advertencia:** BindHosts debe permanecer desactivado. Desactivalo y reiniciá antes de habilitar DNSCrypt Manager. Usarlos juntos puede provocar pérdida de conectividad o bootloop.
+
+          En KernelSU Next puede ser necesario habilitar **Hybrid Mount** y reiniciar. ODoH no se marca activo sin una prueba real compatible. Las pruebas físicas en Moto Edge 40 Pro con Android 16 quedan pendientes. Esta es una versión de prueba; la primera estable será v1.0.0.
+          EOF
+          gh release delete v0.3.0-rc1 --yes >/dev/null 2>&1 || true
+          gh release create v0.3.0-rc1 \
+            --title 'DNSCrypt Manager v0.3.0-RC1' \
+            --notes-file /tmp/release-notes.md \
+            --prerelease \
+            "$RUNNER_TEMP/release/DNSCrypt-Manager-v0.3.0-RC1.zip" \
+            "$RUNNER_TEMP/release/DNSCrypt-Manager-v0.3.0-RC1.zip.sha256" \
+            "$RUNNER_TEMP/release/DNSCrypt-Manager-v0.3.0-RC1.patch" \
+            "$RUNNER_TEMP/release/AUDIT_v0.3.0-RC1.md" \
+            "$RUNNER_TEMP/release/TEST_RESULTS_v0.3.0-RC1.md"
+          gh release view v0.3.0-rc1 --json url,isPrerelease,tagName,assets > /tmp/release.json
+          python3 - <<'PY'
+          import json
+          data = json.load(open('/tmp/release.json', encoding='utf-8'))
+          assert data['tagName'] == 'v0.3.0-rc1'
+          assert data['isPrerelease'] is True
+          names = {a['name'] for a in data['assets']}
+          required = {
+              'DNSCrypt-Manager-v0.3.0-RC1.zip',
+              'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256',
+              'DNSCrypt-Manager-v0.3.0-RC1.patch',
+              'AUDIT_v0.3.0-RC1.md',
+              'TEST_RESULTS_v0.3.0-RC1.md',
+          }
+          assert required <= names, (required - names)
+          print(data['url'])
+          PY
+          rm -rf /tmp/release-download
+          mkdir /tmp/release-download
+          gh release download v0.3.0-rc1 -p 'DNSCrypt-Manager-v0.3.0-RC1.zip*' -D /tmp/release-download
+          (cd /tmp/release-download && sha256sum -c DNSCrypt-Manager-v0.3.0-RC1.zip.sha256)
+          unzip -tq /tmp/release-download/DNSCrypt-Manager-v0.3.0-RC1.zip
+
+      - name: Preserve compiled release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DNSCrypt-Manager-v0.3.0-RC1-GitHub-build
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
