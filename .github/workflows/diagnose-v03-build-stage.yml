@@ -1,0 +1,48 @@
+name: Diagnose v0.3 build stage
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-v03-build-stage.yml'
+      - 'tools/publish-parts/20-build-v03.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct base and capture v0.3 build failure
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/report /tmp/dcm-publish "$RUNNER_TEMP/releases"
+          cp tools/publish-parts/00-reconstruct.sh /tmp/dcm-publish/
+          cp tools/publish-parts/20-build-v03.sh /tmp/dcm-publish/
+          chmod 0755 /tmp/dcm-publish/*.sh
+          bash -x /tmp/dcm-publish/00-reconstruct.sh > /tmp/report/reconstruct.log 2>&1
+          rc0=$?
+          if [ "$rc0" -eq 0 ]; then
+            set -a
+            . "$GITHUB_ENV"
+            set +a
+            bash -x /tmp/dcm-publish/20-build-v03.sh > /tmp/report/v03.log 2>&1
+            rc3=$?
+          else
+            rc3=99
+          fi
+          printf 'reconstruct_exit=%s\nv03_exit=%s\n' "$rc0" "$rc3" > /tmp/report/status.txt
+          tail -160 /tmp/report/v03.log 2>/dev/null || true
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v03-build-diagnostic
+          path: /tmp/report
+          if-no-files-found: error
