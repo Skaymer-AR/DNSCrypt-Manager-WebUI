@@ -52,6 +52,13 @@ if [ -f "$CATALOG_LIB" ]; then
   . "$CATALOG_LIB"
 fi
 
+# fetch.sh: motor comun de descarga (dcm_fetch_url) + source doctor (v0.3.0-RC1).
+FETCH_LIB="${COMMON%/*}/fetch.sh"
+if [ -f "$FETCH_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$FETCH_LIB"
+fi
+
 ##############################################################################
 # TOML helpers
 ##############################################################################
@@ -1265,8 +1272,30 @@ cmd_environment() {
   return 0
 }
 
+cmd_source() {
+  _sub="${1:-}"; shift 2>/dev/null
+  case "$_sub" in
+    doctor)
+      command -v dcm_source_doctor >/dev/null 2>&1 || { echo "ERROR: fetch.sh no cargado" >&2; return 1; }
+      if [ "${1:-}" = "--all" ]; then
+        # Diagnostica todas las fuentes del catalogo (una por bloque).
+        command -v cat_all_ids >/dev/null 2>&1 || { echo "ERROR: catalogo no disponible" >&2; return 1; }
+        for _id in $(cat_all_ids 2>/dev/null); do
+          echo "=== $_id ==="; dcm_source_doctor "$_id"; echo ""
+        done
+        return 0
+      fi
+      [ -n "${1:-}" ] || { echo "Uso: dnscrypt-manager source doctor SOURCE_ID | --all" >&2; return 1; }
+      # Validacion estricta del id (sin metacaracteres).
+      case "$1" in *[!a-zA-Z0-9_-]*) echo "ERROR: id invalido" >&2; return 1 ;; esac
+      dcm_source_doctor "$1" ;;
+    *) echo "Uso: dnscrypt-manager source doctor SOURCE_ID | --all" >&2; return 1 ;;
+  esac
+}
+
   case "$_cmd" in
     environment|env)  cmd_environment "$@" ;;
+    source)           cmd_source "$@" ;;
     start)            cmd_start "$@" ;;
     stop)             cmd_stop "$@" ;;
     restart)          cmd_restart "$@" ;;
