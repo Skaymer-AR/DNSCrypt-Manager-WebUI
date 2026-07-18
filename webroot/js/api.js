@@ -356,6 +356,43 @@ const DCM = (() => {
   function validId(id) { return SOURCE_ID_RE.test(String(id == null ? '' : id)); }
 
   function runEnvironmentStatus() { return runRawT(CLI + ' environment status', 8000); }
+  // A2.5: diagnostico de una fuente. Id validado (allowlist de caracteres).
+  function runSourceDoctor(id) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(String(id || ''))) {
+      return Promise.resolve({ errno: -1, stdout: '', stderr: 'id invalido' });
+    }
+    return runRawT(CLI + ' source doctor ' + id, 12000);
+  }
+  // Parsea la salida key=value de source doctor a un objeto.
+  function parseDoctor(text) {
+    const o = {};
+    String(text || '').split('\n').forEach((ln) => {
+      const i = ln.indexOf('=');
+      if (i > 0) { o[ln.slice(0, i).trim()] = ln.slice(i + 1).trim(); }
+    });
+    return o;
+  }
+  // Mapea failure_class -> clave de estado humano (src.state.*).
+  function failureClassToState(fc) {
+    switch (fc) {
+      case 'ok': return 'actualizada';
+      case 'self_blocked': return 'autobloqueada';
+      case 'dns_system_failed':
+      case 'dns_proxy_failed': return 'error_dns';
+      case 'http_404': return 'fuente_rota';
+      case 'http_error':
+      case 'connection_failed':
+      case 'tls_failed': return 'error_http';
+      case 'redirect_invalid':
+      case 'empty':
+      case 'html_instead_of_list':
+      case 'validation_failed':
+      case 'unsupported_format': return 'validacion_fallida';
+      case 'cancelled': return 'cancelada';
+      case 'timeout': return 'timeout';
+      default: return 'sin_lista';
+    }
+  }
   function runCatalogListJson() { return runRawT(CLI + ' catalog list --json', 45000); }
   function runServiceListJson() { return runRaw(CLI + ' service list --json'); }
   function runCatalogInfo(id) {
@@ -442,6 +479,9 @@ const DCM = (() => {
     available,
     resolveCli,
     runEnvironmentStatus,
+    runSourceDoctor,
+    parseDoctor,
+    failureClassToState,
     cli,
     cliResolved,
     cliPaths,

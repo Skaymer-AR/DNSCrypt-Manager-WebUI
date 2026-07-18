@@ -147,6 +147,16 @@
 
   </div>
   <div class="route" id="route-lists" data-route="lists" hidden>
+  <section class="card">
+    <h2 data-i18n="src.doctor.title">Source doctor</h2>
+    <div class="field" style="display:flex; gap:8px; align-items:center;">
+      <input id="srcDoctorId" type="text" data-i18n-ph="src.doctor.placeholder" placeholder="source id"
+             autocapitalize="off" autocomplete="off" spellcheck="false"
+             style="flex:1; padding:10px 12px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd);">
+      <button id="btnSrcDoctor" class="small" data-i18n="src.doctor.run">Diagnose source</button>
+    </div>
+    <div id="srcDoctorResult" style="margin-top:8px;"></div>
+  </section>
 
 <section class="card">
     <h2>Listas de bloqueo</h2>

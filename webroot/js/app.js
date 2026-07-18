@@ -1231,6 +1231,87 @@ function wireEnvironment() {
   if (b) b.addEventListener('click', function () { if (!busy) refreshEnvironmentCard(); });
 }
 
+/* A2.5: source doctor en la WebUI. DOM seguro (createElement/textContent),
+   sin innerHTML con datos externos. Muestra estado humano, failure_class,
+   ultima copia valida, HTTP, hostname + detalles y botones de accion. */
+function renderSourceDoctor(container, d) {
+  container.textContent = '';
+  const t = (k) => (typeof I18N !== 'undefined' && I18N.t) ? I18N.t(k) : k;
+  const fc = d.failure_class || 'sin_lista';
+  const stateKey = DCM.failureClassToState(fc);
+  // Badge de estado humano
+  const badge = document.createElement('div');
+  badge.className = 'src-badge src-' + stateKey;
+  badge.textContent = t('src.state.' + stateKey) + '  ·  ' + fc;
+  container.appendChild(badge);
+  // Campos legibles
+  const rows = [
+    ['hostname', d.hostname], ['http_status', d.http_status],
+    ['source_hostname_blocked', d.source_hostname_blocked],
+    ['last_valid_available', d.last_valid_available],
+    ['last_valid_domains', d.last_valid_domains],
+    ['last_valid_timestamp', d.last_valid_timestamp],
+    ['runtime_status', d.runtime_status], ['recommendation', d.recommendation]
+  ];
+  const dl = document.createElement('div'); dl.className = 'src-fields';
+  rows.forEach(([k, v]) => {
+    if (v === undefined || v === '') return;
+    const r = document.createElement('div'); r.className = 'src-row';
+    const kk = document.createElement('span'); kk.className = 'src-k'; kk.textContent = k;
+    const vv = document.createElement('span'); vv.className = 'src-v'; vv.textContent = String(v);
+    r.appendChild(kk); r.appendChild(vv); dl.appendChild(r);
+  });
+  container.appendChild(dl);
+  // Si hubo última copia válida, mostrar cantidad + fecha de forma destacada.
+  if (d.last_valid_available === 'yes') {
+    const lv = document.createElement('div'); lv.className = 'src-lastvalid';
+    lv.textContent = t('src.lastvalid')
+      .replace('{count}', String(d.last_valid_domains || '?'))
+      .replace('{date}', String(d.last_valid_timestamp || '?'));
+    container.appendChild(lv);
+  }
+  // Detalles tecnicos expandibles (createElement, no innerHTML)
+  const det = document.createElement('details'); det.className = 'src-details';
+  const sum = document.createElement('summary'); sum.textContent = t('src.action.copydetails').replace('Copy', 'Details').replace('Copiar', 'Detalles');
+  const pre = document.createElement('pre'); pre.style.whiteSpace = 'pre-wrap';
+  pre.textContent = Object.keys(d).map((k) => k + '=' + d[k]).join('\n');
+  det.appendChild(sum); det.appendChild(pre); container.appendChild(det);
+  // Botones de accion
+  const bar = document.createElement('div'); bar.className = 'src-actions';
+  const mkBtn = (labelKey, fn) => {
+    const b = document.createElement('button'); b.className = 'small'; b.textContent = t(labelKey);
+    b.addEventListener('click', fn); return b;
+  };
+  const id = d.source_id || '';
+  bar.appendChild(mkBtn('src.action.diagnose', function () { if (!busy) runSourceDoctorUI(id); }));
+  bar.appendChild(mkBtn('src.action.retry', function () { if (!busy) runSourceDoctorUI(id); }));
+  bar.appendChild(mkBtn('src.action.copydetails', function () {
+    const txt = pre.textContent;
+    try { if (navigator.clipboard) navigator.clipboard.writeText(txt); } catch (_) {}
+    toast(t('src.action.copydetails'), 'ok');
+  }));
+  container.appendChild(bar);
+}
+
+async function runSourceDoctorUI(id) {
+  const box = $('srcDoctorResult'); if (!box) return;
+  const theId = id || (($('srcDoctorId') || {}).value || '').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(theId)) { toast((I18N && I18N.t) ? I18N.t('common.error') : 'error', 'error'); return; }
+  box.textContent = (typeof I18N !== 'undefined' && I18N.t) ? I18N.t('common.loading') : 'Loading...';
+  try {
+    const r = await DCM.runSourceDoctor(theId);
+    const d = DCM.parseDoctor((r && (r.stdout || r.stderr)) ? (r.stdout || r.stderr) : '');
+    if (!d.source_id) d.source_id = theId;
+    renderSourceDoctor(box, d);
+  } catch (_) {
+    box.textContent = (I18N && I18N.t) ? I18N.t('common.error') : 'error';
+  }
+}
+function wireSourceDoctor() {
+  const b = $('btnSrcDoctor');
+  if (b) b.addEventListener('click', function () { if (!busy) runSourceDoctorUI(); });
+}
+
 function init() {
   // Navegacion (SPA) e idioma se inicializan SIEMPRE, haya o no puente ksu.
   if (typeof Router !== 'undefined' && Router.init) {
@@ -1266,6 +1347,7 @@ function init() {
   initSecurity();
   initCatalogRC2();
   wireEnvironment();
+  wireSourceDoctor();
   // Resolver la ruta de la CLI (3 rutas de allowlist) ANTES de emitir comandos.
   DCM.resolveCli().then(function (path) {
     if (!path) {

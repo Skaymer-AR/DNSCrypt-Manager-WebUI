@@ -330,3 +330,15 @@ footer {
 .testbar { margin: 0 12px 8px; padding: 8px 12px; border-radius: var(--radius-sm,8px);
   background: rgba(255,180,60,.10); border: 1px solid var(--amber); color: var(--text-dim);
   font: 12px/1.3 var(--font-ui); }
+
+/* A2.5 — UX de errores por fuente (source doctor) */
+.src-badge { display:inline-block; padding:4px 10px; border-radius:999px; font:600 12px var(--font-ui); margin-bottom:8px; border:1px solid var(--card-brd); }
+.src-actualizada { color:var(--green); border-color:var(--green); }
+.src-error_dns, .src-error_http, .src-autobloqueada, .src-timeout { color:var(--amber); border-color:var(--amber); }
+.src-fuente_rota, .src-validacion_fallida, .src-cancelada { color:var(--red); border-color:var(--red); }
+.src-fields { display:flex; flex-direction:column; gap:2px; font:12px var(--font-mono); }
+.src-row { display:flex; justify-content:space-between; gap:8px; }
+.src-k { color:var(--text-dim); } .src-v { color:var(--text); text-align:right; word-break:break-all; }
+.src-lastvalid { margin-top:6px; color:var(--text-dim); font:12px var(--font-ui); }
+.src-details { margin-top:8px; } .src-details pre { font:11px var(--font-mono); color:var(--text-dim); }
+.src-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
