@@ -28,9 +28,11 @@ jobs:
       - name: Replace checksum asset and verify the public release
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           rm -rf /tmp/fix /tmp/verify
           mkdir -p /tmp/fix /tmp/verify
+          exec > >(tee /tmp/verify/repair.log) 2>&1
+          set -e
 
           gh release download v0.3.0-rc1 \
             -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
@@ -56,13 +58,10 @@ jobs:
           gh release view v0.3.0-rc1 --json url,isPrerelease,tagName,assets > release.json
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: v030-repaired-checksum-verification
           path: |
-            /tmp/verify/DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
-            /tmp/verify/checksum-verification.txt
-            /tmp/verify/unzip-verification.txt
-            /tmp/verify/module.prop
-            /tmp/verify/zip.sha256
-            /tmp/verify/release.json
-          if-no-files-found: error
+            /tmp/fix
+            /tmp/verify
+          if-no-files-found: warn
