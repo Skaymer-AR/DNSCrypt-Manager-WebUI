@@ -1,3 +1,6 @@
+> [!WARNING]
+> **v0.2.0-RC2.2 es una versión preliminar en pruebas.** La RC2 original está descartada. BindHosts debe permanecer desactivado y el dispositivo debe reiniciarse antes de habilitar DNSCrypt Manager; usarlos juntos puede causar pérdida de red o bootloop. En KernelSU Next puede ser necesario activar Hybrid Mount y reiniciar. La primera versión estable será v1.0.0.
+
 # DNSCrypt Manager
 
 **Creado por Skaymer AR**
