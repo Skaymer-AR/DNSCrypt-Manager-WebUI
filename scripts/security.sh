@@ -1223,18 +1223,29 @@ cmd_leak_test() {
     fi
   done
 
-  if have ping; then
-    if ping -c 1 -W 2 dns.google >/dev/null 2>&1; then
-      if [ "$_redir" = "1" ]; then
-        _lt resolucion_sistema protegido "el sistema resuelve, y con redireccion pasa por el proxy"
-      else
-        _lt resolucion_sistema posible_fuga "el sistema resuelve por su DNS normal (sin proteccion)"
-      fi
-    else
-      _lt resolucion_sistema fallo "el sistema no pudo resolver (sin red o DNS caido)"
-    fi
+  _proxy_ok=0; grep -q '^resolucion_proxy|protegido|' "$_rows" 2>/dev/null && _proxy_ok=1
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ] && [ -n "${DCM_TEST_PROXY_OK:-}" ]; then _proxy_ok="$DCM_TEST_PROXY_OK"; fi
+  # _sysping: resultado de la prueba de resolucion del shell (override en TEST).
+  _sysping=fail
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ] && [ -n "${DCM_TEST_SYSPING:-}" ]; then
+    _sysping="$DCM_TEST_SYSPING"
+  elif have ping; then
+    if ping -c 1 -W 2 dns.google >/dev/null 2>&1; then _sysping=ok; else _sysping=fail; fi
   else
+    _sysping=noping
+  fi
+  if [ "$_sysping" = "ok" ]; then
+    if [ "$_redir" = "1" ]; then
+      _lt resolucion_sistema protegido "el sistema resuelve, y con redireccion pasa por el proxy"
+    else
+      _lt resolucion_sistema posible_fuga "el sistema resuelve por su DNS normal (sin proteccion)"
+    fi
+  elif [ "$_sysping" = "noping" ]; then
     _lt resolucion_sistema no_verificable "sin 'ping' disponible para probar la resolucion del sistema"
+  elif [ "$_proxy_ok" = "1" ]; then
+    _lt resolucion_sistema no_verificable "El shell root no usa necesariamente el mismo contexto DNS que Android netd. La consulta directa al proxy respondio correctamente."
+  else
+    _lt resolucion_sistema fallo "ni el shell root ni la consulta directa al proxy resolvieron (posible caida real)"
   fi
 
   if have settings; then
