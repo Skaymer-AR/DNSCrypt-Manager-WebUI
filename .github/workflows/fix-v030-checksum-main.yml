@@ -1,0 +1,64 @@
+name: Repair v0.3.0-RC1 release checksum
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-v030-checksum-main.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Replace checksum asset and verify the public release
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/fix /tmp/verify
+          mkdir -p /tmp/fix /tmp/verify
+
+          gh release download v0.3.0-rc1 \
+            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
+            -D /tmp/fix
+          cd /tmp/fix
+          sha256sum DNSCrypt-Manager-v0.3.0-RC1.zip > DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+          grep -Eq '^[0-9a-f]{64}  DNSCrypt-Manager-v0\.3\.0-RC1\.zip$' DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+
+          asset_id="$(gh api repos/${GITHUB_REPOSITORY}/releases/tags/v0.3.0-rc1 --jq '.assets[] | select(.name == "DNSCrypt-Manager-v0.3.0-RC1.zip.sha256") | .id')"
+          test -n "$asset_id"
+          gh api --method DELETE repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}
+          gh release upload v0.3.0-rc1 DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+
+          cd /tmp/verify
+          gh release download v0.3.0-rc1 \
+            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
+            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256'
+          sha256sum -c DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 | tee checksum-verification.txt
+          unzip -tq DNSCrypt-Manager-v0.3.0-RC1.zip | tee unzip-verification.txt
+          unzip -p DNSCrypt-Manager-v0.3.0-RC1.zip module.prop | tr -d '\r' > module.prop
+          grep -qx 'id=dnscrypt_manager' module.prop
+          grep -qx 'version=v0.3.0-RC1' module.prop
+          grep -qx 'versionCode=300' module.prop
+          grep -qx 'author=Skaymer AR' module.prop
+          sha256sum DNSCrypt-Manager-v0.3.0-RC1.zip > zip.sha256
+          gh release view v0.3.0-rc1 --json url,isPrerelease,tagName,assets > release.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v030-repaired-checksum-verification
+          path: |
+            /tmp/verify/DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+            /tmp/verify/checksum-verification.txt
+            /tmp/verify/unzip-verification.txt
+            /tmp/verify/module.prop
+            /tmp/verify/zip.sha256
+            /tmp/verify/release.json
+          if-no-files-found: error
