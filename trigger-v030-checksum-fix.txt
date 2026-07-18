@@ -1,1 +1,2 @@
 Trigger trusted checksum repair for v0.3.0-RC1.
+Requested again after live verification confirmed the .zip.sha256 asset is missing.
