@@ -1,0 +1,30 @@
+{
+  "id": "tiktok_tracking",
+  "name": "TikTok — reduce tracking endpoints",
+  "category": "trackers",
+  "description": "Reduce endpoints de tracking/analitica de TikTok.",
+  "domains": [
+    "analytics.tiktok.com",
+    "log.tiktokv.com",
+    "mon.tiktokv.com"
+  ],
+  "effects": [
+    "Menos telemetria/tracking"
+  ],
+  "limitations": [
+    "Puede afectar metricas dentro de la app"
+  ],
+  "conflicts": [],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "Filtrado DNS; no inspecciona contenido.",
+  "experimental": true,
+  "sources": [
+    "Dominios de tracking conocidos de TikTok"
+  ]
+}

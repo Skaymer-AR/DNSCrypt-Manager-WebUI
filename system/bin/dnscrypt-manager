@@ -72,6 +72,11 @@ for _lib3 in captive bypass monitor; do
   # shellcheck source=/dev/null
   [ -f "$_LP" ] && . "$_LP"
 done
+for _lib4 in servicectl apppolicy; do
+  _LP4="${COMMON%/*}/$_lib4.sh"
+  # shellcheck source=/dev/null
+  [ -f "$_LP4" ] && . "$_LP4"
+done
 
 ##############################################################################
 # TOML helpers
@@ -1307,6 +1312,28 @@ cmd_source() {
   esac
 }
 
+cmd_service() {
+  command -v service_list >/dev/null 2>&1 || { echo "ERROR: servicectl.sh no cargado" >&2; return 1; }
+  _s="${1:-list}"; shift 2>/dev/null
+  case "$_s" in
+    list) service_list ;;
+    info) [ -n "${1:-}" ] || { echo "Uso: service info ID" >&2; return 1; }; service_info "$1" ;;
+    set)  [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "Uso: service set ID MODE" >&2; return 1; }; service_set "$1" "$2" ;;
+    *) echo "Uso: service list|info ID|set ID MODE" >&2; return 1 ;;
+  esac
+}
+cmd_app_policy() {
+  command -v app_policy_support >/dev/null 2>&1 || { echo "ERROR: apppolicy.sh no cargado" >&2; return 1; }
+  _s="${1:-support}"; shift 2>/dev/null
+  case "$_s" in
+    support) app_policy_support ;;
+    list)    app_policy_list ;;
+    set)     [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "Uso: app-policy set PACKAGE POLICY" >&2; return 1; }; app_policy_set "$1" "$2" ;;
+    clear)   [ -n "${1:-}" ] || { echo "Uso: app-policy clear PACKAGE" >&2; return 1; }; app_policy_clear "$1" ;;
+    *) echo "Uso: app-policy support|list|set PACKAGE POLICY|clear PACKAGE" >&2; return 1 ;;
+  esac
+}
+
 cmd_captive() {
   command -v captive_status >/dev/null 2>&1 || { echo "ERROR: captive.sh no cargado" >&2; return 1; }
   case "${1:-status}" in
@@ -1388,6 +1415,8 @@ cmd_odoh() {
     captive)          cmd_captive "$@" ;;
     bypass)           cmd_bypass "$@" ;;
     monitor)          cmd_monitor "$@" ;;
+    service)          cmd_service "$@" ;;
+    app-policy)       cmd_app_policy "$@" ;;
     start)            cmd_start "$@" ;;
     stop)             cmd_stop "$@" ;;
     restart)          cmd_restart "$@" ;;

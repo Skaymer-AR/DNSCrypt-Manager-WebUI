@@ -1,0 +1,30 @@
+{
+  "id": "microsoft_telemetry",
+  "name": "Microsoft — reduce telemetry",
+  "category": "telemetry",
+  "description": "Reduce endpoints de telemetria de Windows/Microsoft.",
+  "domains": [
+    "vortex.data.microsoft.com",
+    "telemetry.microsoft.com",
+    "watson.telemetry.microsoft.com"
+  ],
+  "effects": [
+    "Menos telemetria enviada"
+  ],
+  "limitations": [
+    "Puede afectar diagnosticos"
+  ],
+  "conflicts": [],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "Reduce telemetria; no privacidad completa.",
+  "experimental": true,
+  "sources": [
+    "Dominios de telemetria conocidos de Microsoft"
+  ]
+}

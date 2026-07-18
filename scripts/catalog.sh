@@ -800,6 +800,7 @@ cmd_catalog() {
   _sub="${1:-list}"; shift 2>/dev/null
   case "$_sub" in
     sync) cat_sync_index; echo "OK: index del catalogo sincronizado ($(cat_all_ids | wc -l | tr -d ' ') entradas)." ;;
+    audit) cat_audit ;;
 
     list)
       _json=0; _filter_cat=""; _filter_maint=""; _only_enabled=0; _only_recommended=0; _only_archived=0; _search=""
@@ -1386,4 +1387,35 @@ cmd_service() {
       done ;;
     *) echo "Uso: dnscrypt-manager service {list [--json]|info <id>|status <id>|set <id> <normal|15m|1h|boot|perm>|conflicts|sync}" >&2; return 1 ;;
   esac
+}
+
+# cat_audit — auditoria OFFLINE de metadatos del catalogo (D.3). No descarga nada.
+# Detecta: URLs duplicadas, licencia ausente, estado broken/archived, formato
+# desconocido, duplicacion extrema (supersedes/contained_by).
+cat_audit() {
+  _idx="$DATA_DIR/catalog/blocklists.index.tsv"
+  [ -f "$_idx" ] || _idx="$MODDIR/config/catalog/blocklists.index.tsv"
+  [ -f "$_idx" ] || { echo "ERROR: indice de catalogo ausente" >&2; return 1; }
+  _total=$(awk -F'\t' '!/^#/{c++} END{print c}' "$_idx")
+  echo "total_sources        : $_total"
+  # URLs duplicadas (columna 8)
+  _dup=$(awk -F'\t' '!/^#/ && $8!="" {print $8}' "$_idx" | sort | uniq -d | wc -l | tr -d ' ')
+  echo "duplicate_urls       : $_dup"
+  [ "${_dup:-0}" -gt 0 ] && awk -F'\t' '!/^#/ && $8!="" {print $8}' "$_idx" | sort | uniq -d | sed 's/^/  dup: /'
+  # licencia ausente (columna 9)
+  _nolic=$(awk -F'\t' '!/^#/ && ($9=="" || $9=="-") {c++} END{print c+0}' "$_idx")
+  echo "missing_license      : $_nolic"
+  # estados declarados
+  _broken=$(awk -F'\t' '!/^#/ && $10=="broken"{c++} END{print c+0}' "$_idx")
+  _archived=$(awk -F'\t' '!/^#/ && $10=="archived"{c++} END{print c+0}' "$_idx")
+  _legacy=$(awk -F'\t' '!/^#/ && $10=="legacy"{c++} END{print c+0}' "$_idx")
+  echo "broken_sources       : $_broken"
+  echo "archived_sources     : $_archived"
+  echo "legacy_sources        : $_legacy"
+  # formato desconocido (columna 3 vacia)
+  _nofmt=$(awk -F'\t' '!/^#/ && ($3=="" ) {c++} END{print c+0}' "$_idx")
+  echo "unknown_format       : $_nofmt"
+  echo "note                 : auditoria de METADATOS (offline). 'verified' solo tras descarga runtime, nunca desde CI."
+  # gate: fallar si hay duplicados de URL o formato desconocido
+  [ "${_dup:-0}" -eq 0 ] && [ "${_nofmt:-0}" -eq 0 ]
 }

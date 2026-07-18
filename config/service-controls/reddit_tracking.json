@@ -1,0 +1,30 @@
+{
+  "id": "reddit_tracking",
+  "name": "Reddit — reduce click/email tracking",
+  "category": "trackers",
+  "description": "Bloquea redirectores de click y tracking de email de Reddit.",
+  "domains": [
+    "click.redditmail.com",
+    "events.reddit.com",
+    "alb.reddit.com"
+  ],
+  "effects": [
+    "Menos tracking de clicks/correo"
+  ],
+  "limitations": [
+    "Puede romper algunos enlaces de notificaciones por email"
+  ],
+  "conflicts": [],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "Filtrado DNS; no inspecciona contenido.",
+  "experimental": true,
+  "sources": [
+    "Dominios de tracking conocidos de Reddit"
+  ]
+}

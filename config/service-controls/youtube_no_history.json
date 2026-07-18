@@ -1,0 +1,30 @@
+{
+  "id": "youtube_no_history",
+  "name": "YouTube — no history endpoints",
+  "category": "privacy",
+  "description": "Bloquea endpoints de registro de historial/actividad de YouTube (no bloquea anuncios).",
+  "domains": [
+    "s.youtube.com",
+    "www.youtube-nocookie.com"
+  ],
+  "effects": [
+    "Menos registro de actividad de reproduccion"
+  ],
+  "limitations": [
+    "NO bloquea todos los anuncios de YouTube (best-effort, limite de diseno DNS)",
+    "Puede afectar 'seguir viendo'"
+  ],
+  "conflicts": [],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "No garantiza privacidad total; es filtrado DNS.",
+  "experimental": false,
+  "sources": [
+    "Observacion de trafico de la app; dominios publicos conocidos"
+  ]
+}

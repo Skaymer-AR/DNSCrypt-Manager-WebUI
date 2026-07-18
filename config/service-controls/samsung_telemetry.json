@@ -1,0 +1,30 @@
+{
+  "id": "samsung_telemetry",
+  "name": "Samsung — reduce telemetry",
+  "category": "telemetry",
+  "description": "Reduce endpoints de telemetria de dispositivos Samsung.",
+  "domains": [
+    "samsungods.com",
+    "dqa.samsung.com",
+    "diagmond.samsung.com"
+  ],
+  "effects": [
+    "Menos diagnostico/telemetria enviada"
+  ],
+  "limitations": [
+    "Puede afectar reportes de error de Samsung"
+  ],
+  "conflicts": [],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "Reduce telemetria; no privacidad total.",
+  "experimental": true,
+  "sources": [
+    "Dominios de telemetria conocidos de Samsung"
+  ]
+}

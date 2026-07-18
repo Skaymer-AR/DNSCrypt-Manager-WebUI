@@ -1,0 +1,31 @@
+{
+  "id": "spotify_telemetry",
+  "name": "Spotify — reduce telemetry",
+  "category": "telemetry",
+  "description": "Reduce endpoints de telemetria/analitica de Spotify.",
+  "domains": [
+    "log.spotify.com",
+    "analytics.spotify.com",
+    "ads-fa.spotify.com"
+  ],
+  "effects": [
+    "Menos telemetria/anuncios servidos por dominio"
+  ],
+  "limitations": [
+    "NO es 'privacidad completa'",
+    "Puede afectar recomendaciones"
+  ],
+  "conflicts": [],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "Reduce telemetria; no la elimina por completo.",
+  "experimental": true,
+  "sources": [
+    "Dominios de telemetria publicos de Spotify"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "id": "google_ads_measurement",
+  "name": "Google — reduce advertising/measurement",
+  "category": "ads",
+  "description": "Reduce endpoints de publicidad y medicion de Google.",
+  "domains": [
+    "doubleclick.net",
+    "googleadservices.com",
+    "google-analytics.com",
+    "googlesyndication.com"
+  ],
+  "effects": [
+    "Menos anuncios/medicion por dominio"
+  ],
+  "limitations": [
+    "Puede afectar apps que dependen de Google Ads/Analytics",
+    "NO es 'privacidad completa'"
+  ],
+  "conflicts": [
+    "allowlist de apps con Google Ads"
+  ],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "Filtrado DNS; puede romper apps dependientes de Google Ads.",
+  "experimental": true,
+  "sources": [
+    "Dominios de ads/medicion conocidos de Google"
+  ]
+}

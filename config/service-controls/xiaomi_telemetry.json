@@ -1,0 +1,30 @@
+{
+  "id": "xiaomi_telemetry",
+  "name": "Xiaomi — reduce telemetry",
+  "category": "telemetry",
+  "description": "Reduce endpoints de telemetria/tracking de MIUI/Xiaomi.",
+  "domains": [
+    "tracking.miui.com",
+    "data.mistat.xiaomi.com",
+    "sdkconfig.ad.xiaomi.com"
+  ],
+  "effects": [
+    "Menos telemetria/anuncios por dominio"
+  ],
+  "limitations": [
+    "Puede afectar algunas funciones de MIUI"
+  ],
+  "conflicts": [],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "Reduce telemetria; es filtrado DNS.",
+  "experimental": true,
+  "sources": [
+    "Dominios de telemetria conocidos de Xiaomi/MIUI"
+  ]
+}

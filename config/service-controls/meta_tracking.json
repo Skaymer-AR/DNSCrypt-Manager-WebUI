@@ -1,0 +1,32 @@
+{
+  "id": "meta_tracking",
+  "name": "Meta — reduce tracking endpoints",
+  "category": "trackers",
+  "description": "Bloquea endpoints de tracking/analitica de Meta (Facebook/Instagram).",
+  "domains": [
+    "graph.facebook.com",
+    "analytics.facebook.com",
+    "pixel.facebook.com"
+  ],
+  "effects": [
+    "Menos tracking cross-app"
+  ],
+  "limitations": [
+    "graph.facebook.com puede afectar logins con Facebook; usar con cuidado"
+  ],
+  "conflicts": [
+    "allowlist de apps que usan Facebook Login"
+  ],
+  "modes": [
+    "off",
+    "15m",
+    "1h",
+    "until_reboot",
+    "permanent"
+  ],
+  "warning": "Puede romper 'Login with Facebook'.",
+  "experimental": true,
+  "sources": [
+    "Dominios de tracking conocidos de Meta"
+  ]
+}
