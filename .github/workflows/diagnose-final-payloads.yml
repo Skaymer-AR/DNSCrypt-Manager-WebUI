@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/diagnose-final-payloads.yml'
+      - 'import-assets/rc22-exact-2k-part-*.b64'
+      - 'import-assets/v03-exact-2k-part-*.b64'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - name: Assemble every payload without blocking
+      - name: Assemble exact payloads without blocking
         shell: bash
         run: |
           set -u
@@ -39,10 +41,9 @@ jobs:
             import-assets/repair-07-1.b64 \
             import-assets/repair-07-2.b64 \
             import-assets/wip3gz-part-08 \
-            import-assets/wip3gz-part-09 \
-            > /tmp/report/wip3.b64
-          cat import-assets/rc22-part-*.b64 > /tmp/report/rc22.b64
-          cat import-assets/v03-part-*.b64 > /tmp/report/v03.b64
+            import-assets/wip3gz-part-09 > /tmp/report/wip3.b64
+          cat import-assets/rc22-exact-2k-part-*.b64 > /tmp/report/rc22.b64
+          cat import-assets/v03-exact-2k-part-*.b64 > /tmp/report/v03.b64
 
           {
             echo '=== encoded ==='
@@ -51,10 +52,12 @@ jobs:
             echo '=== decoded ==='
             base64 --decode /tmp/report/wip3.b64 > /tmp/report/wip3.patch.gz
             gzip -dc /tmp/report/wip3.patch.gz > /tmp/report/wip3.patch
-            base64 --decode /tmp/report/rc22.b64 > /tmp/report/rc22.patch
-            base64 --decode /tmp/report/v03.b64 > /tmp/report/v03.patch
-            wc -c /tmp/report/*.patch /tmp/report/wip3.patch.gz
-            sha256sum /tmp/report/*.patch /tmp/report/wip3.patch.gz
+            base64 --decode /tmp/report/rc22.b64 > /tmp/report/rc22.patch.gz
+            gzip -dc /tmp/report/rc22.patch.gz > /tmp/report/rc22.patch
+            base64 --decode /tmp/report/v03.b64 > /tmp/report/v03.patch.gz
+            gzip -dc /tmp/report/v03.patch.gz > /tmp/report/v03.patch
+            wc -c /tmp/report/*.patch /tmp/report/*.patch.gz
+            sha256sum /tmp/report/*.patch /tmp/report/*.patch.gz
             grep -c '^From ' /tmp/report/wip3.patch
             grep -c '^From ' /tmp/report/rc22.patch
             grep -c '^From ' /tmp/report/v03.patch
@@ -62,6 +65,6 @@ jobs:
           cat /tmp/report/result.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: final-payload-diagnostic
+          name: final-exact-payload-diagnostic
           path: /tmp/report
           if-no-files-found: error
