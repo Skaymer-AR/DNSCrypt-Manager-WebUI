@@ -39,10 +39,7 @@ jobs:
           sha256sum DNSCrypt-Manager-v0.3.0-RC1.zip > DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
           grep -Eq '^[0-9a-f]{64}  DNSCrypt-Manager-v0\.3\.0-RC1\.zip$' DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
 
-          asset_id="$(gh api repos/${GITHUB_REPOSITORY}/releases/tags/v0.3.0-rc1 --jq '.assets[] | select(.name == "DNSCrypt-Manager-v0.3.0-RC1.zip.sha256") | .id')"
-          test -n "$asset_id"
-          gh api --method DELETE repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}
-          gh release upload v0.3.0-rc1 DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+          gh release upload v0.3.0-rc1 DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 --clobber
 
           cd /tmp/verify
           gh release download v0.3.0-rc1 \
