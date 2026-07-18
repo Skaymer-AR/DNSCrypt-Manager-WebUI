@@ -66,6 +66,13 @@ if [ -f "$TRANSPORT_LIB" ]; then
   . "$TRANSPORT_LIB"
 fi
 
+# captive.sh / bypass.sh / monitor.sh: red y monitor local (v0.3 C).
+for _lib3 in captive bypass monitor; do
+  _LP="${COMMON%/*}/$_lib3.sh"
+  # shellcheck source=/dev/null
+  [ -f "$_LP" ] && . "$_LP"
+done
+
 ##############################################################################
 # TOML helpers
 ##############################################################################
@@ -1300,6 +1307,37 @@ cmd_source() {
   esac
 }
 
+cmd_captive() {
+  command -v captive_status >/dev/null 2>&1 || { echo "ERROR: captive.sh no cargado" >&2; return 1; }
+  case "${1:-status}" in
+    status)  captive_status ;;
+    enter)   shift; captive_enter "${1:-}" ;;
+    restore) captive_restore ;;
+    *) echo "Uso: captive status|enter [SECONDS]|restore" >&2; return 1 ;;
+  esac
+}
+cmd_bypass() {
+  command -v bypass_status >/dev/null 2>&1 || { echo "ERROR: bypass.sh no cargado" >&2; return 1; }
+  case "${1:-status}" in
+    status) bypass_status ;;
+    audit)  bypass_audit ;;
+    mode)   shift; bypass_set_mode "${1:-}" ;;
+    *) echo "Uso: bypass status|audit|mode MODE" >&2; return 1 ;;
+  esac
+}
+cmd_monitor() {
+  command -v monitor_status >/dev/null 2>&1 || { echo "ERROR: monitor.sh no cargado" >&2; return 1; }
+  _s="${1:-status}"; shift 2>/dev/null
+  case "$_s" in
+    status) monitor_status ;;
+    alerts) monitor_alerts ;;
+    scan)   monitor_scan ;;
+    export) monitor_export "${1:-json}" ;;
+    clear)  monitor_clear ;;
+    *) echo "Uso: monitor status|alerts|scan|export json|csv|clear" >&2; return 1 ;;
+  esac
+}
+
 cmd_transport() {
   command -v transport_status >/dev/null 2>&1 || { echo "ERROR: transport.sh no cargado" >&2; return 1; }
   case "${1:-status}" in
@@ -1347,6 +1385,9 @@ cmd_odoh() {
     transport)        cmd_transport "$@" ;;
     anonymized)       cmd_anonymized "$@" ;;
     odoh)             cmd_odoh "$@" ;;
+    captive)          cmd_captive "$@" ;;
+    bypass)           cmd_bypass "$@" ;;
+    monitor)          cmd_monitor "$@" ;;
     start)            cmd_start "$@" ;;
     stop)             cmd_stop "$@" ;;
     restart)          cmd_restart "$@" ;;
