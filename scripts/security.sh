@@ -1530,10 +1530,11 @@ cmd_events() {
 sec_migrate() {
   _cur=$(cat "$SCHEMA_FILE" 2>/dev/null)
   case "$_cur" in ''|*[!0-9]*) _cur=1 ;; esac
-  if [ "$_cur" -ge 2 ] 2>/dev/null; then
+  if [ "$_cur" -ge 3 ] 2>/dev/null; then
     echo "Migracion: schema ya en $_cur; nada que hacer."
     return 0
   fi
+  if [ "$_cur" -lt 2 ] 2>/dev/null; then
   log_msg "migracion v0.1.0 -> v0.2.0: inicio"
   rm -f "$MIGRATION_FAILED_FLAG" 2>/dev/null
   _err=0
@@ -1565,6 +1566,40 @@ sec_migrate() {
   log_msg "migracion v0.1.0 -> v0.2.0: OK (schema 2)"
   echo "OK: migracion a schema 2 completada. Proveedor, NextDNS, IPv6, redireccion,"
   echo "    backups y PANIC: conservados tal como estaban."
+  fi   # fin bloque 1->2
+
+  # -------------------------------------------------------------------------
+  # Paso schema 2 -> 3 (v0.3.0-RC1). ADITIVO e IDEMPOTENTE. Inicializa los
+  # subsistemas nuevos con defaults OFF; NO toca config existente. Con backup
+  # del schema para rollback.
+  # -------------------------------------------------------------------------
+  _c2=$(cat "$SCHEMA_FILE" 2>/dev/null); case "$_c2" in ''|*[!0-9]*) _c2=2 ;; esac
+  if [ "$_c2" -lt 3 ] 2>/dev/null; then
+    log_msg "migracion v0.2.0 -> v0.3.0: inicio"
+    cp "$SCHEMA_FILE" "$SCHEMA_FILE.bak" 2>/dev/null   # rollback point
+    _e3=0
+    # Inicializar subsistemas nuevos (cada init crea dirs 0700 + estado OFF).
+    command -v transport_init >/dev/null 2>&1 && { transport_init || _e3=1; }
+    command -v captive_init   >/dev/null 2>&1 && { captive_init   || _e3=1; }
+    command -v bypass_init    >/dev/null 2>&1 && { bypass_init    || _e3=1; }
+    command -v monitor_init   >/dev/null 2>&1 && { monitor_init   || _e3=1; }
+    command -v sc_init        >/dev/null 2>&1 && { sc_init        || _e3=1; }
+    command -v ap_init        >/dev/null 2>&1 && { ap_init        || _e3=1; }
+    # idioma por defecto de la WebUI = en (no se fuerza si el usuario ya eligio).
+    if [ "$_e3" -ne 0 ]; then
+      # rollback: restaurar el schema previo; NO se sube a 3.
+      [ -f "$SCHEMA_FILE.bak" ] && cp "$SCHEMA_FILE.bak" "$SCHEMA_FILE" 2>/dev/null
+      rm -f "$SCHEMA_FILE.bak" 2>/dev/null
+      log_msg "migracion v0.2.0 -> v0.3.0: FALLO; schema revertido, features nuevas no activadas"
+      echo "ERROR: migracion a schema 3 incompleta; se revirtio. Config previa intacta." >&2
+      return 1
+    fi
+    rm -f "$SCHEMA_FILE.bak" 2>/dev/null
+    echo 3 > "$SCHEMA_FILE"
+    log_msg "migracion v0.2.0 -> v0.3.0: OK (schema 3)"
+    echo "OK: migracion a schema 3 completada. Transporte/portal/bypass/monitor/"
+    echo "    service-controls/app-policy inicializados en OFF; tu config se conservo."
+  fi
   return 0
 }
 
