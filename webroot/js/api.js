@@ -454,3 +454,5 @@ const DCM = (() => {
     DOMAIN_RE
   };
 })();
+
+if (typeof module !== 'undefined' && module.exports) { module.exports = DCM; }
