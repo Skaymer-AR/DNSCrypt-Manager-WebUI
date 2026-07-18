@@ -1,0 +1,11 @@
+{
+  "_note": "Nombres de relays de Anonymized DNSCrypt (informativo). Los stamps sdns:// se obtienen de la lista publica de resolvers/relays de dnscrypt-proxy en el dispositivo; este modulo NO descarga nada en build. Elegir relay y resolver de operadores distintos.",
+  "relays": [
+    {"name":"anon-cs-fr","operator":"cs","region":"FR"},
+    {"name":"anon-cs-nl","operator":"cs","region":"NL"},
+    {"name":"anon-scaleway","operator":"scaleway","region":"FR"},
+    {"name":"anon-tiarap","operator":"tiarap","region":"SG"},
+    {"name":"anon-plan9dns-mx","operator":"plan9dns","region":"MX"},
+    {"name":"anon-serbica","operator":"serbica","region":"RS"}
+  ]
+}

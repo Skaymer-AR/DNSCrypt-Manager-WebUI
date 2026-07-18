@@ -59,6 +59,13 @@ if [ -f "$FETCH_LIB" ]; then
   . "$FETCH_LIB"
 fi
 
+# transport.sh: transportes (Anonymized DNSCrypt / ODoH) con apply atomico (v0.3).
+TRANSPORT_LIB="${COMMON%/*}/transport.sh"
+if [ -f "$TRANSPORT_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$TRANSPORT_LIB"
+fi
+
 ##############################################################################
 # TOML helpers
 ##############################################################################
@@ -1293,9 +1300,53 @@ cmd_source() {
   esac
 }
 
+cmd_transport() {
+  command -v transport_status >/dev/null 2>&1 || { echo "ERROR: transport.sh no cargado" >&2; return 1; }
+  case "${1:-status}" in
+    status)   transport_status ;;
+    test)     shift; anonymized_test "$@" ;;
+    apply)    shift; anonymized_apply "$@" ;;
+    rollback) transport_rollback ;;
+    disable)  transport_disable ;;
+    *) echo "Uso: transport status|test|apply|rollback|disable" >&2; return 1 ;;
+  esac
+}
+cmd_anonymized() {
+  command -v anonymized_status >/dev/null 2>&1 || { echo "ERROR: transport.sh no cargado" >&2; return 1; }
+  _s="${1:-status}"; shift 2>/dev/null
+  case "$_s" in
+    status)    anonymized_status ;;
+    resolvers) anonymized_resolvers ;;
+    relays)    anonymized_relays ;;
+    routes)    anonymized_routes ;;
+    test)      [ -n "${1:-}" ] || { echo "Uso: anonymized test RESOLVER RELAY[,RELAY]" >&2; return 1; }; anonymized_test "$1" "${2:-}" ;;
+    apply)     [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "Uso: anonymized apply RESOLVER RELAY[,RELAY]" >&2; return 1; }; anonymized_apply "$1" "$2" ;;
+    disable)   anonymized_disable ;;
+    rollback)  transport_rollback ;;
+    *) echo "Uso: anonymized status|resolvers|relays|routes|test|apply|disable|rollback" >&2; return 1 ;;
+  esac
+}
+cmd_odoh() {
+  command -v odoh_status >/dev/null 2>&1 || { echo "ERROR: transport.sh no cargado" >&2; return 1; }
+  _s="${1:-status}"; shift 2>/dev/null
+  case "$_s" in
+    status)   odoh_status ;;
+    targets)  odoh_targets ;;
+    relays)   odoh_relays ;;
+    test)     odoh_test "${1:-}" "${2:-}" ;;
+    apply)    [ -n "${1:-}" ] || { echo "Uso: odoh apply TARGET_STAMP RELAY" >&2; return 1; }; odoh_apply "$1" "${2:-}" ;;
+    disable)  odoh_disable ;;
+    rollback) transport_rollback ;;
+    *) echo "Uso: odoh status|targets|relays|test|apply|disable|rollback" >&2; return 1 ;;
+  esac
+}
+
   case "$_cmd" in
     environment|env)  cmd_environment "$@" ;;
     source)           cmd_source "$@" ;;
+    transport)        cmd_transport "$@" ;;
+    anonymized)       cmd_anonymized "$@" ;;
+    odoh)             cmd_odoh "$@" ;;
     start)            cmd_start "$@" ;;
     stop)             cmd_stop "$@" ;;
     restart)          cmd_restart "$@" ;;
