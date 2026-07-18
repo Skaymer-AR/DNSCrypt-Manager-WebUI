@@ -194,7 +194,7 @@ export PATH="$FW_BIN:$PATH"
 echo
 echo "=== [A] Migracion v1 -> v2 ==="
 call_cli migrate >/dev/null 2>&1 && ok "migrate rc=0" || bad "migrate fallo"
-[ "$(cat "$DNSCRYPT_TEST_DATA_DIR/schema_version" 2>/dev/null)" = "2" ] && ok "schema_version = 2" || bad "schema_version != 2"
+[ "$(cat "$DNSCRYPT_TEST_DATA_DIR/schema_version" 2>/dev/null)" = "3" ] && ok "schema_version = 3 (migra 1->2->3)" || bad "schema_version != 3"
 [ -d "$DNSCRYPT_TEST_DATA_DIR/security" ] && ok "directorio security/ creado" || bad "falta security/"
 call_cli migrate >/dev/null 2>&1 && ok "migrate idempotente (2da vez rc=0)" || bad "migrate 2da vez fallo"
 
