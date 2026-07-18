@@ -1,4 +1,7 @@
 # DNSCrypt Manager - fuente de blocklist: phishing
+# NOTA RC2.2/A1: en Android se observo "curl code 6 (could not resolve host
+# phishing.army)". Eso es un FALLO DE RESOLUCION DNS, no un 404: la fuente NO se
+# marca broken. Se conserva la ultima copia valida y no se aplica una lista vacia.
 name=Phishing Army - Extended Blocklist
 category=phishing
 url=https://phishing.army/download/phishing_army_blocklist_extended.txt

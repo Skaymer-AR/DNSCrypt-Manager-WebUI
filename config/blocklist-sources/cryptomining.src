@@ -1,12 +1,18 @@
 # DNSCrypt Manager - fuente de blocklist: criptomineria (cryptomining)
 # DESACTIVADA por defecto.
-name=ZeroDot1 CoinBlockerLists
+# CAMBIO RC2.2/A1: ZeroDot1 CoinBlockerLists devolvia HTTP 404 permanente.
+# Reemplazada por NoCoin (hoshsadiq). Se conserva la ultima copia valida; no se
+# aplica una lista vacia; no se reintenta el 404. NoCoin NO bloquea toda la
+# criptomineria existente. No se marca verified desde CI.
+name=NoCoin hosts
 category=cryptomining
-url=https://raw.githubusercontent.com/ZeroDot1/CoinBlockerLists/master/list.txt
-format=domains
-license=GPL-3.0
+url=https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt
+format=hosts
+license=MIT
 min_bytes=512
 max_bytes=26214400
-min_domains=50
-homepage=https://gitlab.com/ZeroDot1/CoinBlockerLists
-notes=Dominios de mineria de criptomonedas en el navegador. Un dominio por linea.
+min_domains=20
+homepage=https://github.com/hoshsadiq/adblock-nocoin-list
+maintainer=hoshsadiq
+replaces=ZeroDot1 CoinBlockerLists
+notes=Mineros de criptomonedas conocidos (NoCoin). Reemplaza a CoinBlockerLists (404). Formato hosts.

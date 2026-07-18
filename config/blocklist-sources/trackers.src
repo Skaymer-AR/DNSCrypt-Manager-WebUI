@@ -1,12 +1,19 @@
 # DNSCrypt Manager - fuente de blocklist: rastreadores (trackers)
 # DESACTIVADA por defecto: puede afectar analitica embebida en apps/paginas.
-name=Firebog - EasyPrivacy (trackers)
+# CAMBIO RC2.2/A1: el mirror Firebog (v.firebog.net) quedo legacy/degraded (no
+# depender de un unico mirror). Se migra a EasyPrivacy 3rd Party (r-a-y,
+# mobile-hosts), una fuente mantenida y apta para movil, ya presente en el
+# catalogo como ray_easyprivacy_3rdparty. No se afirma equivalencia exacta con
+# HaGeZi Native Tracker. Se conserva la ultima copia valida.
+name=EasyPrivacy 3rd Party (r-a-y)
 category=trackers
-url=https://v.firebog.net/hosts/Easyprivacy.txt
-format=domains
+url=https://raw.githubusercontent.com/r-a-y/mobile-hosts/master/EasyPrivacy3rdParty.txt
+format=hosts
 license=GPL-3.0
 min_bytes=1024
 max_bytes=26214400
 min_domains=100
-homepage=https://firebog.net/
-notes=Rastreadores de EasyPrivacy, curada por The Firebog. Un dominio por linea.
+homepage=https://github.com/r-a-y/mobile-hosts
+upstream_status=maintained
+legacy_source=Firebog EasyPrivacy (v.firebog.net) [legacy]
+notes=Rastreadores EasyPrivacy (empaquetado por r-a-y para movil). Reemplaza al mirror Firebog degradado. Formato hosts.
