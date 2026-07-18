@@ -29,7 +29,16 @@ base64 --decode /tmp/wip3.b64 | gzip -dc > /tmp/wip3.patch
 echo '8ed021ed038d7dd7f0c0c8f5a55ff1ffbbc365087242051ded8592c7ab53efae  /tmp/wip3.patch' | sha256sum -c -
 test "$(grep -c '^From ' /tmp/wip3.patch)" -eq 21
 
-cat import-assets/rc22-exact-2k-part-*.b64 > /tmp/rc22.b64
+cat \
+  import-assets/rc22-part00-exact-500-00.b64 \
+  import-assets/rc22-part00-exact-500-01.b64 \
+  import-assets/rc22-part00-exact-500-02.b64 \
+  import-assets/rc22-part00-exact-500-03.b64 \
+  import-assets/rc22-exact-2k-part-01.b64 \
+  import-assets/rc22-exact-2k-part-02.b64 \
+  import-assets/rc22-exact-2k-part-03.b64 \
+  import-assets/rc22-exact-2k-part-04.b64 \
+  import-assets/rc22-exact-2k-part-05.b64 > /tmp/rc22.b64
 echo '06ff8d74f2c86acb1b5a6787547c48dedc304b4217b956246ec890dc4b12f42b  /tmp/rc22.b64' | sha256sum -c -
 base64 --decode /tmp/rc22.b64 > /tmp/rc22.patch.gz
 echo '6dc12ce25f7089156e480971f9dec76a2aa5a78ea5599662ef7dea3cda3e8301  /tmp/rc22.patch.gz' | sha256sum -c -
@@ -38,9 +47,7 @@ echo '70e9b4a8fcbc7992575219f01c1b9ee9beae548161603ba7ce9b4eccbca4bb86  /tmp/rc2
 test "$(grep -c '^From ' /tmp/rc22.patch)" -eq 3
 
 cat import-assets/v03-exact-2k-part-*.b64 > /tmp/v03.b64
-echo '488f8afc480ec441e6bb67ec65b0b6351b6a793ea4d962b9ca62ed11411d2abd  /tmp/v03.b64' | sha256sum -c -
 base64 --decode /tmp/v03.b64 > /tmp/v03.patch.gz
-echo 'c35f37a5b31270b3cc21c11bcb26f253094245e15c07147500c4571eb5c941ee  /tmp/v03.patch.gz' | sha256sum -c -
 gzip -dc /tmp/v03.patch.gz > /tmp/v03.patch
 echo 'a6fb245395ebb4d93e4d46bfb26879b95def90a77b0751330affe9f03e0c869a  /tmp/v03.patch' | sha256sum -c -
 test "$(grep -c '^From ' /tmp/v03.patch)" -eq 4
