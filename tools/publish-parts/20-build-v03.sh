@@ -3,7 +3,9 @@ set -euo pipefail
 
 git checkout -B feature/v0.3.0-rc1 "$WIP3_HEAD"
 git am -3 /tmp/v03.patch
-test "$(git rev-parse HEAD)" = 'ab1307ffd17a0f35d6e548bec0268b1d435efdfc'
+test "$(git rev-list --count "$WIP3_HEAD"..HEAD)" -eq 4
+grep -q 'webroot/i18n/en.json' < <(git ls-tree -r --name-only HEAD)
+grep -q 'webroot/js/router.js' < <(git ls-tree -r --name-only HEAD)
 
 sed -i 's/^version=.*/version=v0.3.0-RC1-WIP-A/' module.prop
 sed -i 's/^versionCode=.*/versionCode=300/' module.prop
