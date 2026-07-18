@@ -8,6 +8,7 @@ on:
       - 'trigger-v030-checksum-fix.txt'
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -24,6 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/report
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=30" > /tmp/report/actions-runs.json || true
           gh release view v0.3.0-rc1 --json url,isPrerelease,tagName,assets > /tmp/report/release.json
           python3 - <<'PY'
           import json
