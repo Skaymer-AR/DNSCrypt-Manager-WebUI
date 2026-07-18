@@ -1,0 +1,262 @@
+name: Publish final verified prereleases
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-final-prereleases.yml'
+      - 'import-assets/repair-03-1-part-*.b64'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: publish-final-verified-prereleases
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout publication inputs
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct exact patch payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Skaymer AR'
+          git config user.email 'skaymer@users.noreply.github.com'
+          git fetch origin main feature/security-v0.2.0 --tags
+
+          cat import-assets/repair-03-1-part-*.b64 > /tmp/repair-03-1.b64
+          echo '57422c4bdbde19234aa9131aed496a0036cb6e5721d3ee07b0994ec7af5b8b43  /tmp/repair-03-1.b64' | sha256sum -c -
+
+          cat \
+            import-assets/wip3gz-part-00 \
+            import-assets/wip3gz-part-01 \
+            import-assets/wip3gz-part-02 \
+            import-assets/repair-03-0.b64 \
+            /tmp/repair-03-1.b64 \
+            import-assets/repair-03-2.b64 \
+            import-assets/wip3gz-part-04 \
+            import-assets/repair-05-0.b64 \
+            import-assets/repair-05-1.b64 \
+            import-assets/repair-05-2.b64 \
+            import-assets/wip3gz-part-06 \
+            import-assets/repair-07-0.b64 \
+            import-assets/repair-07-1.b64 \
+            import-assets/repair-07-2.b64 \
+            import-assets/wip3gz-part-08 \
+            import-assets/wip3gz-part-09 \
+            > /tmp/wip3.b64
+
+          base64 --decode /tmp/wip3.b64 | gzip -dc > /tmp/wip3.patch
+          cat import-assets/rc22-part-*.b64 | base64 --decode > /tmp/rc22.patch
+          cat import-assets/v03-part-*.b64 | base64 --decode > /tmp/v03.patch
+
+          echo '8ed021ed038d7dd7f0c0c8f5a55ff1ffbbc365087242051ded8592c7ab53efae  /tmp/wip3.patch' | sha256sum -c -
+          echo '70e9b4a8fcbc7992575219f01c1b9ee9beae548161603ba7ce9b4eccbca4bb86  /tmp/rc22.patch' | sha256sum -c -
+          echo 'a6fb245395ebb4d93e4d46bfb26879b95def90a77b0751330affe9f03e0c869a  /tmp/v03.patch' | sha256sum -c -
+          test "$(grep -c '^From ' /tmp/wip3.patch)" -eq 21
+          test "$(grep -c '^From ' /tmp/rc22.patch)" -eq 3
+          test "$(grep -c '^From ' /tmp/v03.patch)" -eq 4
+
+          cp import-assets/RELEASE_NOTES_RC22.md /tmp/RELEASE_NOTES_RC22.md
+          cp import-assets/RELEASE_NOTES_V03.md /tmp/RELEASE_NOTES_V03.md
+          cp import-assets/AUDIT_RC2.2.md /tmp/AUDIT_RC2.2.md
+          cp import-assets/TEST_RESULTS_RC2.2.md /tmp/TEST_RESULTS_RC2.2.md
+          mkdir -p "$RUNNER_TEMP/releases"
+
+      - name: Reconstruct canonical WIP3 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B reconstructed/rc2-wip3 bd2e0ab28922b3ed067f4a3c183a77fca714c243
+          git am -3 /tmp/wip3.patch
+          test "$(git rev-parse HEAD)" = '34df8e428bb76880d1887f01ffc5ec97956a030d'
+          echo "WIP3_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Reconstruct, test and package RC2.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B pre-release/v0.2.0-rc2.2 "$WIP3_HEAD"
+          git am -3 /tmp/rc22.patch
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          warning = (
+              '> [!WARNING]\n'
+              '> **v0.2.0-RC2.2 es una versión preliminar en pruebas.** La RC2 original está '
+              'descartada. BindHosts debe permanecer desactivado y el dispositivo debe reiniciarse '
+              'antes de habilitar DNSCrypt Manager; usarlos juntos puede causar pérdida de red o '
+              'bootloop. En KernelSU Next puede ser necesario activar Hybrid Mount y reiniciar. '
+              'La primera versión estable será v1.0.0.\n\n'
+          )
+          text = p.read_text(encoding='utf-8')
+          if 'v0.2.0-RC2.2 es una versión preliminar en pruebas' not in text:
+              p.write_text(warning + text, encoding='utf-8')
+
+          old = Path('.github/workflows/publish-release.yml')
+          if old.exists():
+              text = old.read_text(encoding='utf-8')
+              start = text.find('on:')
+              permissions = text.find('\npermissions:')
+              if start >= 0 and permissions > start:
+                  old.write_text(text[:start] + 'on:\n  workflow_dispatch:\n' + text[permissions:], encoding='utf-8')
+          PY
+
+          git add README.md .github/workflows/publish-release.yml
+          if ! git diff --cached --quiet; then
+            git commit -m 'docs(rc2.2): mark preliminary status and preserve v0.1 release'
+          fi
+
+          grep -qx 'version=v0.2.0-RC2.2' module.prop
+          grep -qx 'versionCode=204' module.prop
+          grep -q 'BindHosts debe permanecer desactivado' README.md
+          bash tests/run-syntax-checks.sh
+          bash tests/smoke-test-cli.sh
+          bash tests/smoke-test-catalog.sh
+          bash tests/smoke-test-environment-v030.sh
+
+          ZIP="$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip"
+          DCM_SKIP_TESTS=1 DCM_OUTPUT="$ZIP" bash tools/build-module.sh
+          unzip -t "$ZIP"
+          unzip -p "$ZIP" module.prop | tr -d '\r' | grep -qx 'version=v0.2.0-RC2.2'
+          unzip -p "$ZIP" module.prop | tr -d '\r' | grep -qx 'versionCode=204'
+          if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|fixtures|bootstrap|\.git)/'; then
+            echo 'Development files leaked into RC2.2 ZIP' >&2
+            exit 1
+          fi
+          sha256sum "$ZIP" > "$ZIP.sha256"
+          cp /tmp/rc22.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch"
+          cp /tmp/AUDIT_RC2.2.md "$RUNNER_TEMP/releases/AUDIT_RC2.2.md"
+          cp /tmp/TEST_RESULTS_RC2.2.md "$RUNNER_TEMP/releases/TEST_RESULTS_RC2.2.md"
+          echo "RC22_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Reconstruct, test and package v0.3 preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B feature/v0.3.0-rc1 "$WIP3_HEAD"
+          git am -3 /tmp/v03.patch
+          sed -i 's/^version=.*/version=v0.3.0-RC1-WIP-A/' module.prop
+          sed -i 's/^versionCode=.*/versionCode=300/' module.prop
+          sed -i 's/^description=.*/description=PREVIEW en pruebas. BindHosts debe estar desactivado; estable desde v1.0.0. KernelSU Next puede requerir Hybrid Mount./' module.prop
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          warning = (
+              '> [!CAUTION]\n'
+              '> **v0.3.0-RC1-WIP-A es una vista previa de desarrollo.** BindHosts debe permanecer '
+              'desactivado y el dispositivo debe reiniciarse antes de habilitar DNSCrypt Manager; '
+              'usarlos juntos puede causar pérdida de red o bootloop. En KernelSU Next puede ser '
+              'necesario activar Hybrid Mount y reiniciar. El proyecto continúa en pruebas hasta '
+              'v1.0.0.\n\n'
+          )
+          text = p.read_text(encoding='utf-8')
+          if 'v0.3.0-RC1-WIP-A es una vista previa de desarrollo' not in text:
+              p.write_text(warning + text, encoding='utf-8')
+          PY
+
+          git add module.prop README.md
+          git commit -m 'chore(v0.3): mark Checkpoint A as development preview'
+
+          grep -qx 'version=v0.3.0-RC1-WIP-A' module.prop
+          grep -qx 'versionCode=300' module.prop
+          grep -q 'BindHosts debe permanecer desactivado' README.md
+          bash tests/run-syntax-checks.sh
+          bash tests/smoke-test-webui.sh
+          bash tests/smoke-test-i18n.sh
+          node tests/smoke-test-webui-v030.cjs
+
+          ZIP="$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip"
+          DCM_SKIP_TESTS=1 DCM_OUTPUT="$ZIP" bash tools/build-module.sh
+          unzip -t "$ZIP"
+          unzip -p "$ZIP" module.prop | tr -d '\r' | grep -qx 'version=v0.3.0-RC1-WIP-A'
+          unzip -p "$ZIP" module.prop | tr -d '\r' | grep -qx 'versionCode=300'
+          if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|fixtures|bootstrap|\.git)/'; then
+            echo 'Development files leaked into v0.3 ZIP' >&2
+            exit 1
+          fi
+          sha256sum "$ZIP" > "$ZIP.sha256"
+          cp /tmp/v03.patch "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch"
+          cp WORK_PROGRESS_v0.3.md "$RUNNER_TEMP/releases/WORK_PROGRESS_v0.3.md"
+          echo "V03_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Publish source trees, main and tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force origin "$RC22_HEAD":refs/heads/pre-release/v0.2.0-rc2.2
+          git push --force origin "$V03_HEAD":refs/heads/feature/v0.3.0-rc1
+          git fetch origin main
+          git merge-base --is-ancestor origin/main "$RC22_HEAD"
+          git push origin "$RC22_HEAD":refs/heads/main
+          git tag -f v0.2.0-rc2.2 "$RC22_HEAD"
+          git tag -f v0.3.0-rc1-wip-a "$V03_HEAD"
+          git push --force origin refs/tags/v0.2.0-rc2.2 refs/tags/v0.3.0-rc1-wip-a
+
+      - name: Create and verify GitHub prereleases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete v0.2.0-rc2.2 --yes >/dev/null 2>&1 || true
+          gh release create v0.2.0-rc2.2 \
+            --title 'DNSCrypt Manager v0.2.0-RC2.2 (Preliminary)' \
+            --notes-file /tmp/RELEASE_NOTES_RC22.md --prerelease \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip" \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip.sha256" \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.2.0-RC2.2.patch" \
+            "$RUNNER_TEMP/releases/AUDIT_RC2.2.md" \
+            "$RUNNER_TEMP/releases/TEST_RESULTS_RC2.2.md"
+
+          gh release delete v0.3.0-rc1-wip-a --yes >/dev/null 2>&1 || true
+          gh release create v0.3.0-rc1-wip-a \
+            --title 'DNSCrypt Manager v0.3.0-RC1-WIP-A (Preview)' \
+            --notes-file /tmp/RELEASE_NOTES_V03.md --prerelease \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip" \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip.sha256" \
+            "$RUNNER_TEMP/releases/DNSCrypt-Manager-v0.3.0-RC1-WIP-A.patch" \
+            "$RUNNER_TEMP/releases/WORK_PROGRESS_v0.3.md"
+
+          gh release view v0.2.0-rc2.2 --json url,isPrerelease,assets > /tmp/verify-rc22.json
+          gh release view v0.3.0-rc1-wip-a --json url,isPrerelease,assets > /tmp/verify-v03.json
+          python3 - <<'PY'
+          import json
+          expected = [
+              ('/tmp/verify-rc22.json', 'DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip', 5),
+              ('/tmp/verify-v03.json', 'DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip', 4),
+          ]
+          for path, asset, minimum in expected:
+              data = json.load(open(path, encoding='utf-8'))
+              names = {item['name'] for item in data['assets']}
+              assert data['isPrerelease'] is True
+              assert asset in names
+              assert len(names) >= minimum
+              print(data['url'])
+          PY
+
+          git fetch origin main
+          test "$(git show origin/main:module.prop | grep '^version=')" = 'version=v0.2.0-RC2.2'
+          test "$(git show origin/main:module.prop | grep '^versionCode=')" = 'versionCode=204'
+
+      - name: Preserve verified release files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-verified-prerelease-files
+          path: ${{ runner.temp }}/releases
+          if-no-files-found: warn
