@@ -1,0 +1,80 @@
+name: Verify live v0.3.0-RC1 release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-v030-release-live.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify public release, assets and downloaded ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release-check /tmp/report
+
+          ok=0
+          for attempt in $(seq 1 20); do
+            if gh release view v0.3.0-rc1 --json url,isPrerelease,tagName,assets > /tmp/report/release.json 2>/tmp/report/release-error.txt; then
+              ok=1
+              break
+            fi
+            sleep 15
+          done
+          test "$ok" -eq 1
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path('/tmp/report/release.json').read_text(encoding='utf-8'))
+          assert data['tagName'] == 'v0.3.0-rc1'
+          assert data['isPrerelease'] is True
+          names = {asset['name'] for asset in data['assets']}
+          required = {
+              'DNSCrypt-Manager-v0.3.0-RC1.zip',
+              'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256',
+              'DNSCrypt-Manager-v0.3.0-RC1.patch',
+              'AUDIT_v0.3.0-RC1.md',
+              'TEST_RESULTS_v0.3.0-RC1.md',
+          }
+          missing = required - names
+          assert not missing, f'Missing assets: {sorted(missing)}'
+          print(data['url'])
+          print('\n'.join(sorted(names)))
+          PY
+
+          gh release download v0.3.0-rc1 \
+            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
+            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256' \
+            -p 'AUDIT_v0.3.0-RC1.md' \
+            -p 'TEST_RESULTS_v0.3.0-RC1.md' \
+            -D /tmp/release-check
+
+          (cd /tmp/release-check && sha256sum -c DNSCrypt-Manager-v0.3.0-RC1.zip.sha256) | tee /tmp/report/checksum.txt
+          unzip -tq /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip | tee /tmp/report/unzip.txt
+          unzip -p /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip module.prop | tr -d '\r' | tee /tmp/report/module.prop
+          grep -qx 'id=dnscrypt_manager' /tmp/report/module.prop
+          grep -qx 'version=v0.3.0-RC1' /tmp/report/module.prop
+          grep -qx 'versionCode=300' /tmp/report/module.prop
+          grep -qx 'author=Skaymer AR' /tmp/report/module.prop
+          sha256sum /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip | tee /tmp/report/zip.sha256
+          cp /tmp/release-check/AUDIT_v0.3.0-RC1.md /tmp/report/
+          cp /tmp/release-check/TEST_RESULTS_v0.3.0-RC1.md /tmp/report/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v030-live-release-verification
+          path: /tmp/report
+          if-no-files-found: error
