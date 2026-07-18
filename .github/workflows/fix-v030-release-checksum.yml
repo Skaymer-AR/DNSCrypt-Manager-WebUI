@@ -1,0 +1,62 @@
+name: Fix v0.3.0-RC1 portable checksum
+
+on:
+  push:
+    branches: [release-v030-rc1-final]
+    paths:
+      - '.github/workflows/fix-v030-release-checksum.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Replace checksum with portable relative filename
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/fix /tmp/verify
+          gh release download v0.3.0-rc1 \
+            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
+            -D /tmp/fix
+          cd /tmp/fix
+          sha256sum DNSCrypt-Manager-v0.3.0-RC1.zip > DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+          grep -Eq '^[0-9a-f]{64}  DNSCrypt-Manager-v0\.3\.0-RC1\.zip$' DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+          gh release upload v0.3.0-rc1 DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 --clobber
+
+      - name: Redownload and independently validate published files
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download v0.3.0-rc1 \
+            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
+            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256' \
+            -D /tmp/verify
+          cd /tmp/verify
+          sha256sum -c DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 | tee checksum-verification.txt
+          unzip -tq DNSCrypt-Manager-v0.3.0-RC1.zip | tee unzip-verification.txt
+          unzip -p DNSCrypt-Manager-v0.3.0-RC1.zip module.prop | tr -d '\r' > module.prop
+          grep -qx 'id=dnscrypt_manager' module.prop
+          grep -qx 'version=v0.3.0-RC1' module.prop
+          grep -qx 'versionCode=300' module.prop
+          grep -qx 'author=Skaymer AR' module.prop
+          gh release view v0.3.0-rc1 --json url,isPrerelease,tagName,assets > release.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v030-portable-checksum-verification
+          path: |
+            /tmp/verify/DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+            /tmp/verify/checksum-verification.txt
+            /tmp/verify/unzip-verification.txt
+            /tmp/verify/module.prop
+            /tmp/verify/release.json
+          if-no-files-found: error
