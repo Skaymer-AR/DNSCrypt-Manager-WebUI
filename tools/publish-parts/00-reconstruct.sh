@@ -60,5 +60,7 @@ cp import-assets/TEST_RESULTS_RC2.2.md /tmp/TEST_RESULTS_RC2.2.md
 git checkout -B reconstructed/rc2-wip3 bd2e0ab28922b3ed067f4a3c183a77fca714c243
 git am -3 /tmp/wip3.patch
 WIP3_HEAD="$(git rev-parse HEAD)"
-test "$WIP3_HEAD" = '34df8e428bb76880d1887f01ffc5ec97956a030d'
+test "$(git rev-list --count bd2e0ab28922b3ed067f4a3c183a77fca714c243..HEAD)" -eq 21
+grep -qx 'version=v0.2.0-RC2' module.prop
+grep -qx 'versionCode=202' module.prop
 echo "WIP3_HEAD=$WIP3_HEAD" >> "$GITHUB_ENV"
