@@ -35,16 +35,20 @@ jobs:
           set -e
 
           gh release download v0.3.0-rc1 \
+            -R "$GITHUB_REPOSITORY" \
             -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
             -D /tmp/fix
           cd /tmp/fix
           sha256sum DNSCrypt-Manager-v0.3.0-RC1.zip > DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
           grep -Eq '^[0-9a-f]{64}  DNSCrypt-Manager-v0\.3\.0-RC1\.zip$' DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
 
-          gh release upload v0.3.0-rc1 DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 --clobber
+          gh release upload v0.3.0-rc1 DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 \
+            -R "$GITHUB_REPOSITORY" \
+            --clobber
 
           cd /tmp/verify
           gh release download v0.3.0-rc1 \
+            -R "$GITHUB_REPOSITORY" \
             -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
             -p 'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256'
           sha256sum -c DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 | tee checksum-verification.txt
@@ -55,7 +59,9 @@ jobs:
           grep -qx 'versionCode=300' module.prop
           grep -qx 'author=Skaymer AR' module.prop
           sha256sum DNSCrypt-Manager-v0.3.0-RC1.zip > zip.sha256
-          gh release view v0.3.0-rc1 --json url,isPrerelease,tagName,assets > release.json
+          gh release view v0.3.0-rc1 \
+            -R "$GITHUB_REPOSITORY" \
+            --json url,isPrerelease,tagName,assets > release.json
 
       - uses: actions/upload-artifact@v4
         if: always()
