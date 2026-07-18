@@ -886,7 +886,7 @@ function wirePrivacy() {
       let max = parseInt(($('histMaxInput') || {}).value, 10);
       if (!(max >= 50 && max <= 10000)) { toast('El maximo debe estar entre 50 y 10000.', 'error'); setBusy(false); return; }
       // Cada set-flag es una cadena FIJA (clave conocida + valor de lista blanca).
-      const CLIcmd = '/system/bin/dnscrypt-manager';
+      const CLIcmd = DCM.cli();
       const seq = [
         CLIcmd + ' set-flag hist_mode ' + mode,
         CLIcmd + ' set-flag hist_days ' + days,
@@ -1212,6 +1212,25 @@ async function initCatalogRC2() {
   await customRender();
 }
 
+/* Tarjeta de entorno (v0.3 A1): corre `environment status` y lo muestra. */
+async function refreshEnvironmentCard() {
+  const box = $('envCard');
+  if (!box) return;
+  if (!DCM.runEnvironmentStatus) { box.textContent = '-'; return; }
+  box.textContent = (typeof I18N !== 'undefined' && I18N.t) ? I18N.t('common.loading') : 'Loading...';
+  try {
+    const r = await DCM.runEnvironmentStatus();
+    const txt = (r && (r.stdout || r.stderr) ? (r.stdout || r.stderr) : '').trim();
+    box.textContent = txt || (I18N && I18N.t ? I18N.t('env.cli.unresolved') : '-');
+  } catch (_) {
+    box.textContent = (I18N && I18N.t) ? I18N.t('common.error') : 'error';
+  }
+}
+function wireEnvironment() {
+  const b = $('btnEnvRefresh');
+  if (b) b.addEventListener('click', function () { if (!busy) refreshEnvironmentCard(); });
+}
+
 function init() {
   // Navegacion (SPA) e idioma se inicializan SIEMPRE, haya o no puente ksu.
   if (typeof Router !== 'undefined' && Router.init) {
@@ -1236,6 +1255,7 @@ function init() {
     // Sin puente ksu no hay backend: navegacion/idioma siguen, pero no hay polling.
     return;
   }
+  // Cablear listeners (seguro aunque la CLI aun no este resuelta).
   wireServiceButtons();
   wireTestDns();
   wireProviders();
@@ -1245,7 +1265,22 @@ function init() {
   wirePanic();
   initSecurity();
   initCatalogRC2();
-  startPolling();
+  wireEnvironment();
+  // Resolver la ruta de la CLI (3 rutas de allowlist) ANTES de emitir comandos.
+  DCM.resolveCli().then(function (path) {
+    if (!path) {
+      // La CLI existe pero no es ejecutable desde el contexto WebUI: en KernelSU
+      // Next suele ser Hybrid Mount apagado. Mensaje claro, no rc=127.
+      const b = $('ksuBanner');
+      const msg = (typeof I18N !== 'undefined' && I18N.t) ? I18N.t('env.cli.unresolved') : '';
+      if (b) { b.textContent = msg || 'No se pudo acceder a la CLI del modulo. Si usas KernelSU Next, activa Hybrid Mount, reinicia y vuelve a abrir la interfaz.'; b.classList.remove('hidden'); }
+      // Igual mostramos el estado del entorno si se puede (usa comando fijo, no la CLI resuelta).
+      if (typeof refreshEnvironmentCard === 'function') { try { refreshEnvironmentCard(); } catch (_) {} }
+      return;
+    }
+    if (typeof refreshEnvironmentCard === 'function') { try { refreshEnvironmentCard(); } catch (_) {} }
+    startPolling();
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);

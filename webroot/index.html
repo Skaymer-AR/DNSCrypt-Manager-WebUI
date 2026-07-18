@@ -32,7 +32,14 @@
   </div>
 
   <!-- ============================ PANEL PRINCIPAL ============================ -->
-    <main id="views" class="views">
+    <div class="warnbar" id="warnBindhosts" role="alert">
+    <strong data-i18n="bindhosts.warning.title">Disable BindHosts</strong>
+    <span data-i18n="bindhosts.warning.body">BindHosts must stay disabled while DNSCrypt Manager is active.</span>
+  </div>
+  <div class="testbar" id="testingBar">
+    <span data-i18n="app.testing">This version is still in testing. The first stable release will be v1.0.0.</span>
+  </div>
+  <main id="views" class="views">
   <div class="route" id="route-status" data-route="status">
 
 <section class="card">
@@ -356,6 +363,11 @@
       </select>
     </div>
     <p class="hint" data-i18n="common.experimental">Experimental</p>
+  </section>
+  <section class="card">
+    <h2 data-i18n="env.title">Environment</h2>
+    <button id="btnEnvRefresh" class="small" data-i18n="common.refresh">Refresh</button>
+    <div id="envCard" class="hint" style="margin-top:8px; white-space:pre-wrap;">-</div>
   </section>
 
 <section class="card">

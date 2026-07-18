@@ -1210,6 +1210,16 @@ _env_selinux() {
   if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && [ -n "${DNSCRYPT_TEST_SELINUX:-}" ]; then printf '%s' "$DNSCRYPT_TEST_SELINUX"; return; fi
   if command -v getenforce >/dev/null 2>&1; then getenforce 2>/dev/null | tr 'A-Z' 'a-z'; else printf unknown; fi
 }
+# BindHosts activo: modulo presente y NO deshabilitado/marcado para remover.
+_env_bindhosts() {
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && [ -n "${DNSCRYPT_TEST_BINDHOSTS:-}" ]; then printf '%s' "$DNSCRYPT_TEST_BINDHOSTS"; return; fi
+  _bhd="/data/adb/modules/bindhosts"
+  if [ -d "$_bhd" ]; then
+    if [ -f "$_bhd/disable" ] || [ -f "$_bhd/remove" ]; then printf no; else printf yes; fi
+    return
+  fi
+  printf no
+}
 cmd_environment() {
   _sub="${1:-status}"
   [ "$_sub" = "status" ] || { echo "Uso: dnscrypt-manager environment status" >&2; return 1; }
@@ -1240,6 +1250,13 @@ cmd_environment() {
   echo "hybrid_mount_detected  : $_det"
   echo "selinux                : $_sel"
   echo "execution_context      : $_ctx"
+  # BindHosts activo: puede convivir mal con la redireccion DNS (perdida de red/bootloop).
+  _bh=$(_env_bindhosts)
+  echo "bindhosts_active       : $_bh"
+  if [ "$_bh" = yes ]; then
+    echo ""
+    echo "BindHosts parece activo. BindHosts debe permanecer desactivado mientras DNSCrypt Manager este activo: desactivalo, reinicia el dispositivo y recien entonces continua. Usarlos a la vez puede provocar perdida de conectividad o bootloop."
+  fi
   # Mensaje accionable solo en el caso concreto (KSU Next, instalado pero no expuesto).
   if [ "$_mgr" = kernelsu_next ] && [ "$_direct" = yes ] && [ "$_sysless" = no ]; then
     echo ""

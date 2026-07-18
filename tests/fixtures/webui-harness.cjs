@@ -129,6 +129,16 @@ let ABORT = false;
 let pendingCalls = 0;
 function execReal(cmd, cbName) {
   pendingCalls++;
+  // Probe del resolvedor de CLI de la WebUI (cadena fija con 'for p in ...; [ -x ]').
+  // Simulamos un dispositivo donde la CLI SI esta en /system/bin: devolvemos esa
+  // ruta (== REAL_CLI_PREFIX) para que resolveCli la fije y los comandos siguientes
+  // vuelvan a coincidir con la whitelist real del arnes.
+  if (/^\s*for\s+p\s+in/.test(cmd) && cmd.indexOf('[ -x') >= 0) {
+    pendingCalls--;
+    const fnp = window[cbName];
+    if (typeof fnp === 'function') fnp(0, REAL_CLI_PREFIX, '');
+    return;
+  }
   if (!cmd.startsWith(REAL_CLI_PREFIX)) {
     pendingCalls--;
     const fn = window[cbName];

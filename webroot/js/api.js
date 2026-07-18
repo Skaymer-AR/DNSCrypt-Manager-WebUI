@@ -20,7 +20,31 @@
 'use strict';
 
 const DCM = (() => {
-  const CLI = '/system/bin/dnscrypt-manager';
+  // Resolvedor central de la ruta de la CLI. SOLO estas 3 rutas (allowlist), en
+  // orden. No se aceptan rutas del usuario; el probe es una cadena FIJA construida
+  // a partir de estas constantes (sin datos externos, sin eval, sin find global).
+  const CLI_PATHS = Object.freeze([
+    '/system/bin/dnscrypt-manager',
+    '/data/adb/modules/dnscrypt_manager/system/bin/dnscrypt-manager',
+    '/data/adb/modules_update/dnscrypt_manager/system/bin/dnscrypt-manager'
+  ]);
+  let CLI = CLI_PATHS[0];      // valor por defecto hasta resolver
+  let CLI_RESOLVED = false;
+  // Probe FIJO: prueba las 3 rutas y devuelve la primera ejecutable. Las rutas no
+  // contienen comillas simples, asi que el comillado simple es seguro.
+  const CLI_PROBE = "for p in '" + CLI_PATHS.join("' '") +
+    "'; do [ -x \"$p\" ] && { printf '%s' \"$p\"; break; }; done";
+  function cli() { return CLI; }
+  function cliResolved() { return CLI_RESOLVED; }
+  function cliPaths() { return CLI_PATHS.slice(); }
+  async function resolveCli() {
+    if (!available()) return null;
+    const r = await runRawT(CLI_PROBE, 8000);
+    const found = String(r && r.stdout ? r.stdout : '').trim();
+    if (CLI_PATHS.indexOf(found) >= 0) { CLI = found; CLI_RESOLVED = true; return found; }
+    CLI_RESOLVED = false;
+    return null;
+  }
 
   const COMMANDS = Object.freeze({
     status:         CLI + ' status --json',
@@ -331,6 +355,7 @@ const DCM = (() => {
   function argErr(msg) { return Promise.resolve({ errno: -1, stdout: '', stderr: msg }); }
   function validId(id) { return SOURCE_ID_RE.test(String(id == null ? '' : id)); }
 
+  function runEnvironmentStatus() { return runRawT(CLI + ' environment status', 8000); }
   function runCatalogListJson() { return runRawT(CLI + ' catalog list --json', 45000); }
   function runServiceListJson() { return runRaw(CLI + ' service list --json'); }
   function runCatalogInfo(id) {
@@ -415,6 +440,11 @@ const DCM = (() => {
     runBindhostsAnalyze,
     runBindhostsImport,
     available,
+    resolveCli,
+    runEnvironmentStatus,
+    cli,
+    cliResolved,
+    cliPaths,
     toast,
     COMMANDS,
     CATEGORIES,
