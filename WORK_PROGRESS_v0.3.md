@@ -9,6 +9,37 @@ Estado: **CHECKPOINT A completado**. No borra RC1/RC2. Mismo module id.
 > estado hasta el commit anterior al de su propia actualización; el HEAD exacto se
 > entrega fuera del repositorio.
 
+## CHECKPOINT A2 — cierre de correcciones de campo (en progreso)
+- **A2.1 `dcm_fetch_url`** (`scripts/fetch.sh`, sourced por la CLI): descargador
+  común HTTPS-only (petición y redirects), TLS verificado (nunca `-k`), sin HTTP
+  fallback, sin DNS público hardcodeado, sin eval/`sh -c` con la URL; valida URL y
+  rechaza metacaracteres; temporal→validación→reemplazo atómico; ante cualquier
+  fallo **no toca el destino** (conserva la última copia); trap; respeta cancelación
+  (PANIC). Salida machine-readable con `failure_class`. Hook TEST para probar cada
+  rama sin red.
+- **A2.2 `source doctor`** (`dcm_source_doctor` + CLI `source doctor ID|--all`):
+  diagnóstico estructurado por fuente; reutiliza el motor + señales de resolución y
+  auto-bloqueo (`self_blocked` cuando un curl(6) coincide con host en la lista
+  activa); `system_resolution=not_verifiable` cuando el shell no tiene resolver;
+  `last_valid_*`, `runtime_status`, `recommendation` por clase. 14 failure_class.
+- **A2.4 auditoría DNS multiseñal**: `resolucion_sistema` ya no dice "sin red o DNS
+  caído" por una sola señal; si el shell no resuelve pero el proxy directo sí →
+  `no_verificable` con el texto de contexto netd/shell; sólo `fallo` si ni shell ni
+  proxy resuelven.
+
+### Tests A2 (verdes)
+`smoke-test-source-fetch.sh` **17/17**, `smoke-test-source-doctor.sh` **26/26**,
+`smoke-test-dns-audit-v030.sh` **6/6**. Regresión: CLI 48/48, seguridad 61/61,
+catálogo 41/41, WebUI 23/23, syntax OK.
+
+### Pendiente de A2 (documentado, próximo sub-paso)
+- **A2.3 bootstrap aislado**: instancia temporal de dnscrypt-proxy con blocklist
+  desactivada sólo ahí + `curl --resolve` (el hook `DCM_FETCH_RESOLVE` ya existe en
+  `dcm_fetch_url`); estructura lista, falta el orquestador y su test.
+- **A2.5 UX de errores por fuente en la WebUI**: estados sin_lista/ultima_valida/…
+  + botones Reintentar/Diagnosticar/Usar-reemplazo/Revertir/Copiar. Las claves i18n
+  ya están (`src.*`); falta cablear la vista de listas al `source doctor`.
+
 ## CHECKPOINT A1 — en progreso (correcciones de campo antes de B)
 Incorporado a v0.3 (cherry-pick selectivo del hotfix RC2.2, **sin** module.prop/
 branding RC2.2) + trabajo nuevo:
