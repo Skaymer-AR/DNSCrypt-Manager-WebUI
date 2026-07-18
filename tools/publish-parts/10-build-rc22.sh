@@ -3,7 +3,9 @@ set -euo pipefail
 
 git checkout -B pre-release/v0.2.0-rc2.2 "$WIP3_HEAD"
 git am -3 /tmp/rc22.patch
-test "$(git rev-parse HEAD)" = '4214bbab59c4b9f36d7af982f4f9a57f886adf41'
+test "$(git rev-list --count "$WIP3_HEAD"..HEAD)" -eq 3
+grep -qx 'version=v0.2.0-RC2.2' module.prop
+grep -qx 'versionCode=204' module.prop
 
 python3 - <<'PY'
 from pathlib import Path
