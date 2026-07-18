@@ -1,3 +1,6 @@
+> [!CAUTION]
+> **v0.3.0-RC1-WIP-A es una vista previa de desarrollo.** BindHosts debe permanecer desactivado y el dispositivo debe reiniciarse antes de habilitar DNSCrypt Manager; usarlos juntos puede causar pérdida de red o bootloop. En KernelSU Next puede ser necesario activar Hybrid Mount y reiniciar. El proyecto continúa en pruebas hasta v1.0.0.
+
 # DNSCrypt Manager
 
 **Creado por Skaymer AR**
