@@ -5,9 +5,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/verify-v030-release-live.yml'
+      - 'trigger-v030-checksum-fix.txt'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify:
@@ -18,21 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Repair checksum asset with portable relative filename
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/checksum-fix
-          mkdir -p /tmp/checksum-fix
-          gh release download v0.3.0-rc1 \
-            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
-            -D /tmp/checksum-fix
-          cd /tmp/checksum-fix
-          sha256sum DNSCrypt-Manager-v0.3.0-RC1.zip > DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
-          grep -Eq '^[0-9a-f]{64}  DNSCrypt-Manager-v0\.3\.0-RC1\.zip$' DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
-          gh release upload v0.3.0-rc1 DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 --clobber
-
-      - name: Verify public release, assets and downloaded ZIP
+      - name: Verify public release, assets, checksum and downloaded ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -56,15 +43,24 @@ jobs:
           print(data['url'])
           PY
 
-          rm -rf /tmp/release-check
-          mkdir -p /tmp/release-check
-          gh release download v0.3.0-rc1 \
-            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
-            -p 'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256' \
-            -p 'AUDIT_v0.3.0-RC1.md' \
-            -p 'TEST_RESULTS_v0.3.0-RC1.md' \
-            -D /tmp/release-check
-          (cd /tmp/release-check && sha256sum -c DNSCrypt-Manager-v0.3.0-RC1.zip.sha256) | tee /tmp/report/checksum.txt
+          verified=0
+          for attempt in $(seq 1 20); do
+            rm -rf /tmp/release-check
+            mkdir -p /tmp/release-check
+            gh release download v0.3.0-rc1 \
+              -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
+              -p 'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256' \
+              -p 'AUDIT_v0.3.0-RC1.md' \
+              -p 'TEST_RESULTS_v0.3.0-RC1.md' \
+              -D /tmp/release-check
+            if (cd /tmp/release-check && sha256sum -c DNSCrypt-Manager-v0.3.0-RC1.zip.sha256) > /tmp/report/checksum.txt 2>&1; then
+              verified=1
+              break
+            fi
+            sleep 15
+          done
+          test "$verified" -eq 1
+
           grep -Eq '^[0-9a-f]{64}  DNSCrypt-Manager-v0\.3\.0-RC1\.zip$' /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
           unzip -tq /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip | tee /tmp/report/unzip.txt
           unzip -p /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip module.prop | tr -d '\r' | tee /tmp/report/module.prop
