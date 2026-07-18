@@ -267,3 +267,123 @@ dcm_source_doctor() {
   esac
   [ "${_fc:-ok}" = ok ] && return 0 || return 1
 }
+
+# ===========================================================================
+# A2.3 — BOOTSTRAP DNS AISLADO
+# Evita que una blocklist activa bloquee el hostname necesario para actualizar
+# esa misma lista. NO desactiva nada global: levanta una instancia temporal de
+# dnscrypt-proxy con la blocklist desactivada SOLO ahi, resuelve el hostname y
+# descarga con --resolve conservando TLS/SNI. Limpieza con trap. Ante cualquier
+# fallo, preserva la ultima copia valida.
+# ===========================================================================
+
+# _boot_free_port -> imprime un puerto TCP/UDP libre (best-effort).
+_boot_free_port() {
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && [ -n "${DCM_BOOT_TEST_PORT:-}" ]; then printf '%s' "$DCM_BOOT_TEST_PORT"; return; fi
+  _p=$(( (RANDOM % 20000) + 20000 ))
+  # intento acotado de encontrar uno no escuchado
+  _i=0
+  while [ $_i -lt 10 ]; do
+    if ! (netstat -ltnu 2>/dev/null | grep -q ":$_p "); then printf '%s' "$_p"; return; fi
+    _p=$(( (RANDOM % 20000) + 20000 )); _i=$((_i+1))
+  done
+  printf '%s' "$_p"
+}
+
+# dcm_bootstrap_resolve HOST -> imprime una IP (o vacio). Levanta instancia temp.
+# Devuelve 0 si obtuvo IP. TEST: DCM_BOOT_TEST_IP inyecta IP; DCM_BOOT_TEST_INSTANCE=fail
+# simula que la instancia no arranca.
+dcm_bootstrap_resolve() {
+  _bh="$1"; [ -n "$_bh" ] || return 1
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ]; then
+    [ "${DCM_BOOT_TEST_INSTANCE:-ok}" = fail ] && return 1
+    if [ -n "${DCM_BOOT_TEST_IP:-}" ]; then printf '%s' "$DCM_BOOT_TEST_IP"; return 0; fi
+    return 1
+  fi
+  # --- Real ---
+  _bin=$(command -v resolve_bin >/dev/null 2>&1 && resolve_bin 2>/dev/null || true)
+  [ -n "$_bin" ] && [ -x "$_bin" ] || return 1
+  _brun="${DATA_DIR:-/tmp}/run/bootstrap.$$.$(_fetch_rand)"
+  mkdir -p "$_brun" 2>/dev/null
+  _bport=$(_boot_free_port)
+  _bcfg="$_brun/bootstrap.toml"
+  # Config temporal: mismo transporte/resolver validos, blocklist DESACTIVADA aqui,
+  # listener SOLO en localhost. Derivamos del TOML principal sin modificarlo.
+  {
+    echo "listen_addresses = ['127.0.0.1:$_bport']"
+    echo "max_clients = 25"
+    echo "ipv4_servers = true"
+    echo "ipv6_servers = false"
+    echo "require_dnssec = false"
+    echo "cache = false"
+    # blocked_names_file NO se define aqui -> sin blocklist en esta instancia.
+    # Reusar las mismas fuentes de resolvers del TOML principal si existen.
+    if [ -f "${TOML:-}" ]; then
+      awk '/^\[sources/{p=1} p{print} ' "$TOML" 2>/dev/null
+      awk '/^server_names/{print}' "$TOML" 2>/dev/null
+    fi
+  } > "$_bcfg" 2>/dev/null
+  # Lanzar instancia temporal con el patron de kill seguro (sin pkill/killall).
+  "$_bin" -config "$_bcfg" >/dev/null 2>&1 &
+  _bpid=$!
+  # trap de limpieza: matar el arbol de la instancia temporal y borrar temporales.
+  trap '_dcm_boot_cleanup "$_bpid" "$_brun"' RETURN 2>/dev/null || true
+  # esperar breve a que escuche
+  _w=0; while [ $_w -lt 20 ]; do
+    if netstat -ltnu 2>/dev/null | grep -q "127.0.0.1:$_bport "; then break; fi
+    sleep 0.1; _w=$((_w+1))
+  done
+  # resolver SOLO el hostname necesario contra la instancia temporal
+  _ip=""
+  if [ -n "${BUSYBOX:-}" ]; then
+    _ip=$($BUSYBOX nslookup "$_bh" "127.0.0.1:$_bport" 2>/dev/null | awk '/^Address[: ]/{ip=$NF} END{print ip}')
+  fi
+  [ -n "$_ip" ] || _ip=$("$_bin" -config "$_bcfg" -resolve "$_bh" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+  _dcm_boot_cleanup "$_bpid" "$_brun"
+  trap - RETURN 2>/dev/null || true
+  [ -n "$_ip" ] || return 1
+  printf '%s' "$_ip"
+}
+
+# _dcm_boot_cleanup PID RUNDIR — mata el arbol temporal (reusa el patron seguro).
+_dcm_boot_cleanup() {
+  _cp="$1"; _cr="$2"
+  if [ -n "$_cp" ]; then
+    if command -v _cat_kill_tree >/dev/null 2>&1; then _cat_kill_tree "$_cp" TERM 2>/dev/null; sleep 0.2; _cat_kill_tree "$_cp" KILL 2>/dev/null
+    else kill -TERM "$_cp" 2>/dev/null; sleep 0.2; kill -KILL "$_cp" 2>/dev/null; fi
+  fi
+  [ -n "$_cr" ] && rm -rf "$_cr" 2>/dev/null
+}
+
+# dcm_bootstrap_fetch URL DEST CONTEXT
+# 1) intenta descarga normal; 2) si falla por DNS o autobloqueo, hace bootstrap.
+dcm_bootstrap_fetch() {
+  _url="$1"; _dest="$2"; _ctx="${3:-bootstrap}"
+  _r1=$(dcm_fetch_url "$_url" "$_dest" "$_ctx")
+  _fc1=$(printf '%s\n' "$_r1" | grep '^failure_class=' | tail -1 | cut -d= -f2)
+  echo "$_r1"
+  case "$_fc1" in
+    ok) return 0 ;;
+    dns_system_failed|self_blocked) : ;;  # candidatos a bootstrap
+    *) return 1 ;;                          # otros fallos no se arreglan con bootstrap
+  esac
+  _bh=$(dcm_host_of "$_url")
+  echo "bootstrap=attempt hostname=$_bh"
+  _ip=$(dcm_bootstrap_resolve "$_bh")
+  if [ -z "$_ip" ]; then
+    echo "bootstrap=failed_no_ip"
+    echo "failure_class=${_fc1}"   # se mantiene la clase original; se preservo la copia
+    return 1
+  fi
+  # validar forma de IP
+  case "$_ip" in
+    *[!0-9.]*) echo "bootstrap=failed_bad_ip"; echo "failure_class=${_fc1}"; return 1 ;;
+  esac
+  echo "bootstrap=resolved ip=$_ip"
+  # reintento con --resolve (TLS/SNI del hostname original)
+  _r2=$(DCM_FETCH_RESOLVE="$_bh:443:$_ip" dcm_fetch_url "$_url" "$_dest" "$_ctx")
+  _fc2=$(printf '%s\n' "$_r2" | grep '^failure_class=' | tail -1 | cut -d= -f2)
+  echo "$_r2"
+  echo "bootstrap=used"
+  [ "$_fc2" = ok ] && return 0 || return 1
+}
