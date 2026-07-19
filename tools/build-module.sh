@@ -79,6 +79,7 @@ scripts/start.sh
 scripts/stop.sh
 webroot/index.html
 webroot/js/app.js
+webroot/js/controls.js
 webroot/js/api.js
 webroot/js/router.js
 webroot/js/i18n.js

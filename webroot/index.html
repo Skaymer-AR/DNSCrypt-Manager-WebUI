@@ -71,13 +71,28 @@
 
   </div>
   <div class="route" id="route-dns" data-route="dns" hidden>
-  <section class="card"><div id="anonCard"></div>
-    <div class="field" style="margin-top:6px; display:flex; gap:6px;">
-      <input id="anonResolver" type="text" placeholder="resolver" value="cloudflare" autocapitalize="off" autocomplete="off" spellcheck="false" style="flex:1; padding:8px; border-radius:6px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd);">
-      <input id="anonRelays" type="text" placeholder="relay,relay" value="anon-cs-fr" autocapitalize="off" autocomplete="off" spellcheck="false" style="flex:1; padding:8px; border-radius:6px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd);">
+  <section class="card">
+    <button type="button" id="anonToggle" class="v-collapse-h" aria-expanded="false" aria-controls="anonBody">
+      <span class="v-collapse-title" data-i18n="tp.anon.title">Anonymized DNSCrypt</span>
+      <span class="v-collapse-sub" id="anonSummary" data-i18n="tp.tap">tap to load status</span>
+      <span class="v-chevron" id="anonChevron" aria-hidden="true">&#9660;</span>
+    </button>
+    <div id="anonBody" class="v-collapse-body" hidden>
+      <div id="anonCard"></div>
+      <div class="field" style="margin-top:6px; display:flex; gap:6px;">
+        <input id="anonResolver" type="text" placeholder="resolver" value="cloudflare" autocapitalize="off" autocomplete="off" spellcheck="false" style="flex:1; padding:8px; border-radius:6px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd);">
+        <input id="anonRelays" type="text" placeholder="relay,relay" value="anon-cs-fr" autocapitalize="off" autocomplete="off" spellcheck="false" style="flex:1; padding:8px; border-radius:6px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd);">
+      </div>
     </div>
   </section>
-  <section class="card"><div id="odohCard"></div></section>
+  <section class="card">
+    <button type="button" id="odohToggle" class="v-collapse-h" aria-expanded="false" aria-controls="odohBody">
+      <span class="v-collapse-title" data-i18n="tp.odoh.title">Oblivious DoH — ODoH</span>
+      <span class="v-collapse-sub" id="odohSummary" data-i18n="tp.tap">tap to load status</span>
+      <span class="v-chevron" id="odohChevron" aria-hidden="true">&#9660;</span>
+    </button>
+    <div id="odohBody" class="v-collapse-body" hidden><div id="odohCard"></div></div>
+  </section>
 
 <section class="card">
     <h2 data-i18n="dns.resolver">Servidores</h2>
@@ -155,9 +170,12 @@
   </div>
   <div class="route" id="route-lists" data-route="lists" hidden>
   <section class="card">
-    <h2 data-i18n="sc.section.title">Per-service privacy</h2>
-    <p class="muted" data-i18n="sc.section.desc">Block telemetry/tracking endpoints per service.</p>
-    <div id="scList"></div>
+    <button type="button" id="scToggle" class="v-collapse-h" aria-expanded="false" aria-controls="scBody">
+      <span class="v-collapse-title" data-i18n="sc.section.title">Per-service privacy</span>
+      <span class="v-collapse-sub" id="scSummary" data-i18n="sc.section.tap">tap to load controls</span>
+      <span class="v-chevron" id="scChevron" aria-hidden="true">&#9660;</span>
+    </button>
+    <div id="scBody" class="v-collapse-body" hidden></div>
   </section>
   <section class="card">
     <h2 data-i18n="src.doctor.title">Source doctor</h2>
@@ -461,6 +479,7 @@
   <script src="js/router.js"></script>
   <script src="js/validation.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/controls.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
