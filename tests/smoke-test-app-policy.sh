@@ -15,8 +15,8 @@ R=$(DCM_AP_TEST_OWNER=yes DCM_AP_TEST_UID="" "$SH" "$M" app-policy set com.foo.b
 printf '%s\n' "$R" | grep -q "result=uid_unresolved" && ok "UID irresoluble -> no aplica (no confia en el package)" || bad "uid"
 # set con soporte + UID valido -> aplica a cadena propia
 R=$(DCM_AP_TEST_OWNER=yes DCM_AP_TEST_UID=10123 "$SH" "$M" app-policy set com.foo.bar allow-direct 2>&1)
-printf '%s\n' "$R" | grep -q "result=set" && ok "con soporte + UID valido -> set" || bad "set"
-printf '%s\n' "$R" | grep -qi "solo cadenas propias" && ok "usa solo cadenas propias" || bad "ownchains"
+printf '%s\n' "$R" | grep -q "result=recorded" && ok "con soporte + UID valido -> recorded (no finge aplicar reglas)" || bad "set"
+printf '%s\n' "$R" | grep -qi "NO aplicada todavia\|pendiente de implementacion" && ok "es honesto: registra, no finge enforcement" || bad "ownchains"
 "$SH" "$M" app-policy list 2>&1 | grep -q "com.foo.bar" && ok "politica listada" || bad "list"
 # politica invalida / package invalido
 DCM_AP_TEST_OWNER=yes "$SH" "$M" app-policy set com.foo.bar nope 2>&1 | grep -qi "politica invalida" && ok "politica invalida rechazada" || bad "badpol"

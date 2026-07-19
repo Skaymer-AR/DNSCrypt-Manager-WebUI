@@ -34,9 +34,12 @@ app_policy_set() {
   case "$_uid" in ''|*[!0-9]*) echo "result=uid_unresolved"; echo "note=no se pudo resolver un UID valido para $_pkg; no se aplica."; return 1 ;; esac
   grep -v "^$_pkg	" "$AP_STATE" 2>/dev/null > "$AP_STATE.new" || true; mv -f "$AP_STATE.new" "$AP_STATE" 2>/dev/null
   printf '%s\t%s\t%s\n' "$_pkg" "$_pol" "$_uid" >> "$AP_STATE"
-  command -v log_msg >/dev/null 2>&1 && log_msg "app-policy $_pkg=$_pol uid=$_uid" 2>/dev/null
-  echo "result=set package=$_pkg policy=$_pol uid=$_uid"
-  echo "note=solo cadenas propias; PANIC limpia solo reglas propias."
+  command -v log_msg >/dev/null 2>&1 && log_msg "app-policy $_pkg=$_pol uid=$_uid (recorded)" 2>/dev/null
+  echo "result=recorded package=$_pkg policy=$_pol uid=$_uid"
+  echo "note=POLITICA REGISTRADA, NO aplicada todavia: la construccion de la cadena"
+  echo "     iptables/nft propia por UID esta pendiente de implementacion en dispositivo"
+  echo "     (no verificable en x86). No se toco ninguna regla de firewall."
+  return 0
 }
 app_policy_clear() {
   ap_init; _pkg="$1"
