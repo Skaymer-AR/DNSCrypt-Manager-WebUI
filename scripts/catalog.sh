@@ -221,6 +221,8 @@ cat_append_active() {
   [ -s "$CAT_BLACKLIST" ] && grep -E '^[a-z0-9.-]+$' "$CAT_BLACKLIST" >> "$_out" 2>/dev/null
   # Dominios bloqueados por controles de servicio ACTIVOS (p.ej. YouTube).
   command -v cat_svc_active_blocked >/dev/null 2>&1 && cat_svc_active_blocked >> "$_out" 2>/dev/null
+  # Dominios de los controles de servicio DECLARATIVOS activos (v0.3, servicectl.sh).
+  command -v sc_append_active >/dev/null 2>&1 && sc_append_active "$_out" 2>/dev/null
   return 0
 }
 
