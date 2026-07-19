@@ -71,6 +71,13 @@
 
   </div>
   <div class="route" id="route-dns" data-route="dns" hidden>
+  <section class="card"><div id="anonCard"></div>
+    <div class="field" style="margin-top:6px; display:flex; gap:6px;">
+      <input id="anonResolver" type="text" placeholder="resolver" value="cloudflare" autocapitalize="off" autocomplete="off" spellcheck="false" style="flex:1; padding:8px; border-radius:6px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd);">
+      <input id="anonRelays" type="text" placeholder="relay,relay" value="anon-cs-fr" autocapitalize="off" autocomplete="off" spellcheck="false" style="flex:1; padding:8px; border-radius:6px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd);">
+    </div>
+  </section>
+  <section class="card"><div id="odohCard"></div></section>
 
 <section class="card">
     <h2 data-i18n="dns.resolver">Servidores</h2>
@@ -147,6 +154,11 @@
 
   </div>
   <div class="route" id="route-lists" data-route="lists" hidden>
+  <section class="card">
+    <h2 data-i18n="sc.section.title">Per-service privacy</h2>
+    <p class="muted" data-i18n="sc.section.desc">Block telemetry/tracking endpoints per service.</p>
+    <div id="scList"></div>
+  </section>
   <section class="card">
     <h2 data-i18n="src.doctor.title">Source doctor</h2>
     <div class="field" style="display:flex; gap:8px; align-items:center;">

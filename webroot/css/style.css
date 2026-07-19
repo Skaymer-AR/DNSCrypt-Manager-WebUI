@@ -342,3 +342,24 @@ footer {
 .src-lastvalid { margin-top:6px; color:var(--text-dim); font:12px var(--font-ui); }
 .src-details { margin-top:8px; } .src-details pre { font:11px var(--font-mono); color:var(--text-dim); }
 .src-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+
+/* v0.3 — service-controls + transport cards */
+.v-card { border:1px solid var(--card-brd); border-radius:10px; padding:12px; margin-bottom:10px; background:var(--card); }
+.v-card-h { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px; }
+.v-name { font:600 14px var(--font-ui); }
+.v-id { font:11px var(--font-mono); color:var(--text-dim); margin-bottom:6px; }
+.v-badge { display:inline-block; padding:3px 9px; border-radius:999px; font:600 11px var(--font-ui); border:1px solid var(--card-brd); white-space:nowrap; }
+.v-active { color:var(--green); border-color:var(--green); }
+.v-configured, .v-not_verifiable, .v-pending, .v-expired { color:var(--amber); border-color:var(--amber); }
+.v-failed, .v-error, .v-conflict, .v-unsupported { color:var(--red); border-color:var(--red); }
+.v-testing { color:var(--text); }
+.v-off, .v-inactive, .v-unknown { color:var(--text-dim); }
+.v-grid { display:flex; flex-direction:column; gap:2px; font:12px var(--font-mono); margin:6px 0; }
+.v-row { display:flex; justify-content:space-between; gap:8px; }
+.v-k { color:var(--text-dim); } .v-v { color:var(--text); text-align:right; word-break:break-all; }
+.v-note { font:11px var(--font-ui); color:var(--amber); margin:6px 0; }
+.v-conflict { color:var(--red); font:12px var(--font-ui); margin:4px 0; }
+.v-actions { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+.v-sel { padding:6px 8px; border-radius:6px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd); font:12px var(--font-ui); }
+.v-result { font:11px var(--font-mono); color:var(--text-dim); margin-top:6px; word-break:break-all; }
+.v-err { color:var(--red); font:12px var(--font-mono); } .v-muted { color:var(--text-dim); }
