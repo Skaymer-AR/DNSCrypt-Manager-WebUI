@@ -1,0 +1,57 @@
+name: Activate exact release payloads
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/activate-exact-release-payloads.yml'
+      - 'import-assets/rc22-exact-2k-part-*.b64'
+      - 'import-assets/v03-exact-2k-part-*.b64'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  activate:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+      - name: Switch publisher to exact compressed patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Skaymer AR'
+          git config user.email 'skaymer@users.noreply.github.com'
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/publish-final-prereleases.yml')
+          text = p.read_text(encoding='utf-8')
+          old = """          cat import-assets/rc22-part-*.b64 | base64 --decode > /tmp/rc22.patch
+          cat import-assets/v03-part-*.b64 | base64 --decode > /tmp/v03.patch
+"""
+          new = """          cat import-assets/rc22-exact-2k-part-*.b64 > /tmp/rc22.b64
+          base64 --decode /tmp/rc22.b64 | gzip -dc > /tmp/rc22.patch
+          cat import-assets/v03-exact-2k-part-*.b64 > /tmp/v03.b64
+          base64 --decode /tmp/v03.b64 | gzip -dc > /tmp/v03.patch
+"""
+          if old not in text:
+              if new in text:
+                  raise SystemExit(0)
+              raise SystemExit('Expected publisher block not found')
+          text = text.replace(old, new)
+          text = text.replace("      - 'import-assets/repair-03-1-part-*.b64'\n", "      - 'import-assets/repair-03-1-part-*.b64'\n      - 'import-assets/rc22-exact-2k-part-*.b64'\n      - 'import-assets/v03-exact-2k-part-*.b64'\n")
+          p.write_text(text, encoding='utf-8')
+          PY
+          git add .github/workflows/publish-final-prereleases.yml
+          if git diff --cached --quiet; then
+            echo 'Publisher already uses exact payloads.'
+            exit 0
+          fi
+          git commit -m 'ci: use exact compressed RC2.2 and v0.3 patches'
+          git push origin HEAD:${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}

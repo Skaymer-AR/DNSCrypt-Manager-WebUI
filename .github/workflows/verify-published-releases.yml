@@ -1,0 +1,49 @@
+name: Verify published GitHub releases
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-published-releases.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Query GitHub Releases API through gh
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release-verification
+          gh release view v0.2.0-rc2.2 --repo "$GITHUB_REPOSITORY" --json tagName,name,url,isPrerelease,assets > /tmp/release-verification/rc22.json
+          gh release view v0.3.0-rc1-wip-a --repo "$GITHUB_REPOSITORY" --json tagName,name,url,isPrerelease,assets > /tmp/release-verification/v03.json
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 10 --json tagName,name,isPrerelease,isLatest,publishedAt > /tmp/release-verification/list.json
+          python3 - <<'PY'
+          import json
+          checks = [
+              ('/tmp/release-verification/rc22.json', 'v0.2.0-rc2.2', 'DNSCrypt-Manager-v0.2.0-RC2.2-Preliminary.zip', 5),
+              ('/tmp/release-verification/v03.json', 'v0.3.0-rc1-wip-a', 'DNSCrypt-Manager-v0.3.0-RC1-WIP-A-Preliminary.zip', 4),
+          ]
+          for path, tag, required, minimum in checks:
+              data = json.load(open(path, encoding='utf-8'))
+              names = sorted(asset['name'] for asset in data['assets'])
+              assert data['tagName'] == tag
+              assert data['isPrerelease'] is True
+              assert required in names
+              assert len(names) >= minimum
+              print(data['url'])
+              for name in names:
+                  print(' -', name)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: published-release-verification
+          path: /tmp/release-verification
+          if-no-files-found: error
