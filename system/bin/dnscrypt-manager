@@ -1276,12 +1276,12 @@ cmd_environment() {
   echo "hybrid_mount_detected  : $_det"
   echo "selinux                : $_sel"
   echo "execution_context      : $_ctx"
-  # BindHosts activo: puede convivir mal con la redireccion DNS (perdida de red/bootloop).
+  # BindHosts presente: coexistencia informada (sin advertencia de bloqueo).
   _bh=$(_env_bindhosts)
   echo "bindhosts_active       : $_bh"
   if [ "$_bh" = yes ]; then
     echo ""
-    echo "BindHosts parece activo. BindHosts debe permanecer desactivado mientras DNSCrypt Manager este activo: desactivalo, reinicia el dispositivo y recien entonces continua. Usarlos a la vez puede provocar perdida de conectividad o bootloop."
+    echo "BindHosts esta activo. Convivencia confirmada por el usuario en pruebas fisicas (Motorola Edge 40 Pro, Android 16, KernelSU Next, Hybrid Mount, SELinux Enforcing) durante una semana sin perdida de DNS ni de conectividad. Ambos filtran por su cuenta: si un dominio aparece bloqueado y no esta en tus listas, revisa tambien BindHosts."
   fi
   # Mensaje accionable solo en el caso concreto (KSU Next, instalado pero no expuesto).
   if [ "$_mgr" = kernelsu_next ] && [ "$_direct" = yes ] && [ "$_sysless" = no ]; then
@@ -1317,9 +1317,13 @@ cmd_service_control() {
   _s="${1:-list}"; shift 2>/dev/null
   case "$_s" in
     list) service_list ;;
-    info) [ -n "${1:-}" ] || { echo "Uso: service info ID" >&2; return 1; }; service_info "$1" ;;
-    set)  [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "Uso: service set ID MODE" >&2; return 1; }; service_set "$1" "$2" ;;
-    *) echo "Uso: service list|info ID|set ID MODE" >&2; return 1 ;;
+    info) [ -n "${1:-}" ] || { echo "Uso: service-control info ID" >&2; return 1; }; service_info "$1" ;;
+    set)  [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "Uso: service-control set ID MODE" >&2; return 1; }; service_set "$1" "$2" ;;
+    status)
+      if [ "${1:-}" = "--all" ]; then service_control_status_all
+      else [ -n "${1:-}" ] || { echo "Uso: service-control status ID|--all" >&2; return 1; }; service_control_status "$1"; fi ;;
+    verify) [ -n "${1:-}" ] || { echo "Uso: service-control verify ID" >&2; return 1; }; service_control_verify "$1" ;;
+    *) echo "Uso: service-control list|info ID|set ID MODE|status ID|--all|verify ID" >&2; return 1 ;;
   esac
 }
 cmd_app_policy() {

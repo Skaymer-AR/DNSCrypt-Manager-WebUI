@@ -79,6 +79,7 @@ scripts/start.sh
 scripts/stop.sh
 webroot/index.html
 webroot/js/app.js
+webroot/js/controls.js
 webroot/js/api.js
 webroot/js/router.js
 webroot/js/i18n.js
@@ -187,24 +188,26 @@ find "$ROOT" \( -name '*.toml.tmp.*' -o -name 'import.toml.*' \) -delete 2>/dev/
 echo "  OK: temporales limpiados"
 
 ##############################################################################
-step "8) Permisos"
+step "8) Preparar staging y permisos del instalable"
 ##############################################################################
-chmod 0755 "$ROOT"/customize.sh "$ROOT"/service.sh "$ROOT"/post-fs-data.sh \
-           "$ROOT"/boot-completed.sh "$ROOT"/uninstall.sh "$ROOT"/action.sh
-chmod 0755 "$ROOT"/system/bin/dnscrypt-manager
-chmod 0755 "$ROOT"/scripts/*.sh
-chmod 0755 "$BIN"
-[ -f "$ROOT/bin/arm/dnscrypt-proxy" ] && chmod 0755 "$ROOT/bin/arm/dnscrypt-proxy"
-chmod 0755 "$ROOT/META-INF/com/google/android/update-binary"
-echo "  OK: permisos fijados"
+# Nunca cambiar permisos ni contenido del working tree durante el build. Esto
+# mantiene la compilacion reproducible y evita dejar el repositorio sucio.
+STAGE="$(mktemp -d /tmp/dcm-build-stage.XXXXXX)"
+ZIP_LOG="$STAGE/.ziplog"
+cp -a "$ROOT/." "$STAGE/"
+chmod 0755 "$STAGE"/customize.sh "$STAGE"/service.sh "$STAGE"/post-fs-data.sh \
+           "$STAGE"/boot-completed.sh "$STAGE"/uninstall.sh "$STAGE"/action.sh
+chmod 0755 "$STAGE"/system/bin/dnscrypt-manager
+chmod 0755 "$STAGE"/scripts/*.sh
+chmod 0755 "$STAGE/bin/arm64/dnscrypt-proxy"
+[ -f "$STAGE/bin/arm/dnscrypt-proxy" ] && chmod 0755 "$STAGE/bin/arm/dnscrypt-proxy"
+chmod 0755 "$STAGE/META-INF/com/google/android/update-binary"
+echo "  OK: staging creado y permisos fijados sin modificar el arbol fuente"
 
 ##############################################################################
 step "9) Empaquetar ZIP limpio (sin artefactos de desarrollo ni placeholders)"
 ##############################################################################
-STAGE="$(mktemp -d /tmp/dcm-build-stage.XXXXXX)"
-ZIP_LOG="$STAGE/.ziplog"
-cp -a "$ROOT/." "$STAGE/"
-rm -rf "$STAGE/tests" "$STAGE/tools" "$STAGE/dist" "$STAGE/.git"
+rm -rf "$STAGE/tests" "$STAGE/tools" "$STAGE/dist" "$STAGE/release" "$STAGE/.git"
 # Artefactos de desarrollo que NUNCA deben ir en el ZIP instalable.
 rm -f "$STAGE"/WORK_PROGRESS*.md "$STAGE"/*.bundle "$STAGE"/*.patch "$STAGE"/*.sha256 "$STAGE"/*.rc2bak 2>/dev/null
 find "$STAGE" -maxdepth 2 -name '*.rc2bak' -delete 2>/dev/null

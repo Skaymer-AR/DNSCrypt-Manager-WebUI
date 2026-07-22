@@ -342,3 +342,46 @@ footer {
 .src-lastvalid { margin-top:6px; color:var(--text-dim); font:12px var(--font-ui); }
 .src-details { margin-top:8px; } .src-details pre { font:11px var(--font-mono); color:var(--text-dim); }
 .src-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+
+/* v0.3 — service-controls + transport cards */
+.v-card { border:1px solid var(--card-brd); border-radius:10px; padding:12px; margin-bottom:10px; background:var(--card); }
+.v-card-h { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px; }
+.v-name { font:600 14px var(--font-ui); }
+.v-id { font:11px var(--font-mono); color:var(--text-dim); margin-bottom:6px; }
+.v-badge { display:inline-block; padding:3px 9px; border-radius:999px; font:600 11px var(--font-ui); border:1px solid var(--card-brd); white-space:nowrap; }
+.v-active { color:var(--green); border-color:var(--green); }
+.v-configured, .v-not_verifiable, .v-pending, .v-expired { color:var(--amber); border-color:var(--amber); }
+.v-failed, .v-error, .v-conflict, .v-unsupported { color:var(--red); border-color:var(--red); }
+.v-testing { color:var(--text); }
+.v-off, .v-inactive, .v-unknown { color:var(--text-dim); }
+.v-grid { display:flex; flex-direction:column; gap:2px; font:12px var(--font-mono); margin:6px 0; }
+.v-row { display:flex; justify-content:space-between; gap:8px; }
+.v-k { color:var(--text-dim); } .v-v { color:var(--text); text-align:right; word-break:break-all; }
+.v-note { font:11px var(--font-ui); color:var(--amber); margin:6px 0; }
+.v-conflict { color:var(--red); font:12px var(--font-ui); margin:4px 0; }
+.v-actions { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+.v-sel { padding:6px 8px; border-radius:6px; background:var(--bg); color:var(--text); border:1px solid var(--card-brd); font:12px var(--font-ui); }
+.v-result { font:11px var(--font-mono); color:var(--text-dim); margin-top:6px; word-break:break-all; }
+.v-err { color:var(--red); font:12px var(--font-mono); } .v-muted { color:var(--text-dim); }
+
+/* v0.3 — secciones/tarjetas colapsables con carga diferida */
+.v-collapse-h { display:flex; align-items:center; gap:8px; width:100%; background:transparent; border:0; color:var(--text); padding:10px 4px; cursor:pointer; text-align:left; font:inherit; }
+.v-collapse-h:focus-visible { outline:2px solid var(--accent, #4a9); outline-offset:2px; }
+.v-collapse-title { font-weight:600; }
+.v-collapse-sub { color:var(--text-dim); font-size:12px; margin-left:auto; }
+.v-chevron { color:var(--text-dim); font-size:12px; width:14px; text-align:center; }
+.v-collapse-body { margin-top:6px; }
+.v-collapse-actions { display:flex; gap:6px; margin-bottom:8px; }
+.v-sc-list { display:flex; flex-direction:column; gap:2px; }
+.v-sc-row { border-top:1px solid var(--card-brd); }
+.v-sc-top { display:flex; align-items:center; gap:6px; }
+.v-sc-rowh { display:flex; align-items:center; gap:8px; flex:1; background:transparent; border:0; color:var(--text); padding:8px 2px; cursor:pointer; text-align:left; font:inherit; min-width:0; }
+.v-sc-rowh:focus-visible { outline:2px solid var(--accent,#4a9); outline-offset:1px; }
+.v-sc-name { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-sc-cat { color:var(--text-dim); font-size:11px; }
+.v-sc-mode { color:var(--text-dim); font-size:11px; }
+.v-sc-chev { color:var(--text-dim); margin-left:auto; }
+.v-sc-toggle { background:var(--bg); border:1px solid var(--card-brd); color:var(--text-dim); border-radius:999px; padding:2px 10px; font-size:11px; font-weight:600; cursor:pointer; }
+.v-sc-toggle.on { color:var(--green,#4a9); border-color:var(--green,#4a9); }
+.v-sc-det { padding:6px 2px 10px; }
+.v-verify { font:11px var(--font-mono); color:var(--text-dim); margin-top:4px; }

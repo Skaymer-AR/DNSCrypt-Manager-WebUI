@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.0
+
+Primera versión estable de **DNSCrypt Manager**, creada por **Skaymer AR**.
+El alcance estable se redujo deliberadamente a las funciones implementadas,
+probadas y utilizadas en Android real.
+
+- `version=v1.0.0`, `versionCode=10000`, mismo module ID y actualización conservando datos.
+- DNSCrypt, DoH, NextDNS, redirección DNS, fail-closed, perfiles, listas, allowlist,
+  excepciones temporales, PANIC, rollback y KernelSU Next + Hybrid Mount.
+- Nueve controles de privacidad por servicio mediante `service-control`, con dominios
+  incorporados realmente a la lista compilada y todos OFF en instalación limpia.
+- Eventos lazy y colapsables: cero consultas al arrancar, máximo 20 filas iniciales,
+  paginación y desmontaje del DOM al cerrar.
+- Retiradas de la WebUI las funciones incompletas Anonymized DNSCrypt y ODoH, y
+  eliminada la tarjeta heredada vacía de controles de servicio.
+- Eliminada la advertencia de incompatibilidad con BindHosts. El usuario confirmó una
+  semana de convivencia en un Motorola Edge 40 Pro con Android 16, KernelSU Next,
+  Hybrid Mount y SELinux Enforcing, sin pérdida de DNS, conectividad ni bootloop;
+  esta prueba no implica compatibilidad universal.
+- Corregido el watchdog de compilación para shells POSIX no interactivos: ya no usa
+  `set -m`, cancela únicamente su subárbol y no espera el timeout completo tras una
+  compilación terminada.
+
 ## v0.2.0-RC2
 
 Catálogo de blocklists por metadatos y motor genérico de fuentes, sobre la capa de

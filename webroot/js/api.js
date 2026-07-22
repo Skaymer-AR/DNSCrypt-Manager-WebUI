@@ -393,6 +393,122 @@ const DCM = (() => {
       default: return 'sin_lista';
     }
   }
+
+  // ---- v0.3 WebUI: service-control / Anonymized / ODoH (usan la CLI resuelta) ----
+  function validMode(m) { return /^(off|15m|1h|until_reboot|permanent)$/.test(String(m || '')); }
+  function validResolver(r) { return /^[A-Za-z0-9_.:-]{1,80}$/.test(String(r || '')); }
+  function validRelays(r) { return /^[A-Za-z0-9_.,:-]{1,200}$/.test(String(r || '')); }
+  function validStamp(s) { return /^sdns:\/\/[A-Za-z0-9_-]{8,}$/.test(String(s || '')); }
+  // Parsea bloques "=== id ===\nk=v..." (status --all) a un array de objetos.
+  function parseKvBlocks(text) {
+    const out = []; let cur = null;
+    String(text || '').split('\n').forEach((ln) => {
+      const m = ln.match(/^===\s*(.+?)\s*===$/);
+      if (m) { if (cur) out.push(cur); cur = { id: m[1] }; return; }
+      const i = ln.indexOf('=');
+      if (cur && i > 0) cur[ln.slice(0, i).trim()] = ln.slice(i + 1).trim();
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+  // Estado backend (service-control status) -> clave i18n de texto humano.
+  function scStateLabel(state) {
+    switch (state) {
+      case 'active': return 'sc.st.active';
+      case 'expired': return 'sc.st.expired';
+      case 'pending': return 'sc.st.pending';
+      case 'conflict': return 'sc.st.conflict';
+      case 'error': return 'sc.st.error';
+      case 'off': return 'sc.st.off';
+      default: return 'sc.st.unknown';
+    }
+  }
+  // Modo -> texto humano.
+  function scModeLabel(mode) {
+    switch (mode) {
+      case '15m': return 'sc.mode.15m';
+      case '1h': return 'sc.mode.1h';
+      case 'until_reboot': return 'sc.mode.until_reboot';
+      case 'permanent': return 'sc.mode.permanent';
+      default: return 'sc.mode.off';
+    }
+  }
+  // service-control
+  function runServiceControlListJson() { return runRawT(CLI + ' service-control status --all', 12000); }
+  function runServiceControlStatus(id) {
+    if (!validId(id)) return argErr('id invalido');
+    return runRawT(CLI + ' service-control status ' + shQuote(id), 10000);
+  }
+  function runServiceControlSet(id, mode) {
+    if (!validId(id)) return argErr('id invalido');
+    if (!validMode(mode)) return argErr('modo invalido');
+    return runRawT(CLI + ' service-control set ' + shQuote(id) + ' ' + shQuote(mode), 20000);
+  }
+  function runServiceControlVerify(id) {
+    if (!validId(id)) return argErr('id invalido');
+    return runRawT(CLI + ' service-control verify ' + shQuote(id), 12000);
+  }
+  function runServiceControlInfo(id) {
+    if (!validId(id)) return argErr('id invalido');
+    return runRawT(CLI + ' service-control info ' + shQuote(id), 8000);
+  }
+  // Anonymized DNSCrypt
+  function runAnonymizedStatus() { return runRawT(CLI + ' anonymized status', 8000); }
+  function runAnonymizedRelays() { return runRawT(CLI + ' anonymized relays', 8000); }
+  function runAnonymizedResolvers() { return runRawT(CLI + ' anonymized resolvers', 8000); }
+  function runAnonymizedTest(res, relays) {
+    if (!validResolver(res)) return argErr('resolver invalido');
+    if (!validRelays(relays)) return argErr('relays invalidos');
+    return runRawT(CLI + ' anonymized test ' + shQuote(res) + ' ' + shQuote(relays), 30000);
+  }
+  function runAnonymizedApply(res, relays) {
+    if (!validResolver(res)) return argErr('resolver invalido');
+    if (!validRelays(relays)) return argErr('relays invalidos');
+    return runRawT(CLI + ' anonymized apply ' + shQuote(res) + ' ' + shQuote(relays), 30000);
+  }
+  function runAnonymizedDisable() { return runRawT(CLI + ' anonymized disable', 15000); }
+  function runTransportRollback() { return runRawT(CLI + ' transport rollback', 15000); }
+  // ODoH
+  function runOdohStatus() { return runRawT(CLI + ' odoh status', 8000); }
+  function runOdohTest(tgt, relay) {
+    if (tgt && !validStamp(tgt)) return argErr('stamp de target invalido');
+    if (relay && !validResolver(relay)) return argErr('relay invalido');
+    return runRawT(CLI + ' odoh test ' + shQuote(tgt || '') + ' ' + shQuote(relay || ''), 30000);
+  }
+  function runOdohApply(tgt, relay) {
+    if (!validStamp(tgt)) return argErr('stamp de target invalido');
+    if (relay && !validResolver(relay)) return argErr('relay invalido');
+    return runRawT(CLI + ' odoh apply ' + shQuote(tgt) + ' ' + shQuote(relay || ''), 30000);
+  }
+  function runOdohDisable() { return runRawT(CLI + ' odoh disable', 15000); }
+  // Estado honesto de un transporte (Anonymized/ODoH) a partir del kv del backend.
+  // NUNCA 'active' por un simple flag: exige evidencia. En x86 tipico -> not_verifiable.
+  function transportState(kv, kind) {
+    const en = String(kv.enabled || kv.anonymized_enabled || '').toLowerCase() === 'true' || kv.enabled === 'true';
+    const supported = kv.supported || '';
+    if (kind === 'odoh') {
+      if (supported === 'no' || supported === 'unknown') return 'unsupported';
+    }
+    const lastTest = kv.last_test || kv.last_result || '';
+    if (kv.state) return kv.state; // si el backend ya lo dice, respetarlo
+    if (lastTest === 'testing') return 'testing';
+    if (lastTest === 'ok' && kv.verified === 'yes') return 'active';
+    if (lastTest === 'not_verifiable') return 'not_verifiable';
+    if (lastTest === 'failed' || lastTest === 'query_failed') return 'failed';
+    if (en || kv.resolver || kv.target) return 'configured';
+    return 'inactive';
+  }
+  function transportStateLabel(state) {
+    switch (state) {
+      case 'active': return 'tp.st.active';
+      case 'configured': return 'tp.st.configured';
+      case 'testing': return 'tp.st.testing';
+      case 'failed': return 'tp.st.failed';
+      case 'not_verifiable': return 'tp.st.not_verifiable';
+      case 'unsupported': return 'tp.st.unsupported';
+      default: return 'tp.st.inactive';
+    }
+  }
   function runCatalogListJson() { return runRawT(CLI + ' catalog list --json', 45000); }
   function runServiceListJson() { return runRaw(CLI + ' service list --json'); }
   function runCatalogInfo(id) {
@@ -482,6 +598,31 @@ const DCM = (() => {
     runSourceDoctor,
     parseDoctor,
     failureClassToState,
+    parseKvBlocks,
+    validMode,
+    validResolver,
+    validRelays,
+    validStamp,
+    scStateLabel,
+    scModeLabel,
+    runServiceControlListJson,
+    runServiceControlStatus,
+    runServiceControlSet,
+    runServiceControlVerify,
+    runServiceControlInfo,
+    runAnonymizedStatus,
+    runAnonymizedRelays,
+    runAnonymizedResolvers,
+    runAnonymizedTest,
+    runAnonymizedApply,
+    runAnonymizedDisable,
+    runTransportRollback,
+    runOdohStatus,
+    runOdohTest,
+    runOdohApply,
+    runOdohDisable,
+    transportState,
+    transportStateLabel,
     cli,
     cliResolved,
     cliPaths,

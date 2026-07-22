@@ -32,13 +32,6 @@
   </div>
 
   <!-- ============================ PANEL PRINCIPAL ============================ -->
-    <div class="warnbar" id="warnBindhosts" role="alert">
-    <strong data-i18n="bindhosts.warning.title">Disable BindHosts</strong>
-    <span data-i18n="bindhosts.warning.body">BindHosts must stay disabled while DNSCrypt Manager is active.</span>
-  </div>
-  <div class="testbar" id="testingBar">
-    <span data-i18n="app.testing">This version is still in testing. The first stable release will be v1.0.0.</span>
-  </div>
   <main id="views" class="views">
   <div class="route" id="route-status" data-route="status">
 
@@ -147,6 +140,14 @@
 
   </div>
   <div class="route" id="route-lists" data-route="lists" hidden>
+  <section class="card">
+    <button type="button" id="scToggle" class="v-collapse-h" aria-expanded="false" aria-controls="scBody">
+      <span class="v-collapse-title" data-i18n="sc.section.title">Per-service privacy</span>
+      <span class="v-collapse-sub" id="scSummary" data-i18n="sc.section.tap">tap to load controls</span>
+      <span class="v-chevron" id="scChevron" aria-hidden="true">&#9660;</span>
+    </button>
+    <div id="scBody" class="v-collapse-body" hidden></div>
+  </section>
   <section class="card">
     <h2 data-i18n="src.doctor.title">Source doctor</h2>
     <div class="field" style="display:flex; gap:8px; align-items:center;">
@@ -282,14 +283,6 @@
     <div id="bhResults" class="hint" style="white-space:pre-wrap;">—</div>
   </section>
 
-<section class="card">
-    <h2 data-i18n="lists.services">Controles de servicio</h2>
-    <p class="hint" style="margin-top:0;">
-      Controles experimentales de mejor esfuerzo. No garantizan privacidad
-      perfecta y pueden afectar funciones del servicio.
-    </p>
-    <div id="svcList" class="hint">Cargando…</div>
-  </section>
 
   </div>
   <div class="route" id="route-activity" data-route="activity" hidden>
@@ -304,18 +297,25 @@
   </section>
 
 <section class="card">
-    <h2 data-i18n="activity.events">Eventos bloqueados</h2>
-    <div class="btn-row" style="margin-bottom:10px;">
-      <button id="btnEventsRefresh" class="primary">Actualizar</button>
-      <button id="btnEventsStats">Estadisticas</button>
-      <button id="btnEventsClear" class="small danger">Borrar historial</button>
+    <button type="button" id="evToggle" class="v-collapse-h" aria-expanded="false" aria-controls="evBody">
+      <span class="v-collapse-title" data-i18n="activity.events">Eventos bloqueados</span>
+      <span class="v-collapse-sub" id="evSummary" data-i18n="ev.tap">tap to load events</span>
+      <span class="v-chevron" id="evChevron" aria-hidden="true">&#9660;</span>
+    </button>
+    <div id="evBody" class="v-collapse-body" hidden>
+      <div class="btn-row" style="margin-bottom:10px;">
+        <button id="btnEventsRefresh" class="primary">Actualizar</button>
+        <button id="btnEventsStats">Estadisticas</button>
+        <button id="btnEventsClear" class="small danger">Borrar historial</button>
+      </div>
+      <div class="field">
+        <label for="eventsFilter">Filtrar por dominio</label>
+        <input type="text" id="eventsFilter" placeholder="ej: ejemplo" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div id="eventsStats" class="hint" style="margin-bottom:8px;"></div>
+      <div id="eventsList" class="hint"></div>
+      <div id="eventsMore"></div>
     </div>
-    <div class="field">
-      <label for="eventsFilter">Filtrar por dominio</label>
-      <input type="text" id="eventsFilter" placeholder="ej: ejemplo" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
-    <div id="eventsStats" class="hint" style="margin-bottom:8px;"></div>
-    <div id="eventsList" class="hint">—</div>
   </section>
 
 <section class="card">
@@ -449,6 +449,7 @@
   <script src="js/router.js"></script>
   <script src="js/validation.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/controls.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

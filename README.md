@@ -10,8 +10,11 @@ Compatible con **KernelSU**, **KernelSU Next**, **APatch** (WebUI completa) y **
 
 ## Estado del proyecto
 
-**v0.2.0** agrega una capa de protección de navegación sobre la base de v0.1.0.
-Cubre:
+**v1.0.0 es la primera versión estable.** El alcance estable se concentra en las
+funciones implementadas, probadas y utilizadas en Android real. Anonymized DNSCrypt
+y ODoH permanecen fuera de la interfaz pública hasta contar con validación suficiente.
+
+Incluye:
 
 - Servicio `dnscrypt-proxy` gestionado por una única CLI (`dnscrypt-manager`).
 - Redirección DNS real vía `iptables`/`ip6tables` o `nftables`, con cadenas propias e idempotentes.
@@ -21,6 +24,9 @@ Cubre:
 - **Modo fail-closed opcional** (opt-in, cadenas propias, idempotente), **detector de fugas DNS** y panel **“por qué fue bloqueado”** con historial local limitado.
 - Watchdog de arranque con rollback automático si el DNS deja de responder.
 - WebUI para KernelSU/KernelSU Next/APatch; CLI y botón Acción para Magisk.
+- **Privacidad por servicio** con nueve controles `service-control` y enforcement real sobre la lista compilada.
+- **Eventos lazy y colapsables**: no se cargan al iniciar; se consultan únicamente al abrir el panel Actividad.
+- Convivencia con **BindHosts** confirmada durante una semana por el usuario en un Motorola Edge 40 Pro con Android 16; no se presenta como garantía universal.
 - Comandos de emergencia (`panic`, `disable`, `restore-network`) — **PANIC siempre restaura la red**.
 - Pruebas aisladas de sintaxis, CLI, WebUI y **seguridad**.
 
@@ -34,8 +40,8 @@ pérdida de Wi‑Fi, red móvil ni conectividad.
 El módulo instalable se publica en la sección **Releases** del repositorio:
 
 ```text
-DNSCrypt-Manager-release.zip
-DNSCrypt-Manager-release.zip.sha256
+DNSCrypt-Manager-v1.0.0.zip
+DNSCrypt-Manager-v1.0.0.zip.sha256
 ```
 
 Verificá siempre el ZIP con el archivo `.sha256` que acompaña a la misma release. El workflow de publicación reconstruye el módulo desde el código fuente, descarga y valida el binario oficial ARM64 de `dnscrypt-proxy` y genera un checksum nuevo para ese build exacto.

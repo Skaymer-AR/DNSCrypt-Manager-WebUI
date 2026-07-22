@@ -97,7 +97,11 @@ classify_rc() {
 # colgada). Solo manda señal al proceso PRINCIPAL tras un plazo global.
 ##############################################################################
 GLOBAL_TIMEOUT_SECS="${DNSCRYPT_TEST_GLOBAL_TIMEOUT:-280}"
-( sleep "$GLOBAL_TIMEOUT_SECS"
+( _wdn=0
+  while [ "$_wdn" -lt "$GLOBAL_TIMEOUT_SECS" ] 2>/dev/null; do
+    sleep 1
+    _wdn=$((_wdn + 1))
+  done
   echo "FATAL: watchdog global (${GLOBAL_TIMEOUT_SECS}s) excedido; forzando aborto." >&2
   kill -TERM "$MAIN_PID" 2>/dev/null
   sleep 5
@@ -112,6 +116,7 @@ disown "$WATCHDOG_PID" 2>/dev/null
 ##############################################################################
 cleanup() {
   kill "$WATCHDOG_PID" 2>/dev/null
+  wait "$WATCHDOG_PID" 2>/dev/null
   for grp in $CALL_GROUPS; do
     kill -TERM -- "-$grp" 2>/dev/null
     wait "$grp" 2>/dev/null

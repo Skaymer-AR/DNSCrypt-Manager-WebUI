@@ -756,8 +756,17 @@ function wireLeak() {
 }
 
 /* -------------------------------- eventos ------------------------------- */
+/* v1.0.0: carga DIFERIDA. Nada de esto corre en el arranque de la WebUI ni al
+   entrar a Actividad: solo cuando el usuario expande el panel Eventos.
+   Al cerrar se desmonta la lista del DOM y las respuestas tardias se ignoran
+   (token de generacion). Se renderizan como maximo EV.page filas. */
+var EV = { open: false, gen: 0, page: 20, shown: 20 };
+
 async function refreshEvents() {
+  if (!EV.open) return;                       // cerrado -> no se consulta nada
+  const myGen = EV.gen;
   const r = await DCM.run('eventsList');
+  if (myGen !== EV.gen || !EV.open) return;   // cerrado mientras cargaba -> ignorar
   const box = $('eventsList');
   if (!box) return;
   if (r.errno !== 0) { setText('eventsList', backendError(r, 'events list')); return; }
@@ -766,10 +775,21 @@ async function refreshEvents() {
   const filterEl = $('eventsFilter');
   const filter = filterEl ? filterEl.value.trim().toLowerCase() : '';
   box.textContent = '';
+  const more = $('eventsMore'); if (more) more.textContent = '';
   let evs = d.events || [];
   if (filter) evs = evs.filter((e) => (e.domain || '').indexOf(filter) >= 0);
-  if (!evs.length) { box.textContent = '(sin eventos)'; return; }
-  evs.forEach((e) => {
+  if (!evs.length) { box.textContent = '(sin eventos)'; evSummary(0); return; }
+  const total = evs.length;
+  evSummary(total);
+  const slice = evs.slice(0, EV.shown);
+  if (total > slice.length && more) {         // paginacion: no cientos de filas juntas
+    const b = document.createElement('button');
+    b.className = 'small';
+    b.textContent = I18N.t('ev.more') + ' (' + slice.length + '/' + total + ')';
+    b.addEventListener('click', () => { if (busy) return; EV.shown += EV.page; refreshEvents(); });
+    more.appendChild(b);
+  }
+  slice.forEach((e) => {
     const row = document.createElement('div');
     row.className = 'event-row';
     const head = document.createElement('div');
@@ -816,7 +836,37 @@ async function refreshEvents() {
     box.appendChild(row);
   });
 }
+function evSummary(n) {
+  const el2 = $('evSummary'); if (!el2) return;
+  el2.textContent = (typeof n === 'number') ? I18N.t('ev.count').replace('{n}', String(n)) : I18N.t('ev.tap');
+}
+async function evOpen() {
+  if (EV.open) return;
+  EV.open = true; EV.gen++; EV.shown = EV.page;
+  const body = $('evBody'); if (body) body.hidden = false;
+  const tg = $('evToggle'); if (tg) tg.setAttribute('aria-expanded', 'true');
+  const ch = $('evChevron'); if (ch) ch.textContent = '\u25B2';
+  setText('eventsList', I18N.t('common.loading'));
+  await refreshEvents();                      // UNA sola consulta
+}
+function evClose() {
+  EV.gen++; EV.open = false;                  // invalida respuestas en vuelo
+  const body = $('evBody'); if (body) body.hidden = true;
+  const list = $('eventsList'); if (list) list.textContent = '';   // desmonta filas del DOM
+  const more = $('eventsMore'); if (more) more.textContent = '';
+  const st = $('eventsStats'); if (st) st.textContent = '';
+  const tg = $('evToggle'); if (tg) tg.setAttribute('aria-expanded', 'false');
+  const ch = $('evChevron'); if (ch) ch.textContent = '\u25BC';
+  evSummary();
+}
+function wireEventsToggle() {
+  const tg = $('evToggle'); if (!tg || tg._wired) return;
+  tg._wired = true;
+  tg.addEventListener('click', () => { if (EV.open) evClose(); else evOpen(); });
+}
+
 function wireEvents() {
+  wireEventsToggle();
   const rf = $('btnEventsRefresh');
   if (rf) rf.addEventListener('click', async () => {
     if (busy) return; setBusy(true);
@@ -941,7 +991,7 @@ async function initSecurity() {
   await refreshBlocklists();
   await refreshAllowlist();
   await refreshTempAllow();
-  await refreshEvents();
+  /* v1.0.0: los eventos NO se cargan en el arranque (panel lazy). */
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1164,51 +1214,13 @@ function wireBindhosts() {
   });
 }
 
-async function svcRender() {
-  const box = $('svcList');
-  if (!box) return;
-  const r = await DCM.runServiceListJson();
-  if (r.errno !== 0) { setText('svcList', backendError(r, 'service list')); return; }
-  const d = safeParse(r.stdout);
-  if (!d || !d.controls) { setText('svcList', 'Sin controles.'); return; }
-  box.textContent = '';
-  if (!d.controls.length) { box.textContent = '(sin controles disponibles)'; return; }
-  d.controls.forEach((c) => {
-    const row = document.createElement('div');
-    row.className = 'event-row';
-    const head = document.createElement('div');
-    head.textContent = c.name + ' — modo: ' + c.mode + ' [' + c.confidence + ']';
-    const sel = document.createElement('select');
-    DCM.SVC_MODES.forEach((m) => {
-      const o = document.createElement('option'); o.value = m;
-      o.textContent = m === 'normal' ? 'Normal' : (m === 'boot' ? 'Hasta reiniciar' : (m === 'perm' ? 'Siempre' : m));
-      if (m === c.mode) o.selected = true;
-      sel.appendChild(o);
-    });
-    const acts = document.createElement('div');
-    acts.className = 'event-actions';
-    const apply = document.createElement('button');
-    apply.textContent = 'Aplicar'; apply.className = 'primary';
-    apply.addEventListener('click', async () => {
-      if (busy) return; setBusy(true);
-      try {
-        const rr = await DCM.runServiceSet(c.id, sel.value);
-        setText('svcList', (rr.stdout || rr.stderr || '').trim());
-        toast(rr.errno === 0 ? 'Aplicado.' : backendError(rr, 'service set'), rr.errno === 0 ? 'ok' : 'error');
-        await svcRender();
-      } finally { setBusy(false); }
-    });
-    acts.appendChild(sel); acts.appendChild(apply);
-    row.appendChild(head); row.appendChild(acts);
-    box.appendChild(row);
-  });
-}
+/* svcRender (motor heredado RC2 `service`) eliminado en v1.0.0: la tarjeta quedaba
+   vacia y duplicaba "Privacidad por servicio" (backend real `service-control`). */
 
 async function initCatalogRC2() {
   wireCatalog();
   wireCustom();
   wireBindhosts();
-  await svcRender();
   await customRender();
 }
 
@@ -1315,7 +1327,11 @@ function wireSourceDoctor() {
 function init() {
   // Navegacion (SPA) e idioma se inicializan SIEMPRE, haya o no puente ksu.
   if (typeof Router !== 'undefined' && Router.init) {
-    try { Router.init(); } catch (_) {}
+    try {
+      Router.init({ onChange: function (route) {
+        if (typeof V030 !== 'undefined' && V030.onRoute) { try { V030.onRoute(route); } catch (e) {} }
+      } });
+    } catch (_) {}
   }
   if (typeof I18N !== 'undefined' && I18N.init) {
     try {
@@ -1366,3 +1382,5 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+/* V030 (service-controls + transportes, lazy) se movio a webroot/js/controls.js (global var V030). */

@@ -34,8 +34,9 @@ ok()  { PASS=$((PASS+1)); printf '  OK   %s\n' "$1"; }
 bad() { FAILN=$((FAILN+1)); printf '  FAIL %s\n' "$1"; }
 # watchdog generoso (2.5M puede tardar)
 WD_SECS=$(( SCALE/2000 + 180 ))
-( sleep "$WD_SECS"; echo "FATAL: watchdog ${WD_SECS}s" >&2; kill -TERM $$ 2>/dev/null ) & WD=$!
-cleanup() { kill "$WD" 2>/dev/null; rm -rf "$TR"; }
+( _wdn=0; while [ "$_wdn" -lt "$WD_SECS" ] 2>/dev/null; do sleep 1; _wdn=$((_wdn + 1)); done
+  echo "FATAL: watchdog ${WD_SECS}s" >&2; kill -TERM $$ 2>/dev/null ) & WD=$!
+cleanup() { kill "$WD" 2>/dev/null; wait "$WD" 2>/dev/null; rm -rf "$TR"; }
 trap 'cleanup; exit 99' INT TERM
 trap cleanup EXIT
 

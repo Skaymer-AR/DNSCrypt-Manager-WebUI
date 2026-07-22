@@ -1,3 +1,7 @@
+> **v1.0.0**: Anonymized DNSCrypt y ODoH quedaron FUERA del alcance estable; se
+> retiraron de la WebUI y no se inicializan. Este documento describe su estado
+> interno/experimental y el resto de las funciones.
+
 # ENFORCEMENT STATUS — v0.3.0-RC1 (qué es real y qué no)
 
 Toda la suite corre en x86 contra un binario dnscrypt-proxy de prueba y hooks

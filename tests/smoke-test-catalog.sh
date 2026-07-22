@@ -32,8 +32,9 @@ PASS=0; FAILN=0
 ok()  { PASS=$((PASS+1)); printf '  OK   %s\n' "$1"; }
 bad() { FAILN=$((FAILN+1)); printf '  FAIL %s\n' "$1"; }
 
-( sleep 200; echo "FATAL: watchdog 200s" >&2; kill -TERM $$ 2>/dev/null ) & WD=$!
-cleanup() { kill "$WD" 2>/dev/null; rm -rf "$TR"; }
+( _wdn=0; while [ "$_wdn" -lt 200 ]; do sleep 1; _wdn=$((_wdn + 1)); done
+  echo "FATAL: watchdog 200s" >&2; kill -TERM $$ 2>/dev/null ) & WD=$!
+cleanup() { kill "$WD" 2>/dev/null; wait "$WD" 2>/dev/null; rm -rf "$TR"; }
 trap 'cleanup; exit 99' INT TERM
 trap cleanup EXIT
 
@@ -164,7 +165,10 @@ BLK_AFTER=$(wc -l < "$DATA/catalog/blacklist.txt" 2>/dev/null | tr -d ' ')
 
 # =====================================================================
 echo "== H. Controles de servicio (YouTube) + reloj =="
+_h0=$(date +%s)
 cli service set youtube_no_history 1h > "$TR/so" 2>&1
+_hdur=$(( $(date +%s) - _h0 ))
+[ "$_hdur" -lt 30 ] && ok "H0 service set no queda esperando el watchdog" || bad "H0 service set tardo ${_hdur}s"
 grep -q "Control experimental de mejor esfuerzo" "$TR/so" && ok "H1 set muestra texto obligatorio" || bad "H1 texto obligatorio"
 inlib "svc_is_blocking youtube_no_history && echo BLOCK" 2>/dev/null | grep -q BLOCK && ok "H2 modo 1h bloquea" || bad "H2 no bloquea"
 # reloj: forzar block_until en el pasado -> expira -> modo normal

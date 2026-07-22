@@ -38,8 +38,13 @@ enfoque DNS y se documentan para no prometer lo que no puede cumplir.
   en runtime (los resultados runtime van a archivos separados).
 - `verified` de una fuente solo tras descarga+validación en el dispositivo, nunca
   desde CI.
-- **BindHosts** debe permanecer desactivado mientras el módulo esté activo;
-  desactivarlo y reiniciar antes de continuar.
+- **BindHosts**: convivencia confirmada por el usuario en pruebas físicas (Motorola
+  Edge 40 Pro, Android 16, KernelSU Next, Hybrid Mount, SELinux Enforcing) durante
+  una semana, con Wi-Fi, datos móviles y hotspot, sin pérdida de DNS ni de
+  conectividad ni bootloop. No se exige desactivarlo ni se bloquea. Esto es una
+  prueba física en un dispositivo, NO una garantía de compatibilidad universal en
+  cualquier equipo o versión. Nota práctica: ambos filtran por su cuenta, así que si
+  un dominio aparece bloqueado y no está en tus listas, revisá también BindHosts.
 - **KernelSU Next**: requiere Hybrid Mount para exponer la CLI a la WebUI.
 - **PANIC** siempre disponible: retira redirección, detiene el proxy y restaura la
   red, limpiando solo lo propio.
