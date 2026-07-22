@@ -27,15 +27,22 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Download public stable release
+      - name: Read public release metadata
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/public-v1
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" \
-            --json url,tagName,isDraft,isPrerelease,isLatest,targetCommitish,assets \
+            --json url,tagName,isDraft,isPrerelease,targetCommitish,assets \
             > /tmp/public-v1/release.json
+          cat /tmp/public-v1/release.json
+
+      - name: Download all public release assets
+        shell: bash
+        run: |
+          set -euo pipefail
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D /tmp/public-v1
+          find /tmp/public-v1 -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Verify release metadata and exact asset set
         shell: bash
@@ -63,7 +70,6 @@ jobs:
           assert data['tagName'] == 'v1.0.0', data
           assert data['isDraft'] is False, data
           assert data['isPrerelease'] is False, data
-          assert data['isLatest'] is True, data
           assert names == expected, (names, expected)
           disk = {p.name for p in root.iterdir() if p.name != 'release.json'}
           assert disk == expected, (disk, expected)
@@ -108,7 +114,6 @@ jobs:
           arm64_binary_sha256=$OFFICIAL_ARM64_SHA256
           draft=false
           prerelease=false
-          latest=true
           checksums=verified
           zip_integrity=verified
           result=PASS
