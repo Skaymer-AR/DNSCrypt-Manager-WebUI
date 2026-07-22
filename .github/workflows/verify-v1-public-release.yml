@@ -129,8 +129,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd /tmp/public-v1
-          git bundle verify DNSCrypt-Manager-v1.0.0.bundle
+          git -C "$GITHUB_WORKSPACE" bundle verify /tmp/public-v1/DNSCrypt-Manager-v1.0.0.bundle
 
       - name: Write independent verification report
         if: success()
