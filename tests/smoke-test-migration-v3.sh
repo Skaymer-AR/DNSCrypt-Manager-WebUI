@@ -11,9 +11,9 @@ P=0;F=0; ok(){ P=$((P+1)); printf '  OK   %s\n' "$1"; }; bad(){ F=$((F+1)); prin
 # idempotente
 "$SH" "$M" migrate 2>&1 | grep -qi "ya en 3" && ok "idempotente (2da corrida no hace nada)" || bad "idem"
 # nuevos dirs OFF
-for d in transport captive bypass monitor service-controls apppolicy; do [ -d "$TR/data/$d" ] && ok "dir $d creado" || bad "dir $d"; done
-grep -q '"enabled":false' "$TR/data/transport/anonymized.json" && ok "anonymized OFF por defecto" || bad "anon off"
-grep -q '"enabled":false' "$TR/data/transport/odoh.json" && ok "odoh OFF por defecto" || bad "odoh off"
+# v1.0.0: transport/ ya NO se inicializa (Anonymized/ODoH fuera de alcance)
+for d in captive bypass monitor service-controls apppolicy; do [ -d "$TR/data/$d" ] && ok "dir $d creado" || bad "dir $d"; done
+[ -d "$TR/data/transport" ] && bad "transport/ no deberia crearse en v1.0.0" || ok "transport/ NO inicializado (fuera de alcance v1.0.0)"
 grep -q "mode	audit" "$TR/data/bypass/config.tsv" && ok "bypass en audit (no strict)" || bad "bypass"
 grep -q "mode	audit" "$TR/data/monitor/config.tsv" && ok "monitor en audit" || bad "monitor"
 # conserva config previa: simular un flag existente y re-migrar desde schema 2

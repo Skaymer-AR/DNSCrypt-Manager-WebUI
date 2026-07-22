@@ -530,19 +530,22 @@ cat_compile() {
   echo "Compilando listas activas (categorias legacy + catalogo)…"
   cat_progress_set merging "fusionando y validando fuentes"
 
-  # 3) Operacion pesada en un HIJO en SU PROPIO grupo de procesos (set -m), para
-  #    poder cancelar/timeoutear TODO el subarbol (no dejar temporales vivos).
-  _had_m=0; case "$-" in *m*) _had_m=1 ;; esac
-  set -m 2>/dev/null
+  # 3) Operacion pesada en un HIJO propio. No usar `set -m`: en shells POSIX
+  #    no interactivos (incluido dash, usado por CI) puede bloquear el script.
+  #    La cancelacion recorre y mata exclusivamente el subarbol del PID registrado.
   ( cat_compile_heavy ) &
   _child=$!
-  [ "$_had_m" = "0" ] && set +m 2>/dev/null
   echo "$_child" > "$CAT_COMPILE_LOCK/child" 2>/dev/null
-  # Watchdog de timeout: mata el grupo del hijo registrado Y su subarbol.
-  ( sleep "$_to"
-    _cat_kill_tree "$_child" TERM; kill -TERM "-$_child" 2>/dev/null
+  # Watchdog portable. Se despierta como maximo cada 1 s, de modo que al cancelar
+  # no queda un `sleep $_to` huerfano que obligue al padre a esperar todo el timeout.
+  ( _cat_wd_n=0
+    while [ "$_cat_wd_n" -lt "$_to" ] 2>/dev/null; do
+      sleep 1
+      _cat_wd_n=$((_cat_wd_n + 1))
+    done
+    _cat_kill_tree "$_child" TERM
     sleep 3
-    _cat_kill_tree "$_child" KILL; kill -KILL "-$_child" 2>/dev/null ) &
+    _cat_kill_tree "$_child" KILL ) &
   _wd=$!
   wait "$_child" 2>/dev/null; _rc=$?
   kill "$_wd" 2>/dev/null; wait "$_wd" 2>/dev/null

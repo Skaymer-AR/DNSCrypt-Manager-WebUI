@@ -1579,7 +1579,7 @@ sec_migrate() {
     cp "$SCHEMA_FILE" "$SCHEMA_FILE.bak" 2>/dev/null   # rollback point
     _e3=0
     # Inicializar subsistemas nuevos (cada init crea dirs 0700 + estado OFF).
-    command -v transport_init >/dev/null 2>&1 && { transport_init || _e3=1; }
+    # transport (Anonymized/ODoH): fuera del alcance de v1.0.0 -> NO se inicializa.
     command -v captive_init   >/dev/null 2>&1 && { captive_init   || _e3=1; }
     command -v bypass_init    >/dev/null 2>&1 && { bypass_init    || _e3=1; }
     command -v monitor_init   >/dev/null 2>&1 && { monitor_init   || _e3=1; }

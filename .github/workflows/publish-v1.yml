@@ -1,0 +1,255 @@
+name: Publish DNSCrypt Manager v1.0.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1.yml'
+      - 'module.prop'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'release/v1.0.0/**'
+      - 'scripts/**'
+      - 'system/**'
+      - 'webroot/**'
+      - 'config/**'
+      - 'tests/**'
+      - 'tools/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-dnscrypt-manager-v1
+  cancel-in-progress: false
+
+jobs:
+  validate-build-publish:
+    if: github.repository == 'Skaymer-AR/DNSCrypt-Manager-WebUI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TAG: v1.0.0
+      VERSION: v1.0.0
+      VERSION_CODE: '10000'
+      OFFICIAL_ARM64_SHA256: 940b650911cfa55cbc0544a9025ceb866101590a88031a90a7e1ca05f5781cbc
+      PATCH_BASE: 95fc745f43ffb65877ec6191c70dc0806c845de3
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout exact publication commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard stable version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'id=dnscrypt_manager' module.prop
+          grep -qx "version=$VERSION" module.prop
+          grep -qx "versionCode=$VERSION_CODE" module.prop
+          grep -qx 'author=Skaymer AR' module.prop
+          test "$GITHUB_REF_NAME" = main
+
+      - name: Install test and packaging dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            zip unzip binutils file iproute2 nodejs python3 ca-certificates
+
+      - name: Verify bundled official ARM64 binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s bin/arm64/dnscrypt-proxy
+          echo "$OFFICIAL_ARM64_SHA256  bin/arm64/dnscrypt-proxy" | sha256sum -c -
+          file bin/arm64/dnscrypt-proxy | grep -Eq 'ARM aarch64|ARM64|AArch64'
+
+      - name: Run 30 functional suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          suites=(
+            tests/smoke-test-v1-scope.cjs
+            tests/smoke-test-webui.sh
+            tests/smoke-test-webui-args.cjs
+            tests/smoke-test-webui-lazy-v030.cjs
+            tests/smoke-test-webui-controls-v030.cjs
+            tests/smoke-test-webui-v030.cjs
+            tests/smoke-test-source-ui-v030.cjs
+            tests/smoke-test-cli-resolver-v030.cjs
+            tests/smoke-test-i18n.sh
+            tests/smoke-test-service-controls.sh
+            tests/smoke-test-service-enforcement.sh
+            tests/smoke-test-app-policy.sh
+            tests/smoke-test-migration-v3.sh
+            tests/smoke-test-catalog-audit.sh
+            tests/smoke-test-catalog.sh
+            tests/smoke-test-source-fetch.sh
+            tests/smoke-test-source-doctor.sh
+            tests/smoke-test-source-bootstrap.sh
+            tests/smoke-test-source-errors-v030.sh
+            tests/smoke-test-dns-audit-v030.sh
+            tests/smoke-test-environment-v030.sh
+            tests/smoke-test-security.sh
+            tests/smoke-test-cli.sh
+            tests/smoke-test-compile.sh
+            tests/smoke-test-transport.sh
+            tests/smoke-test-anonymized.sh
+            tests/smoke-test-odoh.sh
+            tests/smoke-test-captive.sh
+            tests/smoke-test-bypass.sh
+            tests/smoke-test-monitor.sh
+          )
+          mkdir -p /tmp/dcm-test-logs
+          for suite in "${suites[@]}"; do
+            name="$(basename "$suite")"
+            echo "===== $name ====="
+            case "$suite" in
+              *.cjs) timeout 180 node "$suite" 2>&1 | tee "/tmp/dcm-test-logs/$name.log" ;;
+              *)     timeout 180 bash "$suite" 2>&1 | tee "/tmp/dcm-test-logs/$name.log" ;;
+            esac
+          done
+
+      - name: Run syntax, structure and reproducibility checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/run-syntax-checks.sh | tee /tmp/dcm-test-logs/run-syntax-checks.log
+          python3 tools/build-catalog.py --check
+
+      - name: Build exact installable ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSETS="$RUNNER_TEMP/v1-assets"
+          mkdir -p "$ASSETS"
+          DCM_SKIP_TESTS=1 \
+          DCM_OUTPUT="$ASSETS/DNSCrypt-Manager-v1.0.0.zip" \
+            bash tools/build-module.sh | tee /tmp/dcm-build.log
+          unzip -tq "$ASSETS/DNSCrypt-Manager-v1.0.0.zip"
+          unzip -Z1 "$ASSETS/DNSCrypt-Manager-v1.0.0.zip" | grep -qx 'module.prop'
+          if unzip -Z1 "$ASSETS/DNSCrypt-Manager-v1.0.0.zip" | grep -Eq '^(tests|tools|dist|fixtures|bootstrap|release)/'; then
+            echo 'Development/release-source files leaked into the installable ZIP' >&2
+            exit 1
+          fi
+          unzip -p "$ASSETS/DNSCrypt-Manager-v1.0.0.zip" module.prop | tr -d '\r' > /tmp/module.prop.release
+          grep -qx 'id=dnscrypt_manager' /tmp/module.prop.release
+          grep -qx 'version=v1.0.0' /tmp/module.prop.release
+          grep -qx 'versionCode=10000' /tmp/module.prop.release
+          grep -qx 'author=Skaymer AR' /tmp/module.prop.release
+          unzip -p "$ASSETS/DNSCrypt-Manager-v1.0.0.zip" bin/arm64/dnscrypt-proxy > /tmp/dnscrypt-proxy.release
+          echo "$OFFICIAL_ARM64_SHA256  /tmp/dnscrypt-proxy.release" | sha256sum -c -
+          (cd "$ASSETS" && sha256sum DNSCrypt-Manager-v1.0.0.zip > DNSCrypt-Manager-v1.0.0.zip.sha256)
+
+      - name: Prepare reproducible release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSETS="$RUNNER_TEMP/v1-assets"
+          cp release/v1.0.0/RELEASE_NOTES_v1.0.0_ES.md "$ASSETS/"
+          cp release/v1.0.0/RELEASE_NOTES_v1.0.0_EN.md "$ASSETS/"
+          cp release/v1.0.0/ANDROID_USER_VALIDATION_v1.0.0.md "$ASSETS/"
+          cp release/v1.0.0/TEST_RESULTS_v1.0.0.md "$ASSETS/"
+          {
+            printf '\n## Commit publicado\n\n`%s`\n' "$GITHUB_SHA"
+          } >> "$ASSETS/TEST_RESULTS_v1.0.0.md"
+
+          git branch -f release-v1-bundle "$GITHUB_SHA"
+          git bundle create "$ASSETS/DNSCrypt-Manager-v1.0.0.bundle" refs/heads/release-v1-bundle
+          git bundle verify "$ASSETS/DNSCrypt-Manager-v1.0.0.bundle"
+          git format-patch --stdout "$PATCH_BASE..$GITHUB_SHA" > "$ASSETS/DNSCrypt-Manager-v1.0.0.patch"
+          test -s "$ASSETS/DNSCrypt-Manager-v1.0.0.patch"
+
+          (
+            cd "$ASSETS"
+            sha256sum \
+              DNSCrypt-Manager-v1.0.0.zip \
+              DNSCrypt-Manager-v1.0.0.zip.sha256 \
+              DNSCrypt-Manager-v1.0.0.bundle \
+              DNSCrypt-Manager-v1.0.0.patch \
+              RELEASE_NOTES_v1.0.0_ES.md \
+              RELEASE_NOTES_v1.0.0_EN.md \
+              TEST_RESULTS_v1.0.0.md \
+              ANDROID_USER_VALIDATION_v1.0.0.md \
+              > DNSCrypt-Manager-v1.0.0-files.sha256
+          )
+
+          cat "$ASSETS/RELEASE_NOTES_v1.0.0_ES.md" > "$RUNNER_TEMP/release-body.md"
+          printf '\n\n---\n\n' >> "$RUNNER_TEMP/release-body.md"
+          cat "$ASSETS/RELEASE_NOTES_v1.0.0_EN.md" >> "$RUNNER_TEMP/release-body.md"
+
+      - name: Create or refresh stable GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSETS="$RUNNER_TEMP/v1-assets"
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSETS"/* -R "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" -R "$GITHUB_REPOSITORY" \
+              --title 'DNSCrypt Manager v1.0.0' \
+              --notes-file "$RUNNER_TEMP/release-body.md" \
+              --draft=false --prerelease=false --latest
+          else
+            gh release create "$TAG" "$ASSETS"/* -R "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title 'DNSCrypt Manager v1.0.0' \
+              --notes-file "$RUNNER_TEMP/release-body.md" \
+              --draft=false --prerelease=false --latest
+          fi
+
+      - name: Verify public stable release and every checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/dcm-release-verify
+          mkdir -p /tmp/dcm-release-verify
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D /tmp/dcm-release-verify
+          cd /tmp/dcm-release-verify
+          sha256sum -c DNSCrypt-Manager-v1.0.0-files.sha256
+          sha256sum -c DNSCrypt-Manager-v1.0.0.zip.sha256
+          unzip -tq DNSCrypt-Manager-v1.0.0.zip
+          unzip -p DNSCrypt-Manager-v1.0.0.zip module.prop | tr -d '\r' > module.prop
+          grep -qx 'version=v1.0.0' module.prop
+          grep -qx 'versionCode=10000' module.prop
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" \
+            --json url,tagName,isDraft,isPrerelease,isLatest,targetCommitish,assets \
+            > release.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('release.json', encoding='utf-8'))
+          assert data['tagName']=='v1.0.0', data
+          assert data['isDraft'] is False, data
+          assert data['isPrerelease'] is False, data
+          assert data['isLatest'] is True, data
+          names={a['name'] for a in data['assets']}
+          expected={
+            'DNSCrypt-Manager-v1.0.0.zip',
+            'DNSCrypt-Manager-v1.0.0.zip.sha256',
+            'DNSCrypt-Manager-v1.0.0.bundle',
+            'DNSCrypt-Manager-v1.0.0.patch',
+            'DNSCrypt-Manager-v1.0.0-files.sha256',
+            'RELEASE_NOTES_v1.0.0_ES.md',
+            'RELEASE_NOTES_v1.0.0_EN.md',
+            'TEST_RESULTS_v1.0.0.md',
+            'ANDROID_USER_VALIDATION_v1.0.0.md',
+          }
+          assert names==expected, (names, expected)
+          print('Public stable release verified:', data['url'])
+          PY
+
+      - name: Preserve build and verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DNSCrypt-Manager-v1.0.0-publication-evidence
+          path: |
+            /tmp/dcm-test-logs
+            /tmp/dcm-build.log
+            /tmp/dcm-release-verify
+            ${{ runner.temp }}/v1-assets
+          if-no-files-found: warn

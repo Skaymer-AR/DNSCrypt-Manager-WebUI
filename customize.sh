@@ -35,20 +35,8 @@ ui_print "  #   dnscrypt-proxy como servicio   #"
 ui_print "  #      Creado por Skaymer AR       #"
 ui_print "  ####################################"
 ui_print ""
-ui_print "  AVISO: BindHosts debe permanecer DESACTIVADO"
-ui_print "  mientras DNSCrypt Manager este activo. Si usas"
-ui_print "  BindHosts, desactivalo, reinicia el equipo y"
-ui_print "  recien entonces continua. Usar ambos a la vez"
-ui_print "  puede provocar perdida de conectividad o bootloop."
+ui_print "  Version estable v1.0.0"
 ui_print ""
-ui_print "  Esta version continua EN PRUEBAS."
-ui_print "  La primera version estable sera v1.0.0."
-ui_print ""
-# Deteccion informativa de BindHosts (no lo desactiva ni borra su carpeta).
-if [ -d /data/adb/modules/bindhosts ] && [ ! -f /data/adb/modules/bindhosts/disable ] && [ ! -f /data/adb/modules/bindhosts/remove ]; then
-  ui_print "  >> BindHosts parece ACTIVO: desactivalo antes de usar este modulo."
-  ui_print ""
-fi
 
 # ---------------------------------------------------------------------------
 # 1. Detectar gestor root (solo informativo, no bloquea)

@@ -21,8 +21,9 @@ PASS=0; FAILN=0; STRAY_SLEEPS=""
 ok(){ PASS=$((PASS+1)); printf '  OK   %s\n' "$1"; }
 bad(){ FAILN=$((FAILN+1)); printf '  FAIL %s\n' "$1"; }
 
-( sleep 180; echo "FATAL watchdog" >&2; kill -TERM $$ 2>/dev/null ) & WD=$!
-cleanup(){ kill "$WD" 2>/dev/null; for p in $STRAY_SLEEPS; do kill -9 "$p" 2>/dev/null; done; rm -rf "$TR"; }
+( _wdn=0; while [ "$_wdn" -lt 180 ]; do sleep 1; _wdn=$((_wdn + 1)); done
+  echo "FATAL watchdog" >&2; kill -TERM $$ 2>/dev/null ) & WD=$!
+cleanup(){ kill "$WD" 2>/dev/null; wait "$WD" 2>/dev/null; for p in $STRAY_SLEEPS; do kill -9 "$p" 2>/dev/null; done; rm -rf "$TR"; }
 trap 'cleanup; exit 99' INT TERM; trap cleanup EXIT
 
 mkdir -p "$DATA/bin" "$DATA/config"

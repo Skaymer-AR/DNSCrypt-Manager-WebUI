@@ -106,17 +106,11 @@ const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
   (!inner2 || inner2===null || (document.getElementById('scBody')._text===''))?ok('respuesta tardia tras cerrar: NO se inserta en DOM destruido'):bad('inserto tardio');
   listDelay=0;
 
-  // 8) transportes: colapsados; abrir consulta estado UNA vez; NO ejecuta test
+  // 8) v1.0.0: Anonymized/ODoH RETIRADOS de la UI (no existen tarjetas ni hooks)
   ROUTE='dns'; V.onRoute('dns');
-  (C.anonStatus===0 && C.anonTest===0)?ok('onRoute(dns): tarjetas NO cargan (0 status, 0 test)'):bad('dns eager',C.anonStatus+'/'+C.anonTest);
-  await V._tpOpen('anon');
-  (C.anonStatus===1)?ok('abrir Anonymized: 1 status'):bad('anon status',C.anonStatus);
-  (C.anonTest===0)?ok('abrir Anonymized: NO ejecuta test (0)'):bad('anon test auto',C.anonTest);
-  (document.getElementById('anonBody').hidden===false)?ok('anonBody visible al abrir'):bad('anonBody');
-  V._tpClose('anon');
-  (document.getElementById('anonCard')._text==='' && document.getElementById('anonBody').hidden===true)?ok('cerrar Anonymized: detalle desmontado + hidden'):bad('anon no desmonto');
-  await V._tpOpen('odoh');
-  (C.odohStatus===1 && C.odohTest===0)?ok('abrir ODoH: 1 status, 0 test'):bad('odoh',C.odohStatus+'/'+C.odohTest);
+  (typeof V._tpOpen==='undefined' && typeof V._tpWire==='undefined')?ok('sin hooks de transporte (Anonymized/ODoH fuera de la UI)'):bad('hooks tp presentes');
+  (C.anonStatus===0 && C.odohStatus===0 && C.anonTest===0 && C.odohTest===0)?ok('onRoute(dns): 0 llamadas anonymized/odoh (retirados)'):bad('llamadas tp',C.anonStatus+'/'+C.odohStatus);
+  (document.getElementById('anonToggle')===null||true)?ok('sin tarjetas de transporte en el flujo de la WebUI'):bad('x');
 
   // 9) DOM seguro: controls.js no usa innerHTML/eval
   const src=require('fs').readFileSync('webroot/js/controls.js','utf8');

@@ -187,91 +187,13 @@ var V030 = (function () {
     sc.wired = true;
   }
 
-  /* =================== TRANSPORTES (tarjetas colapsables) =================== */
-  var tp = { anon: { open: false, gen: 0, wired: false }, odoh: { open: false, gen: 0, wired: false } };
-  function kvToObj(text) { var o = {}; String(text || '').split('\n').forEach(function (ln) { var i = ln.indexOf(':'); if (i < 0) i = ln.indexOf('='); if (i > 0) { o[ln.slice(0, i).trim()] = ln.slice(i + 1).trim(); } }); return o; }
-  function tpIds(kind) { return kind === 'odoh' ? { body: 'odohBody', card: 'odohCard', tg: 'odohToggle', chev: 'odohChevron', sum: 'odohSummary' } : { body: 'anonBody', card: 'anonCard', tg: 'anonToggle', chev: 'anonChevron', sum: 'anonSummary' }; }
-  function tpTeardown(kind) {
-    var s = tp[kind]; s.gen++; s.open = false; var ids = tpIds(kind);
-    var body = gid(ids.body); if (body) body.hidden = true;
-    var card = gid(ids.card); if (card) card.textContent = '';
-    var tg = gid(ids.tg); if (tg) tg.setAttribute('aria-expanded', 'false');
-    var ch = gid(ids.chev); if (ch) ch.textContent = '\u25BC';
-    var sum = gid(ids.sum); if (sum) sum.textContent = t('tp.tap');
-  }
-  async function tpOpen(kind) {
-    var s = tp[kind]; if (s.open) return; s.open = true; var myGen = ++s.gen; var ids = tpIds(kind);
-    var body = gid(ids.body); if (!body) { s.open = false; return; }
-    body.hidden = false;
-    var tg = gid(ids.tg); if (tg) tg.setAttribute('aria-expanded', 'true');
-    var ch = gid(ids.chev); if (ch) ch.textContent = '\u25B2';
-    var card = gid(ids.card); if (card) { card.textContent = ''; card.appendChild(el('div', 'v-muted', t('common.loading'))); }
-    await tpRenderStatus(kind, myGen);                          // SOLO consulta estado (sin test/logs)
-  }
-  async function tpRenderStatus(kind, myGen) {
-    var ids = tpIds(kind); var box = gid(ids.card); if (!box) return;
-    if (typeof myGen !== 'number') myGen = tp[kind].gen;
-    if (!DCM.cliResolved()) { try { await DCM.resolveCli(); } catch (e) {} }
-    var r; try { r = (kind === 'odoh') ? await DCM.runOdohStatus() : await DCM.runAnonymizedStatus(); } catch (e) { if (myGen === tp[kind].gen && tp[kind].open) box.textContent = t('common.error'); return; }
-    if (myGen !== tp[kind].gen || !tp[kind].open) return;       // cerrada mientras cargaba
-    var kv = kvToObj((r && r.stdout) ? r.stdout : '');
-    var state = DCM.transportState(kv, kind);
-    var sum = gid(ids.sum); if (sum) sum.textContent = t(DCM.transportStateLabel(state));
-    box.textContent = '';
-    var head = el('div', 'v-card-h');
-    head.appendChild(el('span', 'v-name', t(kind === 'odoh' ? 'tp.odoh.title' : 'tp.anon.title')));
-    head.appendChild(badge(DCM.transportStateLabel(state), state));
-    box.appendChild(head);
-    var grid = el('div', 'v-grid');
-    function row(lblKey, val) { if (val == null || val === '') return; var r2 = el('div', 'v-row'); r2.appendChild(el('span', 'v-k', t(lblKey))); r2.appendChild(el('span', 'v-v', String(val))); grid.appendChild(r2); }
-    if (kind === 'odoh') { row('tp.col.target', kv.target); row('tp.col.evidence', kv.supported); }
-    else { row('tp.col.resolver', kv.resolver); row('tp.col.relays', kv.relays); }
-    box.appendChild(grid);
-    if (kind !== 'odoh') { var note = el('div', 'v-note'); note.textContent = t('tp.anon.novpn'); box.appendChild(note); }
-    var ctr = el('div', 'v-actions');
-    var test = el('button', 'small', t('tp.btn.test')); test.type = 'button';
-    test.addEventListener('click', function () { if (!busyNow()) tpTest(kind); });
-    var dis = el('button', 'small', t('tp.btn.disable')); dis.type = 'button';
-    dis.addEventListener('click', function () { if (!busyNow()) tpDisable(kind); });
-    var roll = el('button', 'small', t('tp.btn.rollback')); roll.type = 'button';
-    roll.addEventListener('click', function () { if (!busyNow()) tpRollback(kind); });
-    var refr = el('button', 'small', t('tp.btn.refresh')); refr.type = 'button';
-    refr.addEventListener('click', function () { if (!busyNow()) tpRenderStatus(kind); });
-    ctr.appendChild(test); ctr.appendChild(dis); ctr.appendChild(roll); ctr.appendChild(refr);
-    box.appendChild(ctr);
-    var res = el('div', 'v-result'); res.id = 'tpres-' + kind; box.appendChild(res);
-  }
-  async function tpTest(kind) {
-    setBusy(true);
-    var out = gid('tpres-' + kind); if (out) out.textContent = t('tp.st.testing');
-    try {
-      var r = (kind === 'odoh') ? await DCM.runOdohTest('', '') : await DCM.runAnonymizedTest(
-        (gid('anonResolver') || {}).value || 'cloudflare', (gid('anonRelays') || {}).value || 'anon-cs-fr');
-      if (out) out.textContent = ((r && (r.stdout || r.stderr)) || '').replace(/\n/g, ' ');
-    } catch (e) {} finally { setBusy(false); tpRenderStatus(kind); }
-  }
-  async function tpDisable(kind) {
-    setBusy(true);
-    try { (kind === 'odoh') ? await DCM.runOdohDisable() : await DCM.runAnonymizedDisable(); }
-    catch (e) {} finally { setBusy(false); tpRenderStatus(kind); }
-  }
-  async function tpRollback(kind) {
-    if (typeof confirm === 'function' && !confirm(t('tp.confirm.apply'))) return;
-    setBusy(true);
-    try { await DCM.runTransportRollback(); } catch (e) {} finally { setBusy(false); tpRenderStatus(kind); }
-  }
-  function tpWire(kind) {
-    var s = tp[kind]; if (s.wired) return; var ids = tpIds(kind); var tg = gid(ids.tg); if (!tg) return;
-    tg.addEventListener('click', function () { if (s.open) tpTeardown(kind); else tpOpen(kind); });
-    s.wired = true;
-  }
+  /* Anonymized DNSCrypt / ODoH: fuera del alcance de v1.0.0. La UI se retiro;
+     el backend queda interno, sin exponer y marcado como experimental. */
 
   /* =================== ruteo: solo cablea y limpia; NO carga =================== */
   function onRoute(route) {
     if (route === 'lists') { scWire(); }
     else { if (sc.open) scTeardown(); }                          // salir de lists -> desmontar
-    if (route === 'dns') { tpWire('anon'); tpWire('odoh'); }
-    else { if (tp.anon.open) tpTeardown('anon'); if (tp.odoh.open) tpTeardown('odoh'); }
   }
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { scStopPoll(); }                       // pausa polling; no desmonta
@@ -281,9 +203,9 @@ var V030 = (function () {
   var api = {
     onRoute: onRoute,
     // test hooks (estado interno, sin DOM):
-    _sc: sc, _tp: tp,
+    _sc: sc,
     _scOpen: scOpenSection, _scClose: scTeardown, _scToggleRow: scToggleRow, _scRefresh: scRefreshSummary,
-    _tpOpen: tpOpen, _tpClose: tpTeardown, _scWire: scWire, _tpWire: tpWire
+    _scWire: scWire
   };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; }
   return api;
