@@ -76,30 +76,64 @@ jobs:
           print(data['url'])
           PY
 
-      - name: Verify every public checksum and installable ZIP
+      - name: Verify public master checksums
         shell: bash
         run: |
           set -euo pipefail
           cd /tmp/public-v1
+          cat DNSCrypt-Manager-v1.0.0-files.sha256
           sha256sum -c DNSCrypt-Manager-v1.0.0-files.sha256
+
+      - name: Verify public ZIP checksum and integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/public-v1
+          cat DNSCrypt-Manager-v1.0.0.zip.sha256
           sha256sum -c DNSCrypt-Manager-v1.0.0.zip.sha256
           unzip -tq DNSCrypt-Manager-v1.0.0.zip
+
+      - name: Verify public module metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/public-v1
           unzip -p DNSCrypt-Manager-v1.0.0.zip module.prop | tr -d '\r' > module.prop.public
+          cat module.prop.public
           grep -qx 'id=dnscrypt_manager' module.prop.public
           grep -qx 'version=v1.0.0' module.prop.public
           grep -qx 'versionCode=10000' module.prop.public
           grep -qx 'author=Skaymer AR' module.prop.public
+
+      - name: Verify public ZIP excludes development files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/public-v1
           if unzip -Z1 DNSCrypt-Manager-v1.0.0.zip \
             | grep -Eq '^(tests|tools|dist|fixtures|bootstrap|release)/'; then
             echo 'Development files leaked into public ZIP' >&2
             exit 1
           fi
-          unzip -p DNSCrypt-Manager-v1.0.0.zip bin/arm64/dnscrypt-proxy \
-            | sha256sum \
-            | grep -q "^$OFFICIAL_ARM64_SHA256  -$"
+
+      - name: Verify public official ARM64 binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/public-v1
+          actual="$(unzip -p DNSCrypt-Manager-v1.0.0.zip bin/arm64/dnscrypt-proxy | sha256sum | awk '{print $1}')"
+          echo "actual=$actual"
+          test "$actual" = "$OFFICIAL_ARM64_SHA256"
+
+      - name: Verify public Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/public-v1
           git bundle verify DNSCrypt-Manager-v1.0.0.bundle
 
       - name: Write independent verification report
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
@@ -121,8 +155,9 @@ jobs:
           cat PUBLIC_RELEASE_VERIFICATION.txt
 
       - name: Preserve the exact public assets
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: DNSCrypt-Manager-v1.0.0-public-assets-verified
+          name: DNSCrypt-Manager-v1.0.0-public-assets-audit
           path: /tmp/public-v1
           if-no-files-found: error
