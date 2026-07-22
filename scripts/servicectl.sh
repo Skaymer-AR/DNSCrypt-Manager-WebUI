@@ -11,10 +11,36 @@ _sc_json() {
     | sed 's/^"[^"]*"[[:space:]]*:[[:space:]]*//; s/^"//; s/"[[:space:]]*$//'
 }
 sc_mode_of() { sc_init; grep -m1 "^$1	" "$SC_STATE" 2>/dev/null | cut -f2; }
+# Modo EFECTIVO respetando expiracion: si 15m/1h ya vencio -> off.
+sc_effective_mode() {
+  sc_init; _l=$(grep -m1 "^$1	" "$SC_STATE" 2>/dev/null)
+  [ -n "$_l" ] || { echo off; return; }
+  _m=$(printf '%s' "$_l" | cut -f2); _exp=$(printf '%s' "$_l" | cut -f3)
+  case "$_exp" in
+    ''|0) echo "$_m" ;;                                   # until_reboot/permanent/sin expiry
+    *[!0-9]*) echo "$_m" ;;
+    *) if [ "$_exp" -gt "$(date +%s 2>/dev/null || echo 0)" ] 2>/dev/null; then echo "$_m"; else echo off; fi ;;
+  esac
+}
 # Extrae los dominios del control (soporta arrays JSON multilinea).
 _sc_domains() {
   awk 'BEGIN{f=0} /"domains"[[:space:]]*:/{f=1} f==1{print; if($0 ~ /\]/){exit}}' "$1" 2>/dev/null \
     | grep -oE '"[A-Za-z0-9_.*-]+"' | sed 's/"//g' | grep -v '^domains$'
+}
+# HOOK para el merge: dominios de TODOS los controles declarativos activos.
+# Emite dominios validos (una lista plana); el llamador hace sort -u y resta la
+# allowlist. Respeta expiracion (sc_effective_mode).
+sc_append_active() {
+  _dest="$1"; sc_init
+  [ -d "$SC_DIR" ] || return 0
+  for _f in "$SC_DIR"/*.json; do
+    [ -f "$_f" ] || continue
+    _id=$(basename "$_f" .json)
+    _m=$(sc_effective_mode "$_id")
+    [ "$_m" = off ] && continue
+    _sc_domains "$_f" | grep -E '^[a-z0-9.*-]+$' >> "$_dest" 2>/dev/null
+  done
+  return 0
 }
 service_list() {
   sc_init
@@ -59,6 +85,14 @@ service_set() {
     done
   fi
   command -v log_msg >/dev/null 2>&1 && log_msg "service $_id -> $_mode" 2>/dev/null
-  echo "service=$_id mode=$_mode expiry_epoch=$_exp"
+  # APLICAR DE VERDAD: recompilar blocked-names por el camino atomico con rollback.
+  # (sec_regen_and_reload: merge -> -check -> mv atomico -> restart -> rollback).
+  _applied=no
+  if command -v sec_regen_and_reload >/dev/null 2>&1; then
+    if sec_regen_and_reload >/dev/null 2>&1; then _applied=yes; else _applied=failed; fi
+  fi
+  echo "service=$_id mode=$_mode expiry_epoch=$_exp applied=$_applied"
   echo "note=OFF por defecto; no se borran tus listas manuales."
+  [ "$_applied" = failed ] && { echo "WARN: la recompilacion fallo; el estado quedo guardado pero la lista activa no cambio (rollback)." >&2; return 1; }
+  return 0
 }

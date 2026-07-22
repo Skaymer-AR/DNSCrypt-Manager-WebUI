@@ -55,7 +55,10 @@ captive_enter() {
   if [ "$_fc" = on ] && command -v cmd_set_flag >/dev/null 2>&1; then cmd_set_flag fail_closed 0 >/dev/null 2>&1; fi
   _cap_event "pausa de portal cautivo por ${_win}s (restore_at=$_until)"
   echo "captive=entered window_seconds=$_win restore_at_epoch=$_until"
-  echo "note=se restaurará automáticamente; usá 'captive restore' para volver ya."
+  echo "note=NO hay daemon: la restauracion automatica ocurre cuando se vuelve a"
+  echo "     consultar 'captive status' (o en el proximo arranque). Para volver ya"
+  echo "     mismo, corre 'captive restore'. Si nada consulta el estado, la pausa"
+  echo "     puede durar mas que la ventana; PANIC restaura todo en cualquier momento."
 }
 
 captive_restore() {
