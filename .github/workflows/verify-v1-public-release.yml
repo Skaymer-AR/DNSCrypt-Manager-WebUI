@@ -1,0 +1,123 @@
+name: Verify public DNSCrypt Manager v1.0.0
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/verify-v1-public-release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-public-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TAG: v1.0.0
+      EXPECTED_COMMIT: 7d07f20e6fe660fc909034acefebf653d3e94d8b
+      OFFICIAL_ARM64_SHA256: 940b650911cfa55cbc0544a9025ceb866101590a88031a90a7e1ca05f5781cbc
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout and resolve public tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download public stable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/public-v1
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" \
+            --json url,tagName,isDraft,isPrerelease,isLatest,targetCommitish,assets \
+            > /tmp/public-v1/release.json
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D /tmp/public-v1
+
+      - name: Verify release metadata and exact asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-list -n 1 "$TAG")" = "$EXPECTED_COMMIT"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/public-v1')
+          data = json.loads((root / 'release.json').read_text(encoding='utf-8'))
+          expected = {
+              'DNSCrypt-Manager-v1.0.0.zip',
+              'DNSCrypt-Manager-v1.0.0.zip.sha256',
+              'DNSCrypt-Manager-v1.0.0.bundle',
+              'DNSCrypt-Manager-v1.0.0.patch',
+              'DNSCrypt-Manager-v1.0.0-files.sha256',
+              'RELEASE_NOTES_v1.0.0_ES.md',
+              'RELEASE_NOTES_v1.0.0_EN.md',
+              'TEST_RESULTS_v1.0.0.md',
+              'ANDROID_USER_VALIDATION_v1.0.0.md',
+          }
+          names = {asset['name'] for asset in data['assets']}
+          assert data['tagName'] == 'v1.0.0', data
+          assert data['isDraft'] is False, data
+          assert data['isPrerelease'] is False, data
+          assert data['isLatest'] is True, data
+          assert names == expected, (names, expected)
+          disk = {p.name for p in root.iterdir() if p.name != 'release.json'}
+          assert disk == expected, (disk, expected)
+          print(data['url'])
+          PY
+
+      - name: Verify every public checksum and installable ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/public-v1
+          sha256sum -c DNSCrypt-Manager-v1.0.0-files.sha256
+          sha256sum -c DNSCrypt-Manager-v1.0.0.zip.sha256
+          unzip -tq DNSCrypt-Manager-v1.0.0.zip
+          unzip -p DNSCrypt-Manager-v1.0.0.zip module.prop | tr -d '\r' > module.prop.public
+          grep -qx 'id=dnscrypt_manager' module.prop.public
+          grep -qx 'version=v1.0.0' module.prop.public
+          grep -qx 'versionCode=10000' module.prop.public
+          grep -qx 'author=Skaymer AR' module.prop.public
+          if unzip -Z1 DNSCrypt-Manager-v1.0.0.zip \
+            | grep -Eq '^(tests|tools|dist|fixtures|bootstrap|release)/'; then
+            echo 'Development files leaked into public ZIP' >&2
+            exit 1
+          fi
+          unzip -p DNSCrypt-Manager-v1.0.0.zip bin/arm64/dnscrypt-proxy \
+            | sha256sum \
+            | grep -q "^$OFFICIAL_ARM64_SHA256  -$"
+          git bundle verify DNSCrypt-Manager-v1.0.0.bundle
+
+      - name: Write independent verification report
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/public-v1
+          zip_sha="$(sha256sum DNSCrypt-Manager-v1.0.0.zip | awk '{print $1}')"
+          cat > PUBLIC_RELEASE_VERIFICATION.txt <<EOF
+          DNSCrypt Manager v1.0.0 public release verification
+          tag=$TAG
+          commit=$EXPECTED_COMMIT
+          asset_count=9
+          installable_zip_sha256=$zip_sha
+          arm64_binary_sha256=$OFFICIAL_ARM64_SHA256
+          draft=false
+          prerelease=false
+          latest=true
+          checksums=verified
+          zip_integrity=verified
+          result=PASS
+          EOF
+          cat PUBLIC_RELEASE_VERIFICATION.txt
+
+      - name: Preserve the exact public assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: DNSCrypt-Manager-v1.0.0-public-assets-verified
+          path: /tmp/public-v1
+          if-no-files-found: error
