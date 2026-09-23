@@ -1,0 +1,66 @@
+name: Publish archived DNSCrypt Manager v1.1.0 RC6
+
+on:
+  push:
+    branches: [archive/v1.1.0-rc6]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-dnscrypt-manager-v1.1.0-rc6
+  cancel-in-progress: false
+
+jobs:
+  publish-archive:
+    if: github.repository == 'Skaymer-AR/DNSCrypt-Manager-WebUI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TAG: v1.1.0-rc6
+      PACKAGE: release/archive/v1.1.0-rc6/DNSCrypt-Manager-v1.1.0-rc6.zip
+      CHECKSUM: release/archive/v1.1.0-rc6/DNSCrypt-Manager-v1.1.0-rc6.zip.sha256
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout archived candidate and source base
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate preserved RC6 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$PACKAGE"
+          test -s "$CHECKSUM"
+          (cd "$(dirname "$PACKAGE")" && sha256sum -c "$(basename "$CHECKSUM")")
+          unzip -tq "$PACKAGE"
+          unzip -p "$PACKAGE" module.prop | tr -d '\r' | grep -qx 'version=v1.1.0-rc6'
+          unzip -p "$PACKAGE" module.prop | tr -d '\r' | grep -qx 'versionCode=11006'
+
+      - name: Publish RC6 as a historical prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to replace the archived binary."
+            exit 1
+          fi
+          gh release create "$TAG" "$PACKAGE" "$CHECKSUM" \
+            -R "$GITHUB_REPOSITORY" \
+            --target v1.1.0 \
+            --title 'DNSCrypt Manager v1.1.0 RC6 (archived package)' \
+            --notes-file release/archive/v1.1.0-rc6/README.md \
+            --prerelease
+
+      - name: Download and verify RC6 assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rc6-verify"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D "$RUNNER_TEMP/rc6-verify"
+          cd "$RUNNER_TEMP/rc6-verify"
+          sha256sum -c "$(basename "$CHECKSUM")"
+          unzip -tq "$(basename "$PACKAGE")"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')" = 'v1.1.0'
