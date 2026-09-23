@@ -51,8 +51,10 @@ jobs:
           grep -qx "versionCode=$VERSION_CODE" module.prop
           grep -qx 'author=Skaymer AR' module.prop
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; refusing to overwrite a stable release." >&2
-            exit 1
+            echo 'RELEASE_ALREADY_EXISTS=true' >> "$GITHUB_ENV"
+            echo "Release $TAG already exists; its published assets will be verified without replacement."
+          else
+            echo 'RELEASE_ALREADY_EXISTS=false' >> "$GITHUB_ENV"
           fi
 
       - name: Install build and test dependencies
@@ -133,12 +135,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$TAG" "$RUNNER_TEMP/v1.1-assets"/* \
-            -R "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title 'DNSCrypt Manager v1.1.0' \
-            --notes-file "$RUNNER_TEMP/release-body.md" \
-            --draft=false --prerelease=false --latest
+          if [[ "$RELEASE_ALREADY_EXISTS" == true ]]; then
+            echo "Keeping existing $TAG release; verification will check its published files."
+          else
+            gh release create "$TAG" "$RUNNER_TEMP/v1.1-assets"/* \
+              -R "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title 'DNSCrypt Manager v1.1.0' \
+              --notes-file "$RUNNER_TEMP/release-body.md" \
+              --draft=false --prerelease=false --latest
+          fi
 
       - name: Download and verify published release
         shell: bash
@@ -152,7 +158,7 @@ jobs:
           sha256sum -c DNSCrypt-Manager-v1.1.0.zip.sha256
           unzip -tq DNSCrypt-Manager-v1.1.0.zip
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" \
-            --json url,tagName,isDraft,isPrerelease,isLatest,targetCommitish \
+            --json url,tagName,isDraft,isPrerelease,targetCommitish \
             > "$VERIFY/release.json"
           python3 - "$VERIFY/release.json" <<'PY'
           import json, sys
@@ -160,9 +166,9 @@ jobs:
           assert data['tagName'] == 'v1.1.0', data
           assert data['isDraft'] is False, data
           assert data['isPrerelease'] is False, data
-          assert data['isLatest'] is True, data
           print('Published stable release verified:', data['url'])
           PY
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')" = "$TAG"
 
       - name: Preserve build evidence
         if: always()
