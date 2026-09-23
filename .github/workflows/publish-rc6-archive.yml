@@ -49,7 +49,7 @@ jobs:
           fi
           gh release create "$TAG" "$PACKAGE" "$CHECKSUM" \
             -R "$GITHUB_REPOSITORY" \
-            --target v1.1.0 \
+            --target 89ca5d66d5608b3b9d375846c9a812ca393af2a9 \
             --title 'DNSCrypt Manager v1.1.0 RC6 (archived package)' \
             --notes-file release/archive/v1.1.0-rc6/README.md \
             --prerelease
