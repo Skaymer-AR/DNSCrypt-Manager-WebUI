@@ -106,6 +106,18 @@ sed -e "s/127\.0\.0\.1:5354/127.0.0.1:$TEST_PORT/" -e "s/\[::1\]:5354/[::1]:$TES
   "$SRC_ROOT/config/dnscrypt-proxy.toml" > "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml"
 cp "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml" "$DNSCRYPT_TEST_DATA_DIR/config/defaults/dnscrypt-proxy.toml"
 
+echo ""
+echo "=== Preparando configuración existente (schema 3) ==="
+if ! "$SH_BIN" "$DNSCRYPT_TEST_MODDIR/system/bin/dnscrypt-manager" migrate >"$SCRATCH/migrate.log" 2>&1; then
+  cat "$SCRATCH/migrate.log" >&2
+  echo "FATAL: fallo la migracion del entorno de prueba." >&2
+  exit 99
+fi
+cat "$SCRATCH/migrate.log"
+# Regresión de la captura de Android: datos migrados pero índice ausente.
+# La WebUI debe recuperarlo POR SÍ MISMA al abrir Listas, sin otro migrate.
+mv "$DNSCRYPT_TEST_DATA_DIR/catalog/blocklists.index.tsv" "$SCRATCH/index-before-webui.tsv"
+
 echo
 echo "=== Corriendo el harness DOM (grupo de procesos propio + timeout defensivo) ==="
 setsid timeout --kill-after=5 90 "$NODE_BIN" "$SRC_ROOT/tests/fixtures/webui-harness.cjs" >"$SCRATCH/harness-out.txt" 2>&1 &
@@ -117,6 +129,12 @@ sleep 0.15
 kill -KILL -- "-$HARNESS_GRP" 2>/dev/null; wait "$HARNESS_GRP" 2>/dev/null
 HARNESS_GRP=""
 cat "$SCRATCH/harness-out.txt"
+
+if [ "$RC" -ne 0 ]; then exit "$RC"; fi
+echo
+echo "=== Pruebas deterministas de modo y filtros del catálogo ==="
+"$NODE_BIN" "$SRC_ROOT/tests/smoke-test-catalog-ui.cjs" || exit 1
+"$NODE_BIN" "$SRC_ROOT/tests/smoke-test-source-ui-v030.cjs" || exit 1
 
 OUR_PID="$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null)"
 

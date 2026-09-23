@@ -58,6 +58,8 @@ function noUnquotedMeta(cmd) {
   console.log('== ID valido (comillado) ==');
   await acc('id valido', () => DCM.runCatalogEnable('hagezi_multi_pro'), "catalog enable 'hagezi_multi_pro'");
   await acc('custom guion', () => DCM.runCatalogEnable('custom_mi-lista'), "'custom_mi-lista'");
+  await acc('descarga global usa un comando fijo con confirmación', () => DCM.runCatalogDownloadAllStart(), 'catalog download-all --confirmed');
+  await acc('progreso global usa un comando fijo de solo lectura', () => DCM.runCatalogDownloadAllStatus(), 'catalog download-all status --json');
 
   console.log('== URLs maliciosas ==');
   await rej('javascript', () => DCM.runCustomAdd('javascript:alert(1)'));
@@ -94,6 +96,8 @@ function noUnquotedMeta(cmd) {
   console.log('== Sin metacaracteres sin comillar ==');
   const probes = [
     () => DCM.runCatalogEnable('hagezi_multi_pro'),
+    () => DCM.runCatalogDownloadAllStart(),
+    () => DCM.runCatalogDownloadAllStatus(),
     () => DCM.runCustomAdd('https://ejemplo.net/l.txt?v=1&x=2'),
     () => DCM.runBindhostsAnalyze('/data/adb/bindhosts'),
     () => DCM.runServiceSet('youtube_no_history', 'boot')

@@ -10,9 +10,10 @@ Compatible con **KernelSU**, **KernelSU Next**, **APatch** (WebUI completa) y **
 
 ## Estado del proyecto
 
-**v1.0.0 es la primera versión estable.** El alcance estable se concentra en las
-funciones implementadas, probadas y utilizadas en Android real. Anonymized DNSCrypt
-y ODoH permanecen fuera de la interfaz pública hasta contar con validación suficiente.
+**v1.1.0 es la versión estable actual.** Amplía v1.0.0 con un catálogo de fuentes
+de bloqueo DNS auditables, descargables y reversibles. La base DNSCrypt estable se
+conserva; Anonymized DNSCrypt y ODoH siguen fuera de la interfaz pública hasta contar
+con validación suficiente.
 
 Incluye:
 
@@ -30,6 +31,101 @@ Incluye:
 - Comandos de emergencia (`panic`, `disable`, `restore-network`) — **PANIC siempre restaura la red**.
 - Pruebas aisladas de sintaxis, CLI, WebUI y **seguridad**.
 
+### Catálogo de blocklists DNS
+
+El catálogo estable usa fuentes upstream como datos descargados por HTTPS. Cada fuente se puede
+activar o desactivar por separado; aparecer en el catálogo no la activa. El
+parser admite listas de dominios, formato hosts y reglas AdBlock simples que
+se pueden convertir sin cambiar su significado DNS. Rechaza URLs, IP-only,
+localhost, dominios demasiado amplios y reglas AdBlock con paths, opciones o
+semántica que DNS no puede representar.
+
+Los nombres se normalizan, deduplican y quedan asociados a la fuente y a las
+categorías declaradas por esa fuente. Una etiqueta como `spyware` describe la
+clasificación del upstream; no confirma que cada dominio sea spyware. Las
+blocklists pueden producir falsos positivos, no sustituyen un antivirus y no
+garantizan detectar todas las amenazas. La allowlist personal de DNSCrypt
+Manager prevalece sobre los filtros DNS.
+
+Las fuentes `LICENSE_UNKNOWN` pueden descargarse directamente del upstream
+mediante una acción explícita; el contenido no viene empaquetado. Descargar una
+fuente no la activa: permanece apagada hasta que la selecciones y apliques. La
+etiqueta no certifica permiso de redistribución del upstream.
+
+El motor admite hasta 5 millones de dominios válidos por fuente, 256 MiB por
+feed, 5 millones de dominios únicos en el catálogo activo, 10 millones de
+entradas activas incluyendo duplicados y 1 GiB de cachés de fuentes activas. El
+archivo DNS final admite hasta 5 millones de dominios tras fusionar el catálogo,
+las listas legacy y los controles activos. La compilación pide al menos 512 MiB
+libres para staging y rollback. Una respuesta rota, vacía, HTML/JSON inesperado,
+HTTP fallido o una caída brusca de conteo conserva la caché verificada anterior.
+El motor valida la configuración, reemplaza los archivos activos de forma
+atómica y revierte la actualización si falla el reinicio o la prueba DNS.
+
+El límite de 5.000 líneas aplica solo a importar un archivo de allowlist; no es
+el máximo de dominios bloqueados.
+
+En **Listas** podés usar **Descargar todas las fuentes** para bajar y validar en
+segundo plano todas las fuentes compatibles del catálogo, con hasta cuatro
+descargas simultáneas (menos si el espacio libre lo requiere). El worker usa
+prioridad de CPU reducida y reconstruye el manifiesto una sola vez al finalizar
+para que el resto del módulo siga respondiendo. Conserva el último caché válido
+ante errores y no activa fuentes nuevas ni cambia el archivo DNS activo. Durante
+descargas grandes la WebUI puede responder lenta o parecer congelada; el trabajo
+se ejecuta en segundo plano, con prioridad reducida, y la lista DNS activa se
+mantiene hasta una compilación explícita. Las
+fuentes que el catálogo marca como rotas, archivadas o que requieren revisión
+técnica se omiten. La tarea conserva 512 MiB libres como reserva. Al terminar,
+seleccioná las que quieras y usá **Aplicar cambios**; si ya había fuentes
+activas cuya caché se actualizó, usá **Compilar** para llevar esos cambios al
+archivo activo.
+
+El módulo **no edita `/system/etc/hosts`**. Genera `blocked-names.txt` y lo
+configura en DNSCrypt Proxy como `[blocked_names] / blocked_names_file`; cada
+consulta DNS pasa por el motor del proxy y se compara con esos nombres. La
+allowlist personal se entrega como `[allowed_names]` y tiene precedencia sobre
+el bloqueo. Es filtrado DNS local, no un archivo hosts con redirecciones ni una
+VPN adicional.
+
+La actualización se inicia manualmente. En **Listas → Catálogo de listas** podés
+abrir los acordeones **Seguridad**, **Privacidad** y **Control parental** (más las
+fuentes propias y las que Rethink no asigna a un grupo). El catálogo empieza
+colapsado y dibuja como máximo 15 filas por página del grupo abierto. Podés buscar
+una fuente, seleccionar varias y agregarlas juntas; marcar casillas no descarga
+ni activa nada. La WebUI muestra estado, dominios validados, caché y último éxito.
+No hace polling rutinario; consulta el progreso cada cinco segundos solo mientras
+la descarga global solicitada por el usuario está en curso.
+Las solicitudes solo descargan feeds públicos: el motor no envía la lista de
+apps, el historial DNS ni los dominios consultados. Ver
+[`BLOCKLIST_SOURCES.md`](BLOCKLIST_SOURCES.md) y el [informe de auditoría de
+Rethink](docs/RETHINK_BLOCKLIST_AUDIT_ES.md) para licencias, procedencia y
+límites.
+
+Las categorías se muestran al abrir **Listas**, sin necesitar una búsqueda.
+El índice local de metadatos se sincroniza en la instalación/arranque aunque la
+versión del esquema ya esté al día; esta operación no cambia las fuentes activas,
+la allowlist, los bloqueos manuales ni la configuración DNS.
+
+Los nueve controles existentes de privacidad por servicio permanecen
+independientes y en OFF por defecto; esta fase no agrega controles redundantes.
+
+```sh
+su -c 'dnscrypt-manager catalog list --recommended'
+su -c 'dnscrypt-manager catalog info hagezi_multi_pro'
+su -c 'dnscrypt-manager catalog download-all --confirmed' # descarga validada, no activa fuentes
+su -c 'dnscrypt-manager catalog download-all status --json'
+su -c 'dnscrypt-manager catalog enable hagezi_multi_pro'  # descarga, valida y compila
+su -c 'dnscrypt-manager catalog update enabled'           # actualiza fuentes activas
+su -c 'dnscrypt-manager catalog disable hagezi_multi_pro'
+su -c 'dnscrypt-manager catalog rollback hagezi_multi_pro'
+su -c 'dnscrypt-manager allowlist add example.org'
+su -c 'dnscrypt-manager catalog manifest'
+```
+
+`catalog rollback <id>` recupera la última copia validada de esa fuente. La
+allowlist se mantiene en `allowlist.txt`; se puede consultar y respaldar con
+`dnscrypt-manager allowlist list` y `dnscrypt-manager allowlist export`.
+
 Por defecto la **redirección global** y el **fail-closed** vienen **DESACTIVADOS**;
 la protección de malware/phishing/estafas se activa **después de que las listas se
 validen**. Probado con éxito en un **Motorola Edge 40 Pro con Android 16**, sin
@@ -40,8 +136,8 @@ pérdida de Wi‑Fi, red móvil ni conectividad.
 El módulo instalable se publica en la sección **Releases** del repositorio:
 
 ```text
-DNSCrypt-Manager-v1.0.0.zip
-DNSCrypt-Manager-v1.0.0.zip.sha256
+DNSCrypt-Manager-v1.1.0.zip
+DNSCrypt-Manager-v1.1.0.zip.sha256
 ```
 
 Verificá siempre el ZIP con el archivo `.sha256` que acompaña a la misma release. El workflow de publicación reconstruye el módulo desde el código fuente, descarga y valida el binario oficial ARM64 de `dnscrypt-proxy` y genera un checksum nuevo para ese build exacto.
@@ -85,6 +181,7 @@ su -c dnscrypt-manager disable
 bash tests/run-syntax-checks.sh
 bash tests/smoke-test-cli.sh
 bash tests/smoke-test-webui.sh
+bash tests/smoke-test-blocklist-engine.sh
 ```
 
 ## Funciones visuales actuales

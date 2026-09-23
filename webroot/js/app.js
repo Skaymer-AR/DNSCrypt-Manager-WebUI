@@ -36,6 +36,8 @@ const STR = {
 let POLL_MS = 4000;
 let pollTimer = null;
 let busy = false; // evita acciones superpuestas mientras hay una en curso
+const UI_MODE_KEY = 'dcm_ui_mode';
+let uiMode = 'simple';
 
 /* --------------------------- utilidades DOM --------------------------- */
 const $ = (id) => document.getElementById(id);
@@ -65,6 +67,31 @@ function toast(msg, kind) {
 function setBusy(v) {
   busy = v;
   document.querySelectorAll('button').forEach((b) => { b.disabled = v; });
+}
+
+function setUiMode(mode, persist) {
+  uiMode = mode === 'advanced' ? 'advanced' : 'simple';
+  if (document.body && document.body.setAttribute) document.body.setAttribute('data-ui-mode', uiMode);
+  const simple = $('uiModeSimple');
+  const advanced = $('uiModeAdvanced');
+  if (simple) simple.setAttribute('aria-pressed', uiMode === 'simple' ? 'true' : 'false');
+  if (advanced) advanced.setAttribute('aria-pressed', uiMode === 'advanced' ? 'true' : 'false');
+  if (persist !== false) {
+    try { window.localStorage.setItem(UI_MODE_KEY, uiMode); } catch (_) {}
+  }
+  if (typeof catRenderFilterOptions === 'function' && $('catFilterSheet') && !$('catFilterSheet').hidden) {
+    catRenderFilterOptions();
+  }
+}
+
+function wireUiMode() {
+  let stored = '';
+  try { stored = window.localStorage.getItem(UI_MODE_KEY) || ''; } catch (_) {}
+  setUiMode(stored === 'advanced' ? 'advanced' : 'simple', false);
+  const simple = $('uiModeSimple');
+  const advanced = $('uiModeAdvanced');
+  if (simple) simple.addEventListener('click', () => setUiMode('simple'));
+  if (advanced) advanced.addEventListener('click', () => setUiMode('advanced'));
 }
 
 /* ------------------------------ estado -------------------------------- */
@@ -999,102 +1026,738 @@ async function initSecurity() {
  *  RC2 — Catalogo, fuentes personalizadas, BindHosts, controles de servicio.
  *  Paginacion del lado cliente (no se renderizan miles de tarjetas de una).
  * ======================================================================== */
-let catCache = [];        // entradas del catalogo (cacheadas del JSON)
-let catView = 'recommended';
-let catPage = 0;
+let catCache = [];        // metadata del catalogo; los DOM de listas se crean por acordeon
+// Todos los encabezados visibles, filas desmontadas hasta abrir una categoría.
+let catOpenGroup = '';
+let catPageByGroup = Object.create(null);
+let catDownloadPollTimer = null;
+let catDownloadPollInFlight = false;
+let catDownloadRefreshJobId = '';
+let catLoaded = false;
+let catLoading = null;
+let catAllLoading = null;
+let catCliReady = false;
+let catView = 'all';
+let catGroupCounts = Object.create(null);
+let catGroupActive = Object.create(null);
+const catLoadedGroups = new Set();
+const catGroupLoading = Object.create(null);
+const catSelection = new Set();
+const catDisableSelection = new Set();
+const catFilterGroups = new Set();
+const catFilterSubgroups = new Set();
+const catFilterPacks = new Set();
+let catFilterDraftGroups = new Set();
+let catFilterDraftSubgroups = new Set();
+let catFilterDraftPacks = new Set();
 const CAT_PAGE_SIZE = 15;
+const CAT_GROUP_DEFS = [
+  { key: 'Security', label: 'Seguridad', description: 'Malware, phishing, estafas y otras amenazas.' },
+  { key: 'Privacy', label: 'Privacidad', description: 'Rastreadores, telemetría, analítica y publicidad.' },
+  { key: 'ParentalControl', label: 'Control parental', description: 'Fuentes agrupadas por Rethink para control familiar.' },
+  { key: 'dcm', label: 'Fuentes propias de DNSCrypt Manager', description: 'Controles y listas mantenidas por este módulo.' },
+  { key: 'rethink_unassigned', label: 'Sin grupo en el catálogo Rethink', description: 'Fuentes oficiales sin grupo declarado.' }
+];
+
+function catCategories(e) {
+  return String(e.categories || '').split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+}
+function catGroupKey(e) {
+  if (e.source_name) return e.source_group || 'rethink_unassigned';
+  return 'dcm';
+}
+function catFacetTokens(value) {
+  const values = Array.isArray(value) ? value : String(value || '').split(/[|,]/);
+  return values.map((value) => String(value || '').trim()).filter(Boolean);
+}
+function catPacks(e) { return catFacetTokens(e && e.source_packs); }
+function catSubgroups(e) { return catFacetTokens(e && e.source_subgroup); }
+function catNormalizedSet(set) { return new Set(Array.from(set).map((value) => String(value).toLowerCase())); }
+function catFiltersActive() {
+  return catFilterGroups.size > 0 || catFilterSubgroups.size > 0 || catFilterPacks.size > 0;
+}
+function catIsNarrowed() {
+  return catFiltersActive() || catView === 'selected' || Boolean((($('catSearch') || {}).value || '').trim());
+}
+function catEntryMatchesFilters(e) {
+  const groups = catNormalizedSet(catFilterGroups);
+  const subgroups = catNormalizedSet(catFilterSubgroups);
+  const packs = catNormalizedSet(catFilterPacks);
+  if (groups.size && !groups.has(catGroupKey(e).toLowerCase())) return false;
+  if (subgroups.size && !catSubgroups(e).some((value) => subgroups.has(value.toLowerCase()))) return false;
+  if (packs.size && !catPacks(e).some((value) => packs.has(value.toLowerCase()))) return false;
+  return true;
+}
+function catDisplayName(e) { return e.source_name || e.name; }
+function catCanAdd(e) {
+  return !e.enabled && !e.activation_blocked && !e.archived &&
+    e.upstream_status !== 'broken' && e.upstream_status !== 'archived';
+}
+function catStateLabel(e) {
+  const failed = e.runtime_status === 'download_failed' || e.runtime_status === 'validation_failed';
+  const hasCache = Number(e.cache_domains || 0) > 0;
+  if (failed) return hasCache ? (e.enabled ? 'ACTIVA · error, usa caché' : 'ERROR · usa caché') : 'ERROR · sin caché';
+  if (e.enabled) return 'ACTIVA';
+  if (e.upstream_status === 'broken') return 'ROTA';
+  if (e.archived || e.upstream_status === 'archived') return 'ARCHIVADA';
+  if (e.activation_blocked) return 'REQUIERE REVISIÓN';
+  if (/^(|unknown|license_unknown)$/i.test(String(e.license || ''))) return 'LICENSE_UNKNOWN';
+  if (e.runtime_status === 'verified') return 'VERIFICADA';
+  if (e.runtime_status === 'never_checked') return e.upstream_status === 'legacy' ? 'LEGACY' : 'SIN DESCARGAR';
+  return e.runtime_status || e.upstream_status || 'sin verificar';
+}
 
 async function catLoad() {
-  const r = await DCM.runCatalogListJson();
-  if (r.errno !== 0) { setText('catResults', backendError(r, 'catalog list')); return false; }
+  const r = await DCM.runCatalogGroupsJson();
+  if (r.errno !== 0) { setText('catResults', backendError(r, 'catalog groups')); return false; }
   const d = safeParse(r.stdout);
-  if (!d || !d.entries) { setText('catResults', 'Respuesta no valida del catalogo.'); return false; }
-  catCache = d.entries;
+  if (!d || !Array.isArray(d.groups)) { setText('catResults', 'Respuesta no valida del catalogo.'); return false; }
+  catGroupCounts = Object.create(null);
+  catGroupActive = Object.create(null);
+  d.groups.forEach((g) => {
+    if (!g || !g.key) return;
+    const key = g.key === 'RethinkUnassigned' ? 'rethink_unassigned' : String(g.key);
+    catGroupCounts[key] = Number(g.count || 0);
+    catGroupActive[key] = Number(g.active || 0);
+  });
+  catLoaded = true;
   return true;
+}
+
+async function catLoadGroup(groupKey, force) {
+  if (!force && catLoadedGroups.has(groupKey)) return true;
+  if (!force && catGroupLoading[groupKey]) return catGroupLoading[groupKey];
+  const backendKey = groupKey === 'rethink_unassigned' ? 'RethinkUnassigned' : groupKey;
+  if (!DCM.runCatalogGroupJson) return false;
+  const task = (async () => {
+    const r = await DCM.runCatalogGroupJson(backendKey);
+    if (r.errno !== 0) {
+      setText('catResults', backendError(r, 'catalog list'));
+      return false;
+    }
+    const d = safeParse(r.stdout);
+    if (!d || !Array.isArray(d.entries)) {
+      setText('catResults', 'Respuesta no valida del catalogo.');
+      return false;
+    }
+    catCache = catCache.filter((e) => catGroupKey(e) !== groupKey).concat(d.entries);
+    catLoadedGroups.add(groupKey);
+    return true;
+  })();
+  catGroupLoading[groupKey] = task;
+  try { return await task; }
+  finally { delete catGroupLoading[groupKey]; }
+}
+
+async function catReload() {
+  catCache = [];
+  catLoadedGroups.clear();
+  const ok = await catLoad();
+  if (!ok) return false;
+  if (catOpenGroup) await catLoadGroup(catOpenGroup);
+  return true;
+}
+
+function catEnsureGroup(groupKey) {
+  if (catLoadedGroups.has(groupKey) || catGroupLoading[groupKey]) return;
+  catLoadGroup(groupKey).then((ok) => {
+    if (ok) catRender();
+  });
+}
+
+async function catLoadAllGroups() {
+  if (catAllLoading) return catAllLoading;
+  catAllLoading = (async () => {
+    for (const group of CAT_GROUP_DEFS) {
+      if ((catGroupCounts[group.key] || 0) > 0 && !(await catLoadGroup(group.key))) return false;
+    }
+    return true;
+  })();
+  try {
+    const ok = await catAllLoading;
+    catRender();
+    return ok;
+  } finally { catAllLoading = null; }
 }
 
 function catFiltered() {
   const q = (($('catSearch') || {}).value || '').trim().toLowerCase();
   return catCache.filter((e) => {
-    if (catView === 'recommended' && !e.recommended) return false;
-    if (catView === 'enabled' && !e.enabled) return false;
+    if (!catEntryMatchesFilters(e)) return false;
+    if (catView === 'selected' && !e.enabled && !catSelection.has(e.id)) return false;
     if (q) {
-      const hay = (e.id + ' ' + e.name + ' ' + e.maintainer + ' ' + e.categories).toLowerCase();
+      const hay = [e.id, e.name, e.source_name, e.maintainer, e.source_subgroup,
+        e.source_group, e.source_packs, e.source_formats, e.categories].join(' ').toLowerCase();
       if (hay.indexOf(q) < 0) return false;
     }
     return true;
   });
 }
 
+function catFacetValues(kind) {
+  const map = Object.create(null);
+  if (kind === 'group') {
+    CAT_GROUP_DEFS.forEach((group) => {
+      const count = catCache.filter((e) => catGroupKey(e) === group.key).length;
+      if (count) map[group.key.toLowerCase()] = { key: group.key.toLowerCase(), label: group.label, count };
+    });
+  } else {
+    catCache.forEach((e) => {
+      const values = kind === 'subgroup' ? catSubgroups(e) : catPacks(e);
+      values.forEach((label) => {
+        const key = label.toLowerCase();
+        if (!map[key]) map[key] = { key, label, count: 0 };
+        map[key].count++;
+      });
+    });
+  }
+  return Object.keys(map).map((key) => map[key]).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function catRenderFacet(parent, title, values, selection, facetName) {
+  if (!values.length) return;
+  const section = document.createElement('section'); section.className = 'filter-facet';
+  const heading = document.createElement('div'); heading.className = 'filter-facet-title'; heading.textContent = title;
+  const chips = document.createElement('div'); chips.className = 'filter-chips';
+  values.forEach((value) => {
+    const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'filter-chip';
+    const selected = selection.has(value.key);
+    chip.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    chip.setAttribute('data-filter-facet', facetName);
+    chip.setAttribute('data-filter-value', value.key);
+    const label = document.createElement('span'); label.textContent = value.label;
+    const count = document.createElement('span'); count.className = 'filter-chip-count'; count.textContent = String(value.count);
+    chip.appendChild(label); chip.appendChild(count);
+    chip.addEventListener('click', () => {
+      const current = facetName === 'group' ? catFilterDraftGroups :
+        (facetName === 'subgroup' ? catFilterDraftSubgroups : catFilterDraftPacks);
+      if (current.has(value.key)) current.delete(value.key); else current.add(value.key);
+      catRenderFilterOptions();
+    });
+    chips.appendChild(chip);
+  });
+  section.appendChild(heading); section.appendChild(chips); parent.appendChild(section);
+}
+
+function catRenderFilterOptions() {
+  const box = $('catFilterOptions');
+  const status = $('catFilterStatus');
+  if (!box) return;
+  box.textContent = '';
+  if (!catLoaded || !catLoadedGroups.size || catAllLoading) {
+    if (status && !catAllLoading && !catLoaded) status.textContent = 'Cargando opciones del catálogo…';
+    return;
+  }
+  catRenderFacet(box, 'Categoría', catFacetValues('group'), catFilterDraftGroups, 'group');
+  catRenderFacet(box, 'Subgrupo', catFacetValues('subgroup'), catFilterDraftSubgroups, 'subgroup');
+  catRenderFacet(box, 'Etiquetas del catálogo', catFacetValues('pack'), catFilterDraftPacks, 'pack');
+  if (status) status.textContent = 'Filtros tomados de los grupos y etiquetas originales de las fuentes.';
+}
+
+function catOpenFilterSheet() {
+  const sheet = $('catFilterSheet');
+  const backdrop = $('catFilterBackdrop');
+  if (!sheet || !backdrop) return;
+  catFilterDraftGroups = new Set(catFilterGroups);
+  catFilterDraftSubgroups = new Set(catFilterSubgroups);
+  catFilterDraftPacks = new Set(catFilterPacks);
+  sheet.hidden = false; sheet.setAttribute('aria-hidden', 'false');
+  backdrop.hidden = false;
+  if (document.body && document.body.classList) document.body.classList.add('filter-open');
+  const opener = $('btnCatFilter');
+  if (opener) opener.setAttribute('aria-expanded', 'true');
+  const status = $('catFilterStatus');
+  if (!catCliReady) {
+    if (status) status.textContent = 'Esperando acceso al catálogo del módulo…';
+    return;
+  }
+  if (status) status.textContent = 'Cargando opciones del catálogo…';
+  catRenderFilterOptions();
+  const loading = catLoaded ? catLoadAllGroups() : catRefreshAndRender().then((ready) => ready ? catLoadAllGroups() : false);
+  loading.then((ok) => {
+    if (sheet.hidden) return;
+    if (ok) catRenderFilterOptions();
+    else if (status) status.textContent = 'No se pudieron leer todas las fuentes. Cerrá y volvé a intentar.';
+  });
+  const close = $('btnCatFilterClose');
+  if (close && close.focus) close.focus();
+}
+
+function catCloseFilterSheet(restoreFocus) {
+  const sheet = $('catFilterSheet');
+  const backdrop = $('catFilterBackdrop');
+  if (sheet) { sheet.hidden = true; sheet.setAttribute('aria-hidden', 'true'); }
+  if (backdrop) backdrop.hidden = true;
+  if (document.body && document.body.classList) document.body.classList.remove('filter-open');
+  const opener = $('btnCatFilter');
+  if (opener) opener.setAttribute('aria-expanded', 'false');
+  if (restoreFocus !== false && opener && opener.focus) opener.focus();
+}
+
+function catApplyFilterDraft() {
+  catFilterGroups.clear(); catFilterDraftGroups.forEach((value) => catFilterGroups.add(value));
+  catFilterSubgroups.clear(); catFilterDraftSubgroups.forEach((value) => catFilterSubgroups.add(value));
+  catFilterPacks.clear(); catFilterDraftPacks.forEach((value) => catFilterPacks.add(value));
+  catPageByGroup = Object.create(null);
+  catCloseFilterSheet(true);
+  catRender();
+}
+
+function catClearFilterDraft() {
+  catFilterDraftGroups.clear(); catFilterDraftSubgroups.clear(); catFilterDraftPacks.clear();
+  catRenderFilterOptions();
+}
+
+function catRenderActiveFilters() {
+  const box = $('catActiveFilters');
+  const badge = $('catFilterBadge');
+  const count = catFilterGroups.size + catFilterSubgroups.size + catFilterPacks.size;
+  if (badge) { badge.textContent = String(count); badge.hidden = count === 0; }
+  if (!box) return;
+  box.textContent = '';
+  box.hidden = count === 0 && catView === 'all';
+  if (count) {
+    const summary = document.createElement('span'); summary.textContent = count + ' filtro(s) aplicado(s)'; box.appendChild(summary);
+    const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'small'; clear.textContent = 'Quitar filtros';
+    clear.addEventListener('click', () => {
+      catFilterGroups.clear(); catFilterSubgroups.clear(); catFilterPacks.clear();
+      catPageByGroup = Object.create(null); catRender();
+    });
+    box.appendChild(clear);
+  } else if (catView === 'selected') {
+    const summary = document.createElement('span'); summary.textContent = 'Mostrando fuentes seleccionadas'; box.appendChild(summary);
+  }
+}
+
+function catSetView(view) {
+  catView = view === 'selected' ? 'selected' : 'all';
+  const all = $('btnCatAll'); const selected = $('btnCatSelected');
+  if (all) all.setAttribute('aria-pressed', catView === 'all' ? 'true' : 'false');
+  if (selected) selected.setAttribute('aria-pressed', catView === 'selected' ? 'true' : 'false');
+  catPageByGroup = Object.create(null);
+  catRender();
+  if (catView === 'selected' && catLoaded && !catLoadedGroups.size) catLoadAllGroups();
+  else if (catView === 'selected' && catLoadedGroups.size < CAT_GROUP_DEFS.filter((group) => catGroupCounts[group.key] > 0).length) catLoadAllGroups();
+}
+
+function catPendingCount() { return catSelection.size + catDisableSelection.size; }
+function catEffectiveEnabled(e) {
+  if (e.enabled) return !catDisableSelection.has(e.id);
+  return catSelection.has(e.id);
+}
+function catStageGroup(groupKey, wantEnabled) {
+  const pool = catIsNarrowed() ? catFiltered() : catCache;
+  const entries = pool.filter((e) => catGroupKey(e) === groupKey);
+  entries.forEach((e) => {
+    if (!e.enabled && !catCanAdd(e)) return;
+    if (wantEnabled) {
+      if (e.enabled) catDisableSelection.delete(e.id);
+      else catSelection.add(e.id);
+    } else {
+      if (e.enabled) catDisableSelection.add(e.id);
+      else catSelection.delete(e.id);
+    }
+  });
+  catRender();
+}
+async function catToggleGroupSelection(groupKey, wantEnabled) {
+  if (busy) return;
+  if (!catLoadedGroups.has(groupKey)) {
+    setText('catApplyStatus', 'Cargando las listas de esta categoría…');
+    const ok = await catLoadGroup(groupKey);
+    if (!ok) return;
+  }
+  catStageGroup(groupKey, wantEnabled);
+}
+
+function catRenderSelectionControls() {
+  const n = catPendingCount();
+  const add = $('btnCatAddSelected');
+  const clear = $('btnCatClearSelection');
+  if (add) {
+    add.textContent = 'Aplicar cambios (' + n + ')';
+    add.disabled = busy || n === 0;
+  }
+  if (clear) clear.disabled = busy || n === 0;
+  setText('catSelectionStatus', n ? n + ' fuente(s) preparada(s). Se aplicarán al confirmar.' :
+    'No hay fuentes seleccionadas. Marcar una casilla todavía no activa ni desactiva la lista.');
+}
+
+function catRenderPager(parent, group, list) {
+  const pages = Math.max(1, Math.ceil(list.length / CAT_PAGE_SIZE));
+  let page = Number(catPageByGroup[group] || 0);
+  if (page >= pages) page = pages - 1;
+  catPageByGroup[group] = page;
+  if (pages < 2) return;
+  const pager = document.createElement('div');
+  pager.className = 'btn-row catalog-pager';
+  const prev = document.createElement('button');
+  prev.type = 'button'; prev.className = 'small'; prev.textContent = '‹'; prev.disabled = page === 0;
+  prev.setAttribute('aria-label', 'Fuentes anteriores');
+  prev.addEventListener('click', () => { catPageByGroup[group] = Math.max(0, page - 1); catRender(); });
+  const status = document.createElement('span');
+  status.className = 'hint'; status.textContent = (page + 1) + ' / ' + pages + ' · ' + list.length + ' fuentes';
+  const next = document.createElement('button');
+  next.type = 'button'; next.className = 'small'; next.textContent = '›'; next.disabled = page >= pages - 1;
+  next.setAttribute('aria-label', 'Fuentes siguientes');
+  next.addEventListener('click', () => { catPageByGroup[group] = Math.min(pages - 1, page + 1); catRender(); });
+  pager.appendChild(prev); pager.appendChild(status); pager.appendChild(next); parent.appendChild(pager);
+}
+
+function catRenderSource(e) {
+  const row = document.createElement('div');
+  row.className = 'event-row catalog-source';
+  const head = document.createElement('div');
+  head.className = 'catalog-source-head';
+  const title = document.createElement('span');
+  title.className = 'catalog-source-title'; title.textContent = catDisplayName(e);
+  const state = document.createElement('span');
+  state.className = 'catalog-source-status'; state.textContent = catStateLabel(e);
+  head.appendChild(title); head.appendChild(state);
+
+  const pick = document.createElement('label');
+  pick.className = 'catalog-source-pick';
+  const check = document.createElement('input');
+  check.type = 'checkbox'; check.checked = catEffectiveEnabled(e);
+  check.disabled = busy || (!e.enabled && !catCanAdd(e));
+  check.setAttribute('aria-label', (e.enabled ? 'Fuente activa ' : 'Seleccionar ') + catDisplayName(e));
+  if (!check.disabled) {
+    check.addEventListener('change', () => {
+      if (busy) return;
+      if (e.enabled) {
+        if (check.checked) catDisableSelection.delete(e.id);
+        else catDisableSelection.add(e.id);
+      } else if (check.checked) catSelection.add(e.id);
+      else catSelection.delete(e.id);
+      catRender();
+    });
+  }
+  pick.appendChild(check);
+  const pickText = document.createElement('span');
+  const pendingDisable = e.enabled && catDisableSelection.has(e.id);
+  const pendingEnable = !e.enabled && catSelection.has(e.id);
+  pickText.textContent = pendingDisable ? 'Se desactivará' : pendingEnable ? 'Se activará' :
+    e.enabled ? 'Activa' : catCanAdd(e) ? 'Seleccionar' : 'No disponible';
+  pick.appendChild(pickText); head.appendChild(pick); row.appendChild(head);
+
+  const domains = Number(e.cache_domains || e.valid_domains || 0);
+  const count = document.createElement('div');
+  count.className = 'catalog-source-count';
+  count.textContent = Number.isFinite(domains) && domains > 0 ? domains.toLocaleString() + ' dominios validados' : 'Sin conteo validado todavía';
+  row.appendChild(count);
+
+  const tags = document.createElement('div');
+  tags.className = 'catalog-source-tags';
+  const tagValues = catSubgroups(e).concat(catPacks(e)).filter(Boolean).filter((value, index, all) =>
+    all.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index).slice(0, 4);
+  tagValues.forEach((value) => {
+    const tag = document.createElement('span'); tag.className = 'catalog-source-tag'; tag.textContent = value;
+    tags.appendChild(tag);
+  });
+  if (tagValues.length) row.appendChild(tags);
+
+  const meta = document.createElement('div');
+  meta.className = 'tl-sub catalog-source-meta ui-advanced-only';
+  const packLabels = catPacks(e);
+  const formats = String(e.source_formats || e.format || 'sin formato').replace(/\|/g, ', ');
+  const project = e.source_subgroup || e.maintainer || 'Proyecto no especificado';
+  const countLabel = Number.isFinite(domains) && domains > 0 ? domains.toLocaleString() + ' dominios validados' : 'sin descargar';
+  const successTime = Number(e.last_success || 0);
+  const successLabel = successTime > 0 ? new Date(successTime * 1000).toLocaleString() : 'sin actualización';
+  const labels = packLabels.length ? packLabels : catCategories(e);
+  meta.textContent = project + (labels.length ? ' · ' + labels.join(' · ') : '') +
+    ' · formato: ' + formats + ' · ' + countLabel + ' · última actualización: ' + successLabel +
+    (e.recommended ? ' · recomendada' : '');
+  row.appendChild(meta);
+
+  const reasons = [];
+  if (/^(|unknown|license_unknown)$/i.test(String(e.license || '')))
+    reasons.push('LICENSE_UNKNOWN: podés seleccionar esta fuente; se descarga desde el upstream al aplicar.');
+  if (e.activation_blocked) reasons.push('Requiere revisión técnica: combina varias URLs, usa un transporte no admitido o no tiene una conversión DNS segura.');
+  if (e.upstream_status === 'broken') reasons.push('El catálogo upstream la marca retirada o no publica una URL utilizable.');
+  else if (e.archived || e.upstream_status === 'archived') reasons.push('Fuente archivada.');
+  else if (e.upstream_status === 'legacy') reasons.push('Fuente heredada; revisar vigencia antes de usarla.');
+  if (reasons.length) {
+    const note = document.createElement('div');
+    note.className = 'hint catalog-source-unavailable'; note.textContent = reasons.join(' '); row.appendChild(note);
+  }
+
+  const urls = String(e.source_urls || '').split('|').filter(Boolean);
+  if (urls.length) {
+    const details = document.createElement('details');
+    details.className = 'catalog-source-details ui-advanced-only';
+    const summary = document.createElement('summary'); summary.textContent = 'Ver procedencia upstream';
+    details.appendChild(summary);
+    urls.forEach((url, index) => {
+      const line = document.createElement('div'); line.className = 'catalog-source-url';
+      if (/^https:\/\//i.test(url)) {
+        const link = document.createElement('a'); link.href = url; link.target = '_blank';
+        link.rel = 'noopener noreferrer'; link.textContent = 'Fuente ' + (index + 1) + ': ' + url;
+        line.appendChild(link);
+      } else {
+        line.textContent = 'Fuente ' + (index + 1) + ': ' + url + ' (no se descarga sin HTTPS)';
+      }
+      details.appendChild(line);
+    });
+    row.appendChild(details);
+  }
+
+  return row;
+}
+
 function catRender() {
   const box = $('catResults');
   if (!box) return;
-  const list = catFiltered();
-  const pages = Math.max(1, Math.ceil(list.length / CAT_PAGE_SIZE));
-  if (catPage >= pages) catPage = pages - 1;
-  const slice = list.slice(catPage * CAT_PAGE_SIZE, catPage * CAT_PAGE_SIZE + CAT_PAGE_SIZE);
+  catRenderSelectionControls();
+  catRenderActiveFilters();
+  const allTab = $('btnCatAll'); const selectedTab = $('btnCatSelected');
+  if (allTab) allTab.setAttribute('aria-pressed', catView === 'all' ? 'true' : 'false');
+  if (selectedTab) selectedTab.setAttribute('aria-pressed', catView === 'selected' ? 'true' : 'false');
   box.textContent = '';
-  if (!slice.length) { box.textContent = '(sin coincidencias)'; }
-  slice.forEach((e) => {
-    const row = document.createElement('div');
-    row.className = 'event-row';
-    const head = document.createElement('div');
-    head.textContent = (e.enabled ? '● ' : '○ ') + e.name + '  [' + e.upstream_status + '/' + (e.runtime_status || 'never_checked') + ']';
-    const meta = document.createElement('div');
-    meta.className = 'tl-sub';
-    meta.textContent = e.maintainer + ' · ' + e.categories + ' · ' + e.aggressiveness +
-      ' · movil:' + e.mobile_suitability + (e.valid_domains && e.valid_domains !== '-' ? ' · ' + e.valid_domains + ' dom' : '') +
-      (e.recommended ? ' · recomendada' : '') + (e.archived ? ' · ARCHIVADA' : '');
-    const acts = document.createElement('div');
-    acts.className = 'event-actions';
-    const tog = document.createElement('button');
-    tog.textContent = e.enabled ? 'Desactivar' : 'Activar';
-    if (!e.enabled) tog.className = 'primary';
-    tog.addEventListener('click', async () => {
+  if (!catLoaded) { box.textContent = catCliReady ? 'Tocá una categoría para cargar las fuentes.' : 'El catálogo se carga al abrir esta sección.'; return; }
+  const query = (($('catSearch') || {}).value || '').trim();
+  const filteredEntries = catFiltered();
+  let renderedGroups = 0;
+  CAT_GROUP_DEFS.forEach((group) => {
+    const full = catCache.filter((e) => catGroupKey(e) === group.key);
+    const knownCount = Number(catGroupCounts[group.key] || full.length || 0);
+    if (!knownCount) return;
+    const loaded = catLoadedGroups.has(group.key);
+    const matches = loaded ? filteredEntries.filter((e) => catGroupKey(e) === group.key) : [];
+    if (catIsNarrowed() && loaded && !matches.length) return;
+    const activePool = loaded ? (catIsNarrowed() ? matches : full) : full;
+    const activeCount = loaded ? activePool.filter((e) => e.enabled).length :
+      (catGroupActive[group.key] != null ? catGroupActive[group.key] : 0);
+    const shownCount = catIsNarrowed() && loaded ? matches.length : knownCount;
+    const section = document.createElement('section'); section.className = 'catalog-group';
+    const header = document.createElement('div'); header.className = 'catalog-group-header';
+    const toggle = document.createElement('button'); toggle.type = 'button';
+    toggle.className = 'catalog-group-toggle';
+    const expanded = catOpenGroup === group.key;
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    toggle.setAttribute('aria-controls', 'cat-panel-' + group.key);
+    const label = document.createElement('span'); label.className = 'catalog-group-label'; label.textContent = group.label;
+    const count = document.createElement('span'); count.className = 'catalog-group-count';
+    count.textContent = (catIsNarrowed() && loaded ? matches.length + ' de ' : '') + shownCount + ' listas · ' + activeCount + ' activas';
+    const description = document.createElement('span'); description.className = 'catalog-group-description'; description.textContent = group.description;
+    const master = document.createElement('label'); master.className = 'catalog-group-pick';
+    const masterCheck = document.createElement('input'); masterCheck.type = 'checkbox';
+    masterCheck.setAttribute('aria-label', 'Activar o desactivar todas las listas de ' + group.label);
+    const actionablePool = loaded ? (catIsNarrowed() ? matches : full) : [];
+    const actionable = actionablePool.filter((e) => e.enabled || catCanAdd(e));
+    const enabledNow = actionable.filter(catEffectiveEnabled).length;
+    masterCheck.checked = actionable.length > 0 && enabledNow === actionable.length;
+    masterCheck.indeterminate = loaded ? (enabledNow > 0 && enabledNow < actionable.length) : activeCount > 0;
+    masterCheck.disabled = busy || (loaded && actionable.length === 0);
+    masterCheck.addEventListener('click', (ev) => { if (ev && ev.stopPropagation) ev.stopPropagation(); });
+    masterCheck.addEventListener('change', () => {
       if (busy) return;
-      setBusy(true);
-      setText('catResults', e.enabled ? 'Desactivando y recompilando…' : 'Activando, descargando y compilando…');
-      try {
-        const rr = e.enabled ? await DCM.runCatalogDisable(e.id) : await DCM.runCatalogEnable(e.id);
-        toast(rr.errno === 0 ? (e.name + (e.enabled ? ' desactivada' : ' activada')) : backendError(rr, 'catalog'), rr.errno === 0 ? 'ok' : 'error');
-        if (await catLoad()) catRender();
-      } finally { setBusy(false); }
+      catToggleGroupSelection(group.key, masterCheck.checked);
     });
-    acts.appendChild(tog);
-    row.appendChild(head); row.appendChild(meta); row.appendChild(acts);
-    box.appendChild(row);
-  });
-  const pager = $('catPager');
-  if (pager) {
-    pager.textContent = '';
-    if (pages > 1) {
-      const prev = document.createElement('button'); prev.textContent = '‹'; prev.className = 'small';
-      prev.disabled = catPage === 0;
-      prev.addEventListener('click', () => { if (catPage > 0) { catPage--; catRender(); } });
-      const lbl = document.createElement('span'); lbl.className = 'hint';
-      lbl.textContent = ' ' + (catPage + 1) + '/' + pages + ' (' + list.length + ') ';
-      const next = document.createElement('button'); next.textContent = '›'; next.className = 'small';
-      next.disabled = catPage >= pages - 1;
-      next.addEventListener('click', () => { if (catPage < pages - 1) { catPage++; catRender(); } });
-      pager.appendChild(prev); pager.appendChild(lbl); pager.appendChild(next);
+    const masterText = document.createElement('span'); masterText.textContent = 'Todas';
+    master.appendChild(masterCheck); master.appendChild(masterText);
+    const chevron = document.createElement('span'); chevron.className = 'catalog-group-chevron'; chevron.textContent = '›';
+    // La casilla es HERMANA del botón: nunca un input interactivo dentro de
+    // otro botón. Tocar "Todas" no debe cerrar/abrir el acordeón en Android.
+    toggle.appendChild(label); toggle.appendChild(count); toggle.appendChild(description); toggle.appendChild(chevron);
+    toggle.addEventListener('click', () => {
+      if (busy) return;
+      catOpenGroup = catOpenGroup === group.key ? '' : group.key;
+      catPageByGroup[group.key] = 0;
+      catRender();
+      if (catOpenGroup === group.key) catEnsureGroup(group.key);
+    });
+    header.appendChild(toggle); header.appendChild(master); section.appendChild(header);
+    const panel = document.createElement('div'); panel.className = 'catalog-group-panel';
+    panel.id = 'cat-panel-' + group.key; panel.hidden = !expanded;
+    if (expanded) {
+      if (!loaded) {
+        const loading = document.createElement('div'); loading.className = 'hint';
+        loading.textContent = 'Cargando fuentes de esta categoría…'; panel.appendChild(loading);
+      } else if (!matches.length) {
+        const empty = document.createElement('div'); empty.className = 'hint'; empty.textContent = 'No hay fuentes que coincidan en esta categoría.'; panel.appendChild(empty);
+      } else {
+        let page = Number(catPageByGroup[group.key] || 0);
+        const pages = Math.max(1, Math.ceil(matches.length / CAT_PAGE_SIZE));
+        if (page >= pages) page = pages - 1;
+        catPageByGroup[group.key] = page;
+        const slice = matches.slice(page * CAT_PAGE_SIZE, page * CAT_PAGE_SIZE + CAT_PAGE_SIZE);
+        slice.forEach((e) => panel.appendChild(catRenderSource(e)));
+        catRenderPager(panel, group.key, matches);
+      }
     }
+    section.appendChild(panel); box.appendChild(section); renderedGroups++;
+  });
+  if (!renderedGroups) {
+    box.textContent = catView === 'selected' && !catLoadedGroups.size ? 'Cargando fuentes seleccionadas…' :
+      (catView === 'selected' && !catSelection.size && !catCache.some((e) => e.enabled) ? 'No hay listas seleccionadas todavía.' : 'No hay listas que coincidan con estos filtros.');
   }
 }
 
 async function catRefreshAndRender() {
-  setText('catResults', 'Cargando catalogo…');
-  if (await catLoad()) { catPage = 0; catRender(); }
+  if (!catCliReady) { catRender(); return false; }
+  if (catLoading) return catLoading;
+  setText('catResults', 'Cargando solo metadatos de las fuentes…');
+  catLoading = (async () => {
+    const ok = await catLoad();
+    if (ok) {
+      // Mostrar primero TODOS los encabezados, sin buscador ni filas montadas.
+      catRender();
+      if (catOpenGroup && (catGroupCounts[catOpenGroup] || 0) > 0) {
+        await catLoadGroup(catOpenGroup);
+        catRender();
+      }
+      const query = (($('catSearch') || {}).value || '').trim();
+      const needsAll = catView === 'selected' || catFiltersActive() || Boolean(query);
+      if (needsAll) await catLoadAllGroups();
+    }
+    return ok;
+  })();
+  try { return await catLoading; } finally { catLoading = null; }
+}
+
+async function catApplySelected() {
+  if (busy) return;
+  const enableIds = Array.from(catSelection).filter((id) => {
+    const e = catCache.find((item) => item.id === id);
+    if (!e || !catCanAdd(e)) { catSelection.delete(id); return false; }
+    return true;
+  });
+  const disableIds = Array.from(catDisableSelection).filter((id) => {
+    const e = catCache.find((item) => item.id === id);
+    if (!e || !e.enabled) { catDisableSelection.delete(id); return false; }
+    return true;
+  });
+  const actions = enableIds.map((id) => ({ id, mode: 'enable' }))
+    .concat(disableIds.map((id) => ({ id, mode: 'disable' })));
+  if (!actions.length) { catRenderSelectionControls(); return; }
+  const failures = [];
+  let applied = 0;
+  setBusy(true);
+  document.querySelectorAll('#catResults input[type="checkbox"]').forEach((check) => { check.disabled = true; });
+  try {
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i];
+      const e = catCache.find((item) => item.id === action.id);
+      const verb = action.mode === 'enable' ? 'Activando' : 'Desactivando';
+      setText('catApplyStatus', verb + ' ' + (i + 1) + ' de ' + actions.length + ': ' + (e ? catDisplayName(e) : action.id) + '…');
+      try {
+        const r = action.mode === 'enable' ? await DCM.runCatalogEnable(action.id) : await DCM.runCatalogDisable(action.id);
+        if (r && r.errno === 0) {
+          if (action.mode === 'enable') catSelection.delete(action.id);
+          else catDisableSelection.delete(action.id);
+          applied++;
+        } else failures.push((e ? e.name : action.id) + ': ' + backendError(r, 'catalog'));
+      } catch (err) {
+        failures.push((e ? e.name : action.id) + ': ' + String(err && err.message || err));
+      }
+    }
+    await catReload();
+  } finally {
+    setBusy(false);
+    catRender();
+  }
+  const summary = applied + ' cambio(s) aplicado(s)' + (failures.length ? '; ' + failures.length + ' con error (siguen preparados).' : '.');
+  setText('catApplyStatus', summary + (failures.length ? ' ' + failures.join(' · ') : ''));
+  toast(summary, failures.length ? 'error' : 'ok');
+}
+
+function catDownloadProgressText(info) {
+  const done = Number(info.done || 0), total = Number(info.total || 0);
+  const ok = Number(info.success || 0), failed = Number(info.failed || 0), skipped = Number(info.skipped || 0);
+  if (info.state === 'queued' || info.state === 'running') {
+    const current = info.current && info.current !== 'preparando' ? ' · actual: ' + info.current : '';
+    return 'Descarga en curso: ' + done + '/' + total + ' procesadas · ' + ok + ' verificadas · ' + failed + ' errores · ' + skipped + ' omitidas' + current + '. No activa fuentes.';
+  }
+  if (info.state === 'done') {
+    return 'Descarga terminada: ' + ok + ' fuentes verificadas · ' + skipped + ' omitidas por estado técnico del catálogo. No se activaron fuentes nuevas.';
+  }
+  if (info.state === 'partial') {
+    return 'Descarga parcial: ' + ok + ' verificadas · ' + failed + ' errores · ' + skipped + ' omitidas. Se conservaron las cachés válidas anteriores.';
+  }
+  if (info.state === 'idle') return 'Todavía no se ejecutó una descarga global.';
+  return 'Estado de descarga: ' + String(info.state || 'desconocido') + ' · ' + done + '/' + total + ' procesadas.';
+}
+
+async function catPollDownloadAll() {
+  if (catDownloadPollInFlight || !DCM.runCatalogDownloadAllStatus) return;
+  catDownloadPollInFlight = true;
+  try {
+    const r = await DCM.runCatalogDownloadAllStatus();
+    if (r.errno !== 0) {
+      setText('catDownloadStatus', backendError(r, 'estado de descarga global'));
+      return;
+    }
+    const info = safeParse(r.stdout);
+    if (!info || typeof info.state !== 'string') {
+      setText('catDownloadStatus', 'No se pudo leer el progreso de la descarga global.');
+      return;
+    }
+    setText('catDownloadStatus', catDownloadProgressText(info));
+    const button = $('btnCatDownloadAll');
+    const running = info.state === 'queued' || info.state === 'running';
+    if (button) button.disabled = running;
+    if (running) {
+      if (catDownloadPollTimer) clearTimeout(catDownloadPollTimer);
+      catDownloadPollTimer = setTimeout(() => { catDownloadPollTimer = null; catPollDownloadAll(); }, 5000);
+    } else if (catDownloadPollTimer) {
+      clearTimeout(catDownloadPollTimer); catDownloadPollTimer = null;
+    }
+    if (!running && info.job_id && catDownloadRefreshJobId !== info.job_id) {
+      catDownloadRefreshJobId = info.job_id;
+      if (await catReload()) catRender();
+    }
+  } finally { catDownloadPollInFlight = false; }
+}
+
+async function catStartDownloadAll() {
+  const button = $('btnCatDownloadAll');
+  if (!DCM.runCatalogDownloadAllStart || (button && button.disabled)) return;
+  if (!confirm('Se descargarán y validarán las fuentes técnicamente compatibles del catálogo. Puede usar bastante conexión y almacenamiento. Las fuentes no se activan; los bloqueos actuales no cambian. ¿Continuar?')) return;
+  if (button) button.disabled = true;
+  setText('catDownloadStatus', 'Iniciando descarga global…');
+  const r = await DCM.runCatalogDownloadAllStart();
+  if (r.errno !== 0) {
+    if (button) button.disabled = false;
+    setText('catDownloadStatus', backendError(r, 'descarga global'));
+    return;
+  }
+  setText('catDownloadStatus', (r.stdout || 'Descarga global iniciada.').trim());
+  await catPollDownloadAll();
 }
 
 function wireCatalog() {
   const s = $('catSearch');
-  if (s) s.addEventListener('input', () => { catPage = 0; if (catCache.length) catRender(); else catRefreshAndRender(); });
-  const rec = $('btnCatRecommended');
-  if (rec) rec.addEventListener('click', () => { catView = 'recommended'; catPage = 0; if (catCache.length) catRender(); else catRefreshAndRender(); });
-  const en = $('btnCatEnabled');
-  if (en) en.addEventListener('click', () => { catView = 'enabled'; catPage = 0; if (catCache.length) catRender(); else catRefreshAndRender(); });
+  if (s) s.addEventListener('input', () => {
+    catPageByGroup = Object.create(null);
+    if (!catLoaded && catCliReady) { catRefreshAndRender(); return; }
+    catRender();
+    if (String(s.value || '').trim()) catLoadAllGroups();
+  });
+  const filter = $('btnCatFilter');
+  if (filter) filter.addEventListener('click', catOpenFilterSheet);
+  const closeFilter = $('btnCatFilterClose');
+  if (closeFilter) closeFilter.addEventListener('click', () => catCloseFilterSheet(true));
+  const backdrop = $('catFilterBackdrop');
+  if (backdrop) backdrop.addEventListener('click', () => catCloseFilterSheet(false));
+  const clearFilter = $('btnCatFilterClear');
+  if (clearFilter) clearFilter.addEventListener('click', catClearFilterDraft);
+  const applyFilter = $('btnCatFilterApply');
+  if (applyFilter) applyFilter.addEventListener('click', catApplyFilterDraft);
+  if (document.addEventListener) document.addEventListener('keydown', (ev) => {
+    if (ev && ev.key === 'Escape' && $('catFilterSheet') && !$('catFilterSheet').hidden) catCloseFilterSheet(true);
+  });
   const all = $('btnCatAll');
-  if (all) all.addEventListener('click', () => { catView = 'all'; catPage = 0; if (catCache.length) catRender(); else catRefreshAndRender(); });
+  if (all) all.addEventListener('click', () => catSetView('all'));
+  const selected = $('btnCatSelected');
+  if (selected) selected.addEventListener('click', () => catSetView('selected'));
+  const add = $('btnCatAddSelected');
+  if (add) add.addEventListener('click', catApplySelected);
+  const clear = $('btnCatClearSelection');
+  if (clear) clear.addEventListener('click', () => { catSelection.clear(); catDisableSelection.clear(); catRender(); });
+  const downloadAll = $('btnCatDownloadAll');
+  if (downloadAll) downloadAll.addEventListener('click', catStartDownloadAll);
+  catPollDownloadAll();
   const up = $('btnCatUpdate');
   if (up) up.addEventListener('click', async () => {
     if (busy) return; setBusy(true);
@@ -1102,7 +1765,7 @@ function wireCatalog() {
     try {
       const r = await DCM.runCatalogUpdate();
       toast(r.errno === 0 ? 'Fuentes actualizadas.' : backendError(r, 'update'), r.errno === 0 ? 'ok' : 'error');
-      if (await catLoad()) catRender();
+      if (await catReload()) catRender();
     } finally { setBusy(false); }
   });
   const cp = $('btnCatCompile');
@@ -1112,7 +1775,7 @@ function wireCatalog() {
     try {
       const r = await DCM.runCatalogCompile();
       toast(r.errno === 0 ? 'Compilado.' : backendError(r, 'compile'), r.errno === 0 ? 'ok' : 'error');
-      if (await catLoad()) catRender();
+      if (await catReload()) catRender();
     } finally { setBusy(false); }
   });
   const cf = $('btnCatConflicts');
@@ -1128,7 +1791,8 @@ function wireCatalog() {
 async function customRender() {
   const box = $('customList');
   if (!box) return;
-  if (!catCache.length) { await catLoad(); }
+  if (!catLoaded) { await catLoad(); }
+  if (!catLoadedGroups.has('dcm')) { await catLoadGroup('dcm'); }
   const customs = catCache.filter((e) => e.id.indexOf('custom_') === 0);
   box.textContent = '';
   if (!customs.length) { box.textContent = '(sin fuentes personalizadas)'; return; }
@@ -1146,7 +1810,7 @@ async function customRender() {
       try {
         const rr = e.enabled ? await DCM.runCatalogDisable(e.id) : await DCM.runCatalogEnable(e.id);
         toast(rr.errno === 0 ? 'Listo.' : backendError(rr, 'catalog'), rr.errno === 0 ? 'ok' : 'error');
-        if (await catLoad()) { customRender(); catRender(); }
+        if (await catReload()) { await customRender(); catRender(); }
       } finally { setBusy(false); }
     });
     const del = document.createElement('button');
@@ -1156,7 +1820,7 @@ async function customRender() {
       try {
         const rr = await DCM.runCustomRemove(e.id);
         toast(rr.errno === 0 ? 'Eliminada.' : backendError(rr, 'remove'), rr.errno === 0 ? 'ok' : 'error');
-        if (await catLoad()) { customRender(); catRender(); }
+        if (await catReload()) { await customRender(); catRender(); }
       } finally { setBusy(false); }
     });
     acts.appendChild(tog); acts.appendChild(del);
@@ -1177,7 +1841,7 @@ function wireCustom() {
       const r = await DCM.runCustomAdd(url, name, '');
       toast(r.errno === 0 ? 'Fuente agregada (no activada).' : backendError(r, 'custom add'), r.errno === 0 ? 'ok' : 'error');
       if (r.errno === 0) { const u = $('customUrl'); if (u) u.value = ''; const n = $('customName'); if (n) n.value = ''; }
-      if (await catLoad()) { customRender(); catRender(); }
+      if (await catReload()) { await customRender(); catRender(); }
     } finally { setBusy(false); }
   });
 }
@@ -1209,7 +1873,7 @@ function wireBindhosts() {
       const r = await DCM.runBindhostsImport(dir);
       setText('bhResults', (r.stdout || r.stderr || '').trim());
       toast(r.errno === 0 ? 'Importado.' : backendError(r, 'import'), r.errno === 0 ? 'ok' : 'error');
-      if (await catLoad()) catRender();
+      if (await catReload()) catRender();
     } finally { setBusy(false); }
   });
 }
@@ -1217,11 +1881,17 @@ function wireBindhosts() {
 /* svcRender (motor heredado RC2 `service`) eliminado en v1.0.0: la tarjeta quedaba
    vacia y duplicaba "Privacidad por servicio" (backend real `service-control`). */
 
-async function initCatalogRC2() {
+function initCatalogRC2() {
   wireCatalog();
   wireCustom();
   wireBindhosts();
-  await customRender();
+}
+
+function catOnRoute(route) {
+  if (route !== 'lists' || !catCliReady || catLoaded) return;
+  catRefreshAndRender().then(function (loaded) {
+    if (loaded) customRender();
+  });
 }
 
 /* Tarjeta de entorno (v0.3 A1): corre `environment status` y lo muestra. */
@@ -1325,11 +1995,13 @@ function wireSourceDoctor() {
 }
 
 function init() {
+  wireUiMode();
   // Navegacion (SPA) e idioma se inicializan SIEMPRE, haya o no puente ksu.
   if (typeof Router !== 'undefined' && Router.init) {
     try {
       Router.init({ onChange: function (route) {
         if (typeof V030 !== 'undefined' && V030.onRoute) { try { V030.onRoute(route); } catch (e) {} }
+        catOnRoute(route);
       } });
     } catch (_) {}
   }
@@ -1377,6 +2049,8 @@ function init() {
       return;
     }
     if (typeof refreshEnvironmentCard === 'function') { try { refreshEnvironmentCard(); } catch (_) {} }
+    catCliReady = true;
+    if (typeof Router !== 'undefined' && Router.current && Router.current() === 'lists') catOnRoute('lists');
     startPolling();
   });
 }

@@ -229,12 +229,13 @@ if call_cap "$SCRATCH/b2.out" blocklists update phishing; then
     && ok "B2 formato hosts parseado (localhost descartado)" || bad "B2 hosts mal parseado"
 else bad "B2 update hosts fallo"; fi
 
-# B3 CRLF + invalidos mezclados -> solo validos
+# B3 CRLF + invalidos mezclados -> dominios validos + wildcard DNS equivalente
 write_src scams mixed-invalid.txt domains 2
 if call_cap "$SCRATCH/b3.out" blocklists update scams; then
   _n=$(grep -c '' "$CACHE/scams.list" 2>/dev/null)
-  [ "${_n:-0}" = "2" ] && ! grep -q '1.2.3.4' "$CACHE/scams.list" \
-    && ok "B3 CRLF normalizado + IPs/URLs/comodines rechazados (solo 2 validos)" || bad "B3 filtrado incorrecto ($_n)"
+  [ "${_n:-0}" = "3" ] && ! grep -q '1.2.3.4' "$CACHE/scams.list" \
+    && grep -qx 'wild.example' "$CACHE/scams.list" \
+    && ok "B3 CRLF + IP/URL rechazados; comodín simple normalizado a DNS (3 dominios)" || bad "B3 filtrado incorrecto ($_n)"
 else bad "B3 update mixto fallo"; fi
 
 # B4 lista binaria -> rechazo, NO se activa

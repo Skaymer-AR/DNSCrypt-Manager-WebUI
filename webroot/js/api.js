@@ -509,6 +509,24 @@ const DCM = (() => {
       default: return 'tp.st.inactive';
     }
   }
+  // El catalogo se consulta en dos pasos: un resumen de grupos y, solamente
+  // al abrir un acordeon, la metadata de esa categoria. Asi nunca se envia el
+  // catalogo completo (184 KB en la version actual) por stdout de ksu.exec.
+  function runCatalogGroupsJson() { return runRawT(CLI + ' catalog groups --json', 45000); }
+  const CATALOG_GROUP_COMMANDS = Object.freeze({
+    Security: ' catalog list --json --source-group Security',
+    Privacy: ' catalog list --json --source-group Privacy',
+    ParentalControl: ' catalog list --json --source-group ParentalControl',
+    dcm: ' catalog list --json --source-group dcm',
+    RethinkUnassigned: ' catalog list --json --source-group RethinkUnassigned'
+  });
+  function runCatalogGroupJson(group) {
+    const suffix = CATALOG_GROUP_COMMANDS[group];
+    if (!suffix) return argErr('Grupo de catalogo no reconocido.');
+    return runRawT(CLI + suffix, 45000);
+  }
+  // Compatibilidad para consumidores externos de la API anterior. La WebUI
+  // ya no la usa en la carga inicial, pero se conserva el metodo publico.
   function runCatalogListJson() { return runRawT(CLI + ' catalog list --json', 45000); }
   function runServiceListJson() { return runRaw(CLI + ' service list --json'); }
   function runCatalogInfo(id) {
@@ -524,6 +542,8 @@ const DCM = (() => {
     return runRawT(CLI + ' catalog disable ' + shQuote(id), 180000);
   }
   function runCatalogUpdate() { return runRawT(CLI + ' catalog update enabled', 300000); }
+  function runCatalogDownloadAllStart() { return runRawT(CLI + ' catalog download-all --confirmed', 15000); }
+  function runCatalogDownloadAllStatus() { return runRawT(CLI + ' catalog download-all status --json', 8000); }
   function runCatalogCompile() { return runRawT(CLI + ' catalog compile', 300000); }
   function runCatalogConflicts() { return runRaw(CLI + ' catalog conflicts'); }
 
@@ -580,10 +600,14 @@ const DCM = (() => {
     runTempAllowAdd,
     runTempAllowRemove,
     runCatalogListJson,
+    runCatalogGroupsJson,
+    runCatalogGroupJson,
     runCatalogInfo,
     runCatalogEnable,
     runCatalogDisable,
     runCatalogUpdate,
+    runCatalogDownloadAllStart,
+    runCatalogDownloadAllStatus,
     runCatalogCompile,
     runCatalogConflicts,
     runServiceListJson,

@@ -51,9 +51,10 @@ FC_CHAIN="DNSCRYPT_FC"
 NFT_FC_TABLE="dnscrypt_manager_fc"
 
 SEC_CATEGORIES="malware phishing scams trackers ads cryptomining"
-SEC_MAX_LIST_BYTES=26214400
+SEC_MAX_LIST_BYTES=268435456
 SEC_MIN_LIST_BYTES=64
-SEC_MAX_DOMAINS=500000
+SEC_MAX_DOMAINS=5000000
+: "${SEC_MAX_BLOCKED_DOMAINS:=5000000}" # limite final tras fusionar catalogo + legacy + controles
 SEC_MIN_DOMAINS=10
 SEC_MAX_IMPORT_BYTES=1048576
 SEC_MAX_IMPORT_LINES=5000
@@ -194,7 +195,21 @@ sec_ensure_sources() {
   for _s in "$MODDIR"/config/blocklist-sources/*.src; do
     [ -f "$_s" ] || continue
     _b=$(basename "$_s")
-    [ -f "$BL_SRC_DIR/$_b" ] || cp -f "$_s" "$BL_SRC_DIR/$_b" 2>/dev/null
+    if [ ! -f "$BL_SRC_DIR/$_b" ]; then
+      cp -f "$_s" "$BL_SRC_DIR/$_b" 2>/dev/null
+      continue
+    fi
+    # Elevar solo el valor de fábrica anterior. No reemplaza otras
+    # personalizaciones en sources.d ni una capacidad configurada por el usuario.
+    _old_max=$(grep '^max_bytes=' "$BL_SRC_DIR/$_b" 2>/dev/null | tail -n1 | cut -d= -f2-)
+    _new_max=$(grep '^max_bytes=' "$_s" 2>/dev/null | tail -n1 | cut -d= -f2-)
+    if [ "$_old_max" = "26214400" ] && [ "$_new_max" = "268435456" ]; then
+      _src_tmp="$BL_SRC_DIR/$_b.tmp.$$"
+      awk -F= -v OFS= -v max="$_new_max" \
+        '$1=="max_bytes" && $2=="26214400" {$0="max_bytes=" max} {print}' \
+        "$BL_SRC_DIR/$_b" > "$_src_tmp" && mv -f "$_src_tmp" "$BL_SRC_DIR/$_b" \
+        || { rm -f "$_src_tmp"; log_msg "security: could not raise default max_bytes for $_b; preserving source config"; }
+    fi
   done
   return 0
 }
@@ -264,7 +279,8 @@ sec_download() {
 #   - comentarios (#, !, ;) y lineas vacias fuera
 #   - CRLF normalizado, minusculas, sin lineas absurdas (>512)
 #   - formato hosts: solo 2do campo cuando el 1ro es 0.0.0.0/127.0.0.1/::/::1
-#   - formato domains: exactamente UNA palabra por linea
+#   - formato domains: exactamente UNA palabra por linea; acepta *.dominio
+#     como wildcard DNSCrypt y lo canoniza a dominio (mismo alcance efectivo)
 #   - sintaxis de dominio estricta (misma clase que valid_host, en minusculas)
 #   - fuera: IPs puras, URLs (fallan la sintaxis), localhost y ruido de hosts
 #   - dedupe + orden estable
@@ -289,7 +305,13 @@ sec_parse_domains() {
         if (n != 1) next
         d = f[1]
       }
-      print tolower(d)
+      d = tolower(d)
+      if (substr(d, 1, 2) == "*.") d = substr(d, 3)
+      if (index(d, "*") || index(d, "?") || index(d, "[") || index(d, "]") || index(d, "/") || index(d, "\\") || index(d, ":") || index(d, "$") ) next
+      # No aceptar reglas que bloquean un sufijo público completo.
+      if (d ~ /^(co|org|gov|ac|net|com)\.(uk|au|nz|jp|in|br|cn|sg|hk|tw|mx|tr|kr|ar|za|id|my|ph)$/) next
+      if (d ~ /\.(localhost|local|test|invalid)$/) next
+      print d
     }' \
   | grep -E '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$' \
   | awk 'length($0) <= 253' \
@@ -321,6 +343,14 @@ sec_merge_blocked() {
   command -v cat_append_active >/dev/null 2>&1 && cat_append_active "$1"
   # Fusion a escala: sort -u externo (maneja millones de lineas sin bucles).
   [ -s "$1" ] && sort -u "$1" -o "$1"
+  case "$SEC_MAX_BLOCKED_DOMAINS" in ''|*[!0-9]*) SEC_MAX_BLOCKED_DOMAINS=5000000 ;; esac
+  _merged_count=0; [ -f "$1" ] && _merged_count=$(wc -l < "$1" 2>/dev/null | tr -d ' ')
+  case "$_merged_count" in ''|*[!0-9]*) return 1 ;; esac
+  if [ "$_merged_count" -gt "$SEC_MAX_BLOCKED_DOMAINS" ] 2>/dev/null; then
+    log_msg "[BLOCKLIST] ERROR merged blocked-name limit exceeded ($_merged_count > $SEC_MAX_BLOCKED_DOMAINS); active list preserved"
+    echo "ERROR: la lista fusionada contiene $_merged_count dominios únicos; el límite seguro es $SEC_MAX_BLOCKED_DOMAINS." >&2
+    return 1
+  fi
   return 0
 }
 
@@ -400,27 +430,127 @@ sec_sync_toml_blocks() {
 # Regenerar listas activas + TOML; reiniciar el proxy SOLO si algo cambio
 # y esta corriendo. Escrituras atomicas. Uso: sec_regen_and_reload [--no-restart]
 # ----------------------------------------------------------------------------
+sec_config_check_candidate() {
+  _blocked="$1"; _allowed="$2"
+  _bin=$(resolve_bin) || return 2
+  _ct="$RUN_DIR/sec.candidate.toml.$$"
+  cp -f "$TOML" "$_ct" 2>/dev/null || return 1
+  if [ -s "$_blocked" ]; then
+    printf '%s\n' "[blocked_names]" "  blocked_names_file = '$_blocked'" | sec_block_in_file "$_ct" security_blocked
+  else
+    sec_unblock_in_file "$_ct" security_blocked
+  fi
+  if [ -s "$_allowed" ]; then
+    printf '%s\n' "[allowed_names]" "  allowed_names_file = '$_allowed'" | sec_block_in_file "$_ct" security_allowed
+  else
+    sec_unblock_in_file "$_ct" security_allowed
+  fi
+  "$_bin" -config "$_ct" -check >/dev/null 2>&1
+  _rc=$?
+  rm -f "$_ct" 2>/dev/null
+  return "$_rc"
+}
+
+sec_restore_active_file() {
+  _backup="$1"; _dest="$2"; _absent="$3"
+  if [ -f "$_absent" ]; then rm -f "$_dest"; return 0; fi
+  [ -f "$_backup" ] || { rm -f "$_dest"; return 0; }
+  _tmp="$_dest.restore.$$"
+  cp -f "$_backup" "$_tmp" && mv -f "$_tmp" "$_dest" || { rm -f "$_tmp"; return 1; }
+  chmod 0600 "$_dest" 2>/dev/null
+}
+
 sec_regen_and_reload() {
+  _no_restart=0; _verify_dns=0
+  for _opt in "$@"; do
+    case "$_opt" in --no-restart) _no_restart=1 ;; --verify-dns) _verify_dns=1 ;; esac
+  done
   sec_init_dirs
   sec_sweep_exceptions; _sw=$?
-  _tb="$RUN_DIR/sec.blocked.tmp.$$"
-  _ta="$RUN_DIR/sec.allowed.tmp.$$"
-  sec_merge_blocked "$_tb"
+  # El staging vive junto a blocked-names.txt para que el último mv sea
+  # atómico incluso si RUN_DIR y DATA_DIR están en filesystems diferentes.
+  _tb="$BL_ACTIVE_DIR/blocked-names.new.$$"
+  _ta="$BL_ACTIVE_DIR/allowed-names.new.$$"
+  sec_merge_blocked "$_tb" || { rm -f "$_tb" "$_ta"; return 1; }
   sec_build_allowed "$_ta"
   _changed=0
   cmp -s "$_tb" "$BL_BLOCKED" 2>/dev/null || _changed=1
   cmp -s "$_ta" "$BL_ALLOWED" 2>/dev/null || _changed=1
-  mv -f "$_tb" "$BL_BLOCKED" 2>/dev/null
-  mv -f "$_ta" "$BL_ALLOWED" 2>/dev/null
-  chmod 0600 "$BL_BLOCKED" "$BL_ALLOWED" 2>/dev/null
-  sec_sync_toml_blocks
   [ "$_sw" = "10" ] && _changed=1
-  [ "${SEC_TOML_CHANGED:-0}" = "1" ] && _changed=1
-  if [ "$_changed" = "1" ] && [ "${1:-}" != "--no-restart" ] && cmd_is_running 2>/dev/null; then
+  _tf="$TOML.new.$$"
+  cp -f "$TOML" "$_tf" 2>/dev/null || { rm -f "$_tb" "$_ta" "$_tf"; return 1; }
+  if [ -s "$_tb" ]; then
+    {
+      echo "[blocked_names]"
+      echo "  blocked_names_file = '$BL_BLOCKED'"
+      if [ "$(sec_hist_mode)" != "off" ]; then echo "  log_file = '$EVENTS_LOG'"; echo "  log_format = 'tsv'"; fi
+    } | sec_block_in_file "$_tf" security_blocked
+  else sec_unblock_in_file "$_tf" security_blocked; fi
+  if [ -s "$_ta" ]; then
+    printf '%s\n' "[allowed_names]" "  allowed_names_file = '$BL_ALLOWED'" | sec_block_in_file "$_tf" security_allowed
+  else sec_unblock_in_file "$_tf" security_allowed; fi
+  _pre_toml=$(sec_sha256 "$TOML"); _post_toml=$(sec_sha256 "$_tf")
+  [ "$_pre_toml" != "$_post_toml" ] && _changed=1
+  SEC_TOML_CHANGED=0; [ "$_pre_toml" != "$_post_toml" ] && SEC_TOML_CHANGED=1
+  if [ "$_changed" = "0" ]; then rm -f "$_tb" "$_ta" "$_tf"; return 0; fi
+
+  # Config check usa temporalmente ambas listas candidatas. Si falla, la
+  # versión activa no se toca.
+  sec_config_check_candidate "$_tb" "$_ta"; _check_rc=$?
+  if [ "$_check_rc" != "0" ]; then
+    if [ "$_check_rc" = "2" ] && [ "$_verify_dns" = "0" ]; then
+      # Compatibilidad con operaciones de seguridad previas a instalar el
+      # binario. El motor de blocklists pasa --verify-dns y exige -check.
+      log_msg "security: dnscrypt-proxy unavailable; config check skipped for non-catalog operation"
+    else
+      rm -f "$_tb" "$_ta" "$_tf"
+      log_msg "security: config check rechazo blocked-names.new; active files preserved"
+      echo "ERROR: dnscrypt-proxy -check rechazó la lista candidata; se conserva la lista activa." >&2
+      return 1
+    fi
+  fi
+
+  _bak_b="$BL_BAK_DIR/blocked-names.txt.prev"
+  _bak_a="$BL_BAK_DIR/allowed-names.txt.prev"
+  _bak_t="$BL_BAK_DIR/dnscrypt-proxy.toml.prev"
+  _abs_b="$BL_BAK_DIR/blocked-names.txt.prev.absent"
+  _abs_a="$BL_BAK_DIR/allowed-names.txt.prev.absent"
+  rm -f "$_abs_b" "$_abs_a"
+  if [ -f "$BL_BLOCKED" ]; then cp -f "$BL_BLOCKED" "$_bak_b.tmp.$$" && mv -f "$_bak_b.tmp.$$" "$_bak_b" || { rm -f "$_tb" "$_ta" "$_tf"; return 1; }
+  else : > "$_abs_b"; fi
+  if [ -f "$BL_ALLOWED" ]; then cp -f "$BL_ALLOWED" "$_bak_a.tmp.$$" && mv -f "$_bak_a.tmp.$$" "$_bak_a" || { rm -f "$_tb" "$_ta" "$_tf"; return 1; }
+  else : > "$_abs_a"; fi
+  cp -f "$TOML" "$_bak_t.tmp.$$" && mv -f "$_bak_t.tmp.$$" "$_bak_t" || { rm -f "$_tb" "$_ta" "$_tf"; return 1; }
+
+  # Commit preparado. Cada rename individual es atómico; cualquier error
+  # posterior restaura el snapshot anterior de los tres artefactos activos.
+  if ! mv -f "$_tb" "$BL_BLOCKED" || ! mv -f "$_ta" "$BL_ALLOWED" || ! mv -f "$_tf" "$TOML"; then
+    sec_restore_active_file "$_bak_b" "$BL_BLOCKED" "$_abs_b"
+    sec_restore_active_file "$_bak_a" "$BL_ALLOWED" "$_abs_a"
+    sec_restore_active_file "$_bak_t" "$TOML" "$RUN_DIR/never-absent"
+    rm -f "$_tb" "$_ta" "$_tf"
+    log_msg "security: atomic commit failed; active snapshot restored"
+    return 1
+  fi
+  chmod 0600 "$BL_BLOCKED" "$BL_ALLOWED" "$TOML" 2>/dev/null
+  if [ "$_changed" = "1" ] && [ "$_no_restart" = "0" ] && cmd_is_running 2>/dev/null; then
     log_msg "security: listas/config cambiaron; reiniciando dnscrypt-proxy"
     if ! cmd_restart >/dev/null 2>&1; then
-      log_msg "security: restart tras regeneracion FALLO"
+      sec_restore_active_file "$_bak_b" "$BL_BLOCKED" "$_abs_b"
+      sec_restore_active_file "$_bak_a" "$BL_ALLOWED" "$_abs_a"
+      sec_restore_active_file "$_bak_t" "$TOML" "$RUN_DIR/never-absent"
+      cmd_restart >/dev/null 2>&1 || log_msg "security: no se pudo reiniciar tras restaurar snapshot previo"
+      log_msg "security: restart tras regeneracion FALLO; active snapshot restored"
       sec_on_service_failure "regen-restart"
+      return 1
+    fi
+    if [ "$_verify_dns" = "1" ] && ! cmd_test_dns --quiet >/dev/null 2>&1; then
+      sec_restore_active_file "$_bak_b" "$BL_BLOCKED" "$_abs_b"
+      sec_restore_active_file "$_bak_a" "$BL_ALLOWED" "$_abs_a"
+      sec_restore_active_file "$_bak_t" "$TOML" "$RUN_DIR/never-absent"
+      cmd_restart >/dev/null 2>&1 || log_msg "security: DNS check failed and prior snapshot restart failed"
+      log_msg "security: post-update DNS test failed; active snapshot restored"
+      sec_on_service_failure "regen-dns-test"
       return 1
     fi
   fi
@@ -641,7 +771,7 @@ sec_config_check_with() {
   _cb="$RUN_DIR/sec.cand.blocked.$$"
   _ca="$RUN_DIR/sec.cand.allowed.$$"
   _ct="$RUN_DIR/sec.cand.toml.$$"
-  sec_merge_blocked "$_cb" "$1" "$2"
+  sec_merge_blocked "$_cb" "$1" "$2" || { rm -f "$_cb" "$_ca" "$_ct"; return 1; }
   sec_build_allowed "$_ca"
   cp -f "$TOML" "$_ct" 2>/dev/null || { rm -f "$_cb" "$_ca"; return 1; }
   if [ -s "$_cb" ]; then
@@ -713,7 +843,17 @@ sec_update_category() {
   sec_write_meta "$SEC_UF_CAT" "$_sha" "$_sz" "$_count" ok "$_shalist"
   rm -f "$SEC_UF_T1" 2>/dev/null
   # 14) regenerar lista activa (+restart si corre)
-  sec_regen_and_reload
+  if ! sec_regen_and_reload; then
+    log_msg "blocklists update $SEC_UF_CAT: apply failed; restoring last valid cache"
+    if [ "$_had_prev" = "1" ]; then
+      cp -f "$BL_BAK_DIR/$SEC_UF_CAT.list.prev" "$BL_CACHE_DIR/$SEC_UF_CAT.list" 2>/dev/null
+      [ -f "$BL_BAK_DIR/$SEC_UF_CAT.meta.prev" ] && cp -f "$BL_BAK_DIR/$SEC_UF_CAT.meta.prev" "$BL_CACHE_DIR/$SEC_UF_CAT.meta" 2>/dev/null
+    else
+      rm -f "$BL_CACHE_DIR/$SEC_UF_CAT.list" "$BL_CACHE_DIR/$SEC_UF_CAT.meta" 2>/dev/null
+    fi
+    sec_regen_and_reload >/dev/null 2>&1 || log_msg "blocklists update $SEC_UF_CAT: prior cache restored but active regeneration failed"
+    sec__ufail "no se pudo aplicar la lista; se restauro la ultima copia valida"; return 1
+  fi
   # 15-16) prueba DNS; si falla, rollback automatico
   if cmd_is_running 2>/dev/null; then
     if ! cmd_test_dns --quiet >/dev/null 2>&1; then
@@ -1528,6 +1668,12 @@ cmd_events() {
 # intacta, failclosed=0, y service.sh no aplica redireccion ese boot.
 # ----------------------------------------------------------------------------
 sec_migrate() {
+  # El catálogo puede cambiar con cada módulo aunque schema_version siga en 3.
+  # Hacerlo ANTES del retorno de migración idempotente; no descarga fuentes,
+  # no cambia enabled.txt/allowlist/blocked-names y no reinicia DNSCrypt.
+  if command -v cat_sync_index >/dev/null 2>&1; then
+    cat_sync_index || return 1
+  fi
   _cur=$(cat "$SCHEMA_FILE" 2>/dev/null)
   case "$_cur" in ''|*[!0-9]*) _cur=1 ;; esac
   if [ "$_cur" -ge 3 ] 2>/dev/null; then
@@ -1559,8 +1705,7 @@ sec_migrate() {
     echo "       la redireccion automatica se omite hasta resolverlo. Ver: dnscrypt-manager logs" >&2
     return 1
   fi
-  # RC2 (aditivo): copiar el index del catalogo al dispositivo (sin descargar).
-  command -v cat_sync_index >/dev/null 2>&1 && cat_sync_index
+  # El índice de blocklists ya se sincronizó independientemente del esquema.
   command -v svc_sync_index >/dev/null 2>&1 && svc_sync_index
   echo 2 > "$SCHEMA_FILE"
   log_msg "migracion v0.1.0 -> v0.2.0: OK (schema 2)"
