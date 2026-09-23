@@ -53,7 +53,7 @@ done
 
 echo
 echo "=== 2) Sintaxis JS (node --check) ==="
-for f in webroot/js/*.js tests/fixtures/webui-harness.cjs; do
+for f in webroot/js/*.js tests/fixtures/webui-harness.cjs tests/smoke-test-catalog-ui.cjs tests/smoke-test-source-ui-v030.cjs; do
   [ -f "$f" ] || continue
   if node --check "$f" 2>"$SCRATCH/synerr3"; then pass "$f"; else fail "$f"; cat "$SCRATCH/synerr3" >&2; fi
 done

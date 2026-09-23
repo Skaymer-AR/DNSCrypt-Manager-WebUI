@@ -67,6 +67,8 @@ class FakeElement {
   set className(v) { this.classList.set = new Set(String(v).split(/\s+/).filter(Boolean)); }
   appendChild(n) { this.children.push(n); }
   getAttribute(n) { return this.attrs[n]; }
+  setAttribute(n, v) { this.attrs[n] = String(v); }
+  removeAttribute(n) { delete this.attrs[n]; }
   addEventListener(type, fn) { (this._listeners[type] ||= []).push(fn); }
   dispatch(type, evt) { (this._listeners[type] || []).forEach((fn) => fn(evt || { target: this })); }
 }
@@ -83,6 +85,10 @@ for (const m of html.matchAll(/id="([^"]+)"[^>]*class="([^"]+)"|class="([^"]+)"[
   const id = m[1] || m[4], cls = m[2] || m[3];
   if (id) classById[id] = cls.split(/\s+/);
 }
+const ariaPressedById = {};
+for (const m of html.matchAll(/<button\b[^>]*\bid="([^"]+)"[^>]*aria-pressed="([^"]+)"/g)) {
+  ariaPressedById[m[1]] = m[2];
+}
 function initialText(id) {
   const m = html.match(new RegExp('id="' + id + '"[^>]*>([^<]*)<'));
   return m ? m[1] : '';
@@ -90,7 +96,8 @@ function initialText(id) {
 const registry = new Map();
 for (const id of htmlIds) {
   const tag = TYPES[id] ? TYPES[id][0] : realTag(id);
-  const attrs = TYPES[id] ? TYPES[id][1] : {};
+  const attrs = Object.assign({}, TYPES[id] ? TYPES[id][1] : {});
+  if (ariaPressedById[id]) attrs['aria-pressed'] = ariaPressedById[id];
   const el = new FakeElement(tag, attrs);
   (classById[id] || []).forEach((c) => el.classList.add(c));
   if (!TYPES[id] && tag !== 'button') el._text = initialText(id);
@@ -124,7 +131,8 @@ const document = {
 //   - clasificacion: 126/127 (no ejecutable/no encontrado) = arnes roto,
 //     aborta TODO el proceso; timeout = errno -124 (distinguible).
 // ---------------------------------------------------------------------------
-const window = {};
+const window = { location: { hash: '#/lists' }, localStorage: { getItem: () => null, setItem: () => {} },
+  addEventListener() {}, scrollTo() {} };
 let ABORT = false;
 let pendingCalls = 0;
 function execReal(cmd, cbName) {
@@ -187,7 +195,7 @@ const context = vm.createContext({
   window, document, console, confirm: () => true,
   setTimeout, clearTimeout, setInterval, clearInterval, Promise,
 });
-for (const f of ['js/validation.js', 'js/api.js', 'js/app.js']) {
+for (const f of ['js/validation.js', 'js/api.js', 'js/router.js', 'js/app.js']) {
   vm.runInContext(fs.readFileSync(path.join(WEBROOT, f), 'utf8'), context, { filename: f });
 }
 
@@ -244,6 +252,69 @@ async function waitForRunningListeningPid() {
   check('backendText refleja un backend valido para el entorno',
         () => ['ninguno detectado', 'iptables', 'nft'].includes(registry.get('backendText').textContent));
   await waitNotBusy();
+
+  console.log('\n=== Catálogo de fuentes: acordeones lazy y selección diferida ===');
+  const findCatalogGroup = (name) => registry.get('catResults').children.find((g) => g.children[0] &&
+    g.children[0].children[0] && g.children[0].children[0].children[0] &&
+    g.children[0].children[0].children[0].textContent === name);
+  await waitFor(() => registry.get('catResults').children.length > 0);
+  check('catálogo recupera el índice ausente con schema 3 y muestra cinco categorías',
+        () => fs.existsSync(path.join(TEST_DATA_DIR, 'catalog/blocklists.index.tsv')) &&
+          registry.get('catResults').children.length === 5 && !!findCatalogGroup('Seguridad'));
+  check('botón global de descarga y estado aparecen en el catálogo',
+        () => html.indexOf('id="btnCatDownloadAll" type="button" class="small">Descargar todas las fuentes</button>') >= 0 &&
+          !!registry.get('btnCatDownloadAll') && !!registry.get('catDownloadStatus'));
+  check('categorías empiezan cerradas, sin filas montadas',
+        () => registry.get('catResults').children.every((g) =>
+          g.children[0].children[0].getAttribute('aria-expanded') === 'false' && g.children[1].children.length === 0));
+  let privacy = findCatalogGroup('Privacidad');
+  if (privacy) privacy.children[0].children[0].dispatch('click');
+  // El acordeon pide su metadata bajo demanda; esperar la respuesta chica de
+  // la categoria antes de probar busqueda/seleccion evita depender del timing
+  // del callback ksu.exec.
+  await waitFor(() => {
+    const p = findCatalogGroup('Privacidad');
+    return !!(p && p.children[1] && p.children[1].children.some((row) =>
+      row.children[0] && row.children[0].children[0] && row.children[0].children[0].textContent === 'Light (HaGeZi)'));
+  });
+  privacy = findCatalogGroup('Privacidad');
+  check('abrir Privacidad dibuja solo esa categoría y pagina sus filas',
+        () => !!privacy && privacy.children[1].children.length > 0 &&
+          registry.get('catResults').children.filter((g) => g.children[1] && g.children[1].children.length > 0).length === 1);
+  const privacyMaster = privacy && privacy.children[0].children[1] && privacy.children[0].children[1].children[0];
+  let masterClickStopped = false;
+  if (privacyMaster) privacyMaster.dispatch('click', { stopPropagation() { masterClickStopped = true; } });
+  check('tocar Todas no propaga el clic al acordeón',
+        () => masterClickStopped && privacy.children[0].children[0].getAttribute('aria-expanded') === 'true');
+  check('casilla Todas fuera del botón del acordeón (sin controles interactivos anidados)',
+        () => privacy.children[0].tagName === 'DIV' && privacy.children[0].children[0].tagName === 'BUTTON' &&
+          privacy.children[0].children[1].tagName === 'LABEL');
+  if (privacyMaster) { privacyMaster.checked = true; privacyMaster.dispatch('change'); }
+  await waitFor(() => !registry.get('btnCatAddSelected').disabled);
+  // catStageGroup vuelve a renderizar el acordeón; recuperar la referencia
+  // evita inspeccionar el nodo anterior que ya no está en el DOM.
+  privacy = findCatalogGroup('Privacidad');
+  check('checkbox maestro de Privacidad prepara todas las fuentes elegibles',
+        () => !!privacy && !registry.get('btnCatAddSelected').disabled &&
+          privacy.children[1].children.some((row) => row.children[0] && row.children[0].children[2] &&
+            row.children[0].children[2].children[0] && row.children[0].children[2].children[0].checked));
+  registry.get('btnCatClearSelection').dispatch('click');
+  const catSearch = registry.get('catSearch');
+  catSearch.value = 'hagezi_multi_light'; catSearch.dispatch('input');
+  privacy = findCatalogGroup('Privacidad');
+  const hageziRow = privacy && privacy.children[1].children.find((row) =>
+    row.children[0] && row.children[0].children[0] && row.children[0].children[0].textContent === 'Light (HaGeZi)');
+  check('busqueda por ID encuentra la fuente exacta', () => !!hageziRow);
+  const hageziCheck = hageziRow && hageziRow.children[0].children[2] && hageziRow.children[0].children[2].children[0];
+  if (hageziCheck) { hageziCheck.checked = true; hageziCheck.dispatch('change'); }
+  check('marcar casilla solo prepara la seleccion, no activa la fuente',
+        () => !!hageziCheck && !hageziCheck.disabled && !registry.get('btnCatAddSelected').disabled &&
+          registry.get('catSelectionStatus').textContent.indexOf('1 fuente') === 0 &&
+          hageziRow.children[0].children[1].textContent !== 'ACTIVA');
+  registry.get('btnCatClearSelection').dispatch('click');
+  check('Limpiar selección desmarca las fuentes pendientes',
+        () => registry.get('btnCatAddSelected').disabled && registry.get('catSelectionStatus').textContent.indexOf('No hay fuentes') === 0);
+  catSearch.value = ''; catSearch.dispatch('input');
 
   console.log('\n=== click Iniciar (btnStart): espera EXPLICITA combinada running+listening+pid>0 ===');
   registry.get('btnStart').dispatch('click');

@@ -16,6 +16,11 @@
     </div>
   </header>
 
+  <div class="ui-mode-switch" role="group" aria-label="Modo de interfaz">
+    <button id="uiModeSimple" type="button" aria-pressed="true">Simple</button>
+    <button id="uiModeAdvanced" type="button" aria-pressed="false">Avanzado</button>
+  </div>
+
   <div id="ksuBanner" class="banner banner-warn hidden"></div>
 
   <div id="disabledBanner" class="banner banner-danger hidden">
@@ -44,12 +49,12 @@
     </div>
 
     <div class="kv-grid">
-      <div class="kv"><div class="k">PID</div><div class="v" id="pidText">—</div></div>
-      <div class="kv"><div class="k">Escucha</div><div class="v" id="listeningText">—</div></div>
-      <div class="kv"><div class="k">Direccion local</div><div class="v" id="listenText">—</div></div>
-      <div class="kv"><div class="k">Version</div><div class="v" id="versionText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k">PID</div><div class="v" id="pidText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k">Escucha</div><div class="v" id="listeningText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k">Direccion local</div><div class="v" id="listenText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k">Version</div><div class="v" id="versionText">—</div></div>
       <div class="kv"><div class="k">Servidor activo</div><div class="v" id="serverText">—</div></div>
-      <div class="kv"><div class="k">Backend firewall</div><div class="v" id="backendText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k">Backend firewall</div><div class="v" id="backendText">—</div></div>
     </div>
 
     <div class="btn-row">
@@ -68,7 +73,7 @@
 <section class="card">
     <h2 data-i18n="dns.resolver">Servidores</h2>
 
-    <p class="hint" style="margin:0 0 10px;">Proveedores preestablecidos (stamp con IP embebida):</p>
+    <p class="hint ui-advanced-only" style="margin:0 0 10px;">Proveedores preestablecidos (stamp con IP embebida):</p>
     <div class="btn-row" style="margin-bottom:16px;">
       <button data-provider="cloudflare">Cloudflare</button>
       <button data-provider="quad9">Quad9</button>
@@ -112,7 +117,7 @@
         <option value="block">Bloquear DNS por IPv6 (evita fugas)</option>
       </select>
     </div>
-    <p class="hint">
+    <p class="hint ui-advanced-only">
       "Redirigir" usa el mismo proxy para IPv4 e IPv6. "Bloquear" corta las
       consultas DNS por IPv6 para que no se escapen sin cifrar; el resto del
       trafico IPv6 no se toca.
@@ -132,7 +137,7 @@
     <div id="protectionTotal" class="hint" style="margin-top:8px;"></div>
   </section>
 
-<details class="card">
+  <details class="card ui-advanced-only">
     <summary>Diagnostico — Private DNS de Android</summary>
     <button id="btnPrivateDns" class="small" style="margin-bottom:10px;">Verificar Private DNS</button>
     <div id="privateDnsText" class="hint">Toca el boton para consultar.</div>
@@ -140,6 +145,49 @@
 
   </div>
   <div class="route" id="route-lists" data-route="lists" hidden>
+  <section class="card catalog-card">
+    <h2 data-i18n="lists.catalog">Protección por listas</h2>
+    <p class="hint" style="margin-top:0;">Las categorías están a la vista. Podés activar una categoría completa o elegir listas individuales; nada cambia hasta confirmar.</p>
+    <div class="catalog-tools">
+      <label class="catalog-search" for="catSearch">
+        <span class="catalog-search-icon" aria-hidden="true">&#8981;</span>
+        <input type="text" id="catSearch" placeholder="Buscar en las listas" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </label>
+      <button id="btnCatFilter" type="button" class="catalog-filter-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="catFilterSheet" aria-label="Filtrar listas">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>
+        <span>Filtrar</span>
+        <span id="catFilterBadge" class="catalog-filter-badge" hidden>0</span>
+      </button>
+    </div>
+    <div id="catActiveFilters" class="catalog-active-filters" hidden></div>
+    <div class="catalog-selection-tabs" role="group" aria-label="Fuentes del catálogo">
+      <button id="btnCatAll" type="button" aria-pressed="true">Todas</button>
+      <button id="btnCatSelected" type="button" aria-pressed="false">Seleccionadas</button>
+    </div>
+    <div class="catalog-download-all">
+      <button id="btnCatDownloadAll" type="button" class="small">Descargar todas las fuentes</button>
+      <p class="hint">Descarga y valida las fuentes compatibles en segundo plano, hasta 4 a la vez según el espacio disponible. No activa listas nuevas ni cambia los bloqueos actuales; conserva 512 MiB libres. Las fuentes que requieren revisión técnica se informan como omitidas.</p>
+      <div id="catDownloadStatus" class="hint" aria-live="polite"></div>
+    </div>
+    <div id="catResults" class="catalog-groups hint" aria-live="polite">Cargando categorías…</div>
+    <div class="btn-row" style="margin:12px 0 8px;">
+      <button id="btnCatAddSelected" class="primary" disabled>Aplicar cambios (0)</button>
+      <button id="btnCatClearSelection" class="small" disabled>Limpiar selección</button>
+    </div>
+    <div id="catSelectionStatus" class="hint" aria-live="polite">No hay fuentes seleccionadas.</div>
+    <div id="catApplyStatus" class="hint" aria-live="polite"></div>
+    <details class="catalog-options">
+      <summary>Actualizar, compilar y otras opciones</summary>
+      <div class="btn-row" style="margin-bottom:10px;">
+        <button id="btnCatUpdate" class="primary">Actualizar activas</button>
+        <button id="btnCatCompile">Compilar</button>
+        <button id="btnCatConflicts" class="small">Conflictos</button>
+      </div>
+      <p class="hint">Las listas se descargan desde sus fuentes y se validan antes de activarse. <code>LICENSE_UNKNOWN</code> informa que no se verificó la licencia upstream; podés seleccionar la lista y se descarga al aplicar. <code>REQUIERE REVISIÓN</code> y <code>ROTA</code> indican que esa fuente todavía no es técnicamente utilizable. Una casilla marcada prepara el cambio; solo se ejecuta al confirmar.</p>
+    </details>
+    <div id="catConflicts" class="hint" style="margin-top:8px;"></div>
+  </section>
+
   <section class="card">
     <button type="button" id="scToggle" class="v-collapse-h" aria-expanded="false" aria-controls="scBody">
       <span class="v-collapse-title" data-i18n="sc.section.title">Per-service privacy</span>
@@ -148,7 +196,7 @@
     </button>
     <div id="scBody" class="v-collapse-body" hidden></div>
   </section>
-  <section class="card">
+  <section class="card ui-advanced-only">
     <h2 data-i18n="src.doctor.title">Source doctor</h2>
     <div class="field" style="display:flex; gap:8px; align-items:center;">
       <input id="srcDoctorId" type="text" data-i18n-ph="src.doctor.placeholder" placeholder="source id"
@@ -223,33 +271,6 @@
   </section>
 
 <section class="card">
-    <h2 data-i18n="lists.catalog">Catalogo de listas</h2>
-    <p class="hint" style="margin-top:0;">
-      Motor por metadatos. Activar una fuente la descarga, valida y recompila.
-      Estado: <code>verified</code> (descargada y validada en este equipo),
-      <code>unverified</code> (URL oficial, aun no descargada), <code>legacy</code>,
-      <code>archived</code>, <code>broken</code>.
-    </p>
-    <div class="field">
-      <label for="catSearch">Buscar (nombre, id, categoria)</label>
-      <input type="text" id="catSearch" placeholder="ej: hagezi, malware, ads" autocapitalize="off" autocorrect="off" spellcheck="false">
-    </div>
-    <div class="btn-row" style="margin-bottom:8px;">
-      <button id="btnCatRecommended" class="small">Recomendadas</button>
-      <button id="btnCatEnabled" class="small">Activas</button>
-      <button id="btnCatAll" class="small">Todas</button>
-    </div>
-    <div class="btn-row" style="margin-bottom:10px;">
-      <button id="btnCatUpdate" class="primary">Actualizar activas</button>
-      <button id="btnCatCompile">Compilar</button>
-      <button id="btnCatConflicts" class="small">Conflictos</button>
-    </div>
-    <div id="catResults" class="hint">Escribi una busqueda o toca “Recomendadas”.</div>
-    <div id="catPager" class="btn-row" style="margin-top:8px;"></div>
-    <div id="catConflicts" class="hint" style="margin-top:8px;"></div>
-  </section>
-
-<section class="card">
     <h2 data-i18n="lists.custom">Fuentes personalizadas</h2>
     <div class="field">
       <label for="customUrl">URL (https://)</label>
@@ -287,7 +308,7 @@
   </div>
   <div class="route" id="route-activity" data-route="activity" hidden>
 
-<section class="card">
+  <section class="card ui-advanced-only">
     <h2 data-i18n="activity.leaks">Auditoria de fugas DNS</h2>
     <div class="btn-row" style="margin-bottom:12px;">
       <button id="btnLeakTest" class="primary">Ejecutar prueba</button>
@@ -352,7 +373,7 @@
     </p>
   </section>
 
-<details class="card">
+<details class="card ui-advanced-only">
     <summary>Logs</summary>
     <div class="btn-row" style="margin-bottom:12px;">
       <button id="btnLogs" class="small">Ver logs recientes</button>
@@ -374,7 +395,7 @@
     </div>
     <p class="hint" data-i18n="common.experimental">Experimental</p>
   </section>
-  <section class="card">
+  <section class="card ui-advanced-only">
     <h2 data-i18n="env.title">Environment</h2>
     <button id="btnEnvRefresh" class="small" data-i18n="common.refresh">Refresh</button>
     <div id="envCard" class="hint" style="margin-top:8px; white-space:pre-wrap;">-</div>
@@ -442,6 +463,22 @@
   <footer>
     DNSCrypt Manager · Creado por Skaymer AR
   </footer>
+
+  <div id="catFilterBackdrop" class="filter-backdrop" hidden></div>
+  <section id="catFilterSheet" class="filter-sheet" role="dialog" aria-modal="true" aria-labelledby="catFilterTitle" aria-hidden="true" hidden tabindex="-1">
+    <div class="filter-sheet-handle" aria-hidden="true"></div>
+    <div class="filter-sheet-head">
+      <h3 id="catFilterTitle">Filtrar listas</h3>
+      <button id="btnCatFilterClose" type="button" class="filter-close" aria-label="Cerrar filtros">&#215;</button>
+    </div>
+    <p class="hint">Elegí uno o más valores reales del catálogo. Se combinan con OR dentro de cada grupo y con AND entre grupos.</p>
+    <div id="catFilterStatus" class="hint" aria-live="polite">Cargando opciones del catálogo…</div>
+    <div id="catFilterOptions" class="filter-options"></div>
+    <div class="filter-actions">
+      <button id="btnCatFilterClear" type="button">Limpiar</button>
+      <button id="btnCatFilterApply" type="button" class="primary">Aplicar</button>
+    </div>
+  </section>
 
   <div id="toast" class="toast"></div>
 

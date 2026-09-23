@@ -2,19 +2,7 @@ name: Publish DNSCrypt Manager v1.0.0
 
 on:
   push:
-    branches: [main]
-    paths:
-      - '.github/workflows/publish-v1.yml'
-      - 'module.prop'
-      - 'README.md'
-      - 'CHANGELOG.md'
-      - 'release/v1.0.0/**'
-      - 'scripts/**'
-      - 'system/**'
-      - 'webroot/**'
-      - 'config/**'
-      - 'tests/**'
-      - 'tools/**'
+    tags: [v1.0.0]
   workflow_dispatch:
 
 permissions:
@@ -51,7 +39,7 @@ jobs:
           grep -qx "version=$VERSION" module.prop
           grep -qx "versionCode=$VERSION_CODE" module.prop
           grep -qx 'author=Skaymer AR' module.prop
-          test "$GITHUB_REF_NAME" = main
+          test "$GITHUB_REF_NAME" = "$TAG"
 
       - name: Install test and packaging dependencies
         shell: bash

@@ -65,11 +65,10 @@ fi
   done
   log "red disponible tras ${i}s"
 
-  # 2b. Migracion versionada v0.1.0 -> v0.2.0 (idempotente; solo actua una vez).
-  if [ ! -f "$DATA_DIR/schema_version" ] || [ "$(cat "$DATA_DIR/schema_version" 2>/dev/null)" != "2" ]; then
-    log "ejecutando migracion de esquema"
-    run_cli migrate >> "$LOG" 2>&1 || log "migracion reporto error (se continua con cuidado)"
-  fi
+  # 2b. Migración idempotente + metadatos del catálogo. El índice local debe
+  # actualizarse aunque schema_version no cambie; no descarga ni activa listas.
+  log "verificando esquema y metadatos locales"
+  run_cli migrate >> "$LOG" 2>&1 || log "migracion reporto error (se continua con cuidado)"
 
   # 2c. Barrer excepciones temporales caducas (o de boots anteriores) antes de
   #     regenerar/arrancar. No depende de cron.

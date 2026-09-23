@@ -21,7 +21,9 @@
 #  1 id 2 family_id 3 name 4 maintainer 5 categories 6 aggressiveness 7 format
 #  8 primary_url 9 license 10 upstream_status 11 recommended 12 mobile_suitability
 #  13 archived 14 supersedes 15 contained_by 16 overlaps_with 17 conflicts_with
-#  18 last_verified 19 description_es
+#  18 last_verified 19 description_es 20 source_name 21 source_group
+#  22 source_subgroup 23 source_packs 24 source_formats 25 source_urls
+#  26 source_url_count 27 activation_blocked
 ##############################################################################
 
 CAT_DIR="$DATA_DIR/catalog"
@@ -31,13 +33,27 @@ CAT_CUSTOM="$CAT_DIR/custom.tsv"
 CAT_CACHE_DIR="$CAT_DIR/cache"
 CAT_BLACKLIST="$CAT_DIR/blacklist.txt"
 SRCST="$CAT_DIR/source-status.tsv"   # estado runtime persistente (separado del catalogo)
+CAT_SUCCESS="$CAT_DIR/source-success.tsv" # ultimo artefacto validado por fuente
+CAT_MANIFEST="$CAT_DIR/blocklists-manifest.json"
+CAT_PROVENANCE="$CAT_DIR/source-provenance.tsv"
 CAT_COMPILE_LOCK="$RUN_DIR/catalog.compile.lock"        # lock DIR (mkdir atomico)
 CAT_COMPILE_PROGRESS="$RUN_DIR/catalog.compile.progress" # estado consultable
 : "${CAT_COMPILE_TIMEOUT_DEFAULT:=900}"                    # 15 min tope seguro (override por env)
 CAT_STATS="$CAT_DIR/contribution-stats.tsv"             # aporte unico (runtime, separado)
-: "${CAT_MIN_FREE_KB:=51200}"   # ~50 MB libres minimos para compilar (override por env)
-: "${CAT_MAX_SOURCE_BYTES:=104857600}" # 100 MB por fuente descargada (override por env)
+: "${CAT_MIN_FREE_KB:=524288}"  # ~512 MiB libres para staging/rollback a escala (override por env)
+: "${CAT_MAX_SOURCE_BYTES:=268435456}" # 256 MiB por fuente descargada (override por env)
 : "${CAT_MIN_SOURCE_BYTES:=32}"
+: "${CAT_MAX_SOURCE_DOMAINS:=5000000}"
+: "${CAT_MAX_ACTIVE_DOMAINS:=5000000}" # limite del conjunto deduplicado del catalogo activo
+: "${CAT_MAX_ACTIVE_SOURCE_ENTRIES:=10000000}" # incluye duplicados; acota procesamiento y almacenamiento
+: "${CAT_MAX_ACTIVE_SOURCE_BYTES:=1073741824}" # 1 GiB entre cachés activas del catálogo
+: "${CAT_MIN_RETENTION_PCT:=50}" # rechaza caidas bruscas contra la ultima cache valida
+: "${CAT_DOWNLOAD_RESERVE_KB:=524288}" # conserva 512 MiB libres mientras prepara las cachés
+: "${CAT_DOWNLOAD_JOBS:=4}" # máximo de descargas concurrentes; el worker reduce esto según el espacio disponible
+
+CAT_DOWNLOAD_LOCK="$CAT_DIR/download-all.lock"
+CAT_DOWNLOAD_STATUS="$CAT_DIR/download-all.status"
+CAT_DOWNLOAD_LOG="$CAT_DIR/download-all.log"
 
 cat_lib_loaded() { return 0; }
 
@@ -48,21 +64,54 @@ cat_init_dirs() {
   [ -f "$CAT_CUSTOM" ] || : > "$CAT_CUSTOM"
   [ -f "$CAT_BLACKLIST" ] || : > "$CAT_BLACKLIST"
   [ -f "$SRCST" ] || : > "$SRCST"
-  chmod 0600 "$CAT_ENABLED" "$CAT_CUSTOM" "$CAT_BLACKLIST" "$SRCST" 2>/dev/null
+  [ -f "$CAT_SUCCESS" ] || : > "$CAT_SUCCESS"
+  chmod 0600 "$CAT_ENABLED" "$CAT_CUSTOM" "$CAT_BLACKLIST" "$SRCST" "$CAT_SUCCESS" 2>/dev/null
   return 0
 }
 cat_init_dirs
 
-# Copia el index del modulo al dispositivo (solo si falta o cambio). Se llama
-# desde la migracion. NUNCA descarga nada.
-cat_sync_index() {
-  _src="$MODDIR/config/catalog/blocklists.index.tsv"
-  [ -f "$_src" ] || return 0
-  if [ ! -f "$CAT_INDEX" ] || ! cmp -s "$_src" "$CAT_INDEX" 2>/dev/null; then
-    cp -f "$_src" "$CAT_INDEX" 2>/dev/null
-    chmod 0600 "$CAT_INDEX" 2>/dev/null
+# Metadatos locales del módulo, NO listas descargadas ni preferencias. Esta
+# sincronización es independiente del schema: una actualización puede cambiar
+# el catálogo sin cambiar el formato de los datos del usuario.
+# Staging en el MISMO directorio + rename: lectores concurrentes ven siempre
+# el índice anterior completo o el nuevo completo, nunca una copia a medias.
+cat_sync_index() (
+  _cat_src="$MODDIR/config/catalog/blocklists.index.tsv"
+  if [ ! -f "$_cat_src" ] || [ ! -r "$_cat_src" ] || [ ! -s "$_cat_src" ]; then
+    echo "ERROR: falta el índice de catálogo incluido en el módulo: $_cat_src" >&2
+    return 1
+  fi
+  if [ -f "$CAT_INDEX" ] && [ -r "$CAT_INDEX" ] && cmp -s "$_cat_src" "$CAT_INDEX" 2>/dev/null; then
+    return 0
+  fi
+  _cat_tmp=$(mktemp "$CAT_DIR/.blocklists.index.XXXXXX") || {
+    echo "ERROR: no se pudo preparar el índice de catálogo en $CAT_DIR" >&2; return 1;
+  }
+  trap 'rm -f "$_cat_tmp"' 0
+  trap 'exit 1' HUP INT TERM
+  if ! cp "$_cat_src" "$_cat_tmp" || ! chmod 0600 "$_cat_tmp" || ! cmp -s "$_cat_src" "$_cat_tmp"; then
+    echo "ERROR: no se pudo copiar el índice de catálogo; se conserva el anterior." >&2
+    return 1
+  fi
+  if ! awk -F '\t' '!/^#/ && NF {
+      if (NF!=27 || $1 !~ /^[a-z0-9][a-z0-9_-]*$/ || seen[$1]++) bad=1
+      count++
+    } END { exit (bad || count==0) }' "$_cat_tmp"; then
+    echo "ERROR: índice de catálogo inválido; se conserva el anterior." >&2
+    return 1
+  fi
+  if ! mv -f "$_cat_tmp" "$CAT_INDEX"; then
+    echo "ERROR: no se pudo reemplazar el índice de catálogo; se conserva el anterior." >&2
+    return 1
   fi
   return 0
+)
+
+# Autorreparación al consultar: también funciona antes de migrate/primer boot,
+# o si una instalación schema 3 perdió solo este archivo de metadatos.
+cat_ensure_index() {
+  [ -f "$CAT_INDEX" ] && [ -r "$CAT_INDEX" ] && [ -s "$CAT_INDEX" ] && return 0
+  cat_sync_index
 }
 
 # ---------------------------------------------------------------------------
@@ -70,6 +119,7 @@ cat_sync_index() {
 # ---------------------------------------------------------------------------
 # Imprime la fila completa (TSV) de un id, buscando primero en custom.
 cat_row() {
+  cat_ensure_index || return 1
   _id="$1"
   awk -F'\t' -v id="$_id" '$1==id {print; exit}' "$CAT_CUSTOM" 2>/dev/null | grep -q . && {
     awk -F'\t' -v id="$_id" '$1==id {print; exit}' "$CAT_CUSTOM" 2>/dev/null
@@ -92,10 +142,153 @@ cat_runtime_status() { srcst_status "$1"; }
 
 # Lista todos los ids (custom primero, luego catalogo), sin duplicar.
 cat_all_ids() {
+  cat_ensure_index || return 1
   {
     awk -F'\t' 'NF>=1 && $1!="" {print $1}' "$CAT_CUSTOM" 2>/dev/null
     awk -F'\t' '!/^#/ && NF>=1 && $1!="" {print $1}' "$CAT_INDEX" 2>/dev/null
   } | awk '!seen[$0]++'
+}
+
+# Resumen pequeño del catalogo para la WebUI. La pantalla de Listas no necesita
+# recibir las fichas completas para dibujar los acordeones: primero pide solo
+# estos contadores y luego solicita una categoria cuando el usuario la abre.
+# Esto evita truncamientos del stdout de ksu.exec en Android.
+cat_groups_output() {
+  cat_ensure_index || return 1
+  awk -F '\t' \
+    -v custom_file="$CAT_CUSTOM" -v index_file="$CAT_INDEX" \
+    -v enabled_file="$CAT_ENABLED" '
+    BEGIN {
+      order[1]="Security"; order[2]="Privacy"; order[3]="ParentalControl"
+      order[4]="dcm"; order[5]="rethink_unassigned"
+    }
+    function add(    g) {
+      if ($1=="" || seen[$1]++) return
+      if ($20=="") g="dcm"
+      else if ($21=="") g="rethink_unassigned"
+      else g=$21
+      count[g]++
+      if ($1 in active) active_count[g]++
+    }
+    FILENAME == enabled_file { if ($1!="") active[$1]=1; next }
+    /^#/ { next }
+    NF < 1 || $1 == "" { next }
+    FILENAME == custom_file { add(); next }
+    FILENAME == index_file { add(); next }
+    END {
+      printf "{\"groups\":["
+      for (i=1; i<=5; i++) {
+        g=order[i]
+        if (i>1) printf ","
+        printf "{\"key\":\"%s\",\"count\":%d,\"active\":%d}", g, count[g]+0, active_count[g]+0
+      }
+      print "]}"
+    }
+  ' "$CAT_ENABLED" "$CAT_CUSTOM" "$CAT_INDEX"
+}
+
+# La WebUI pide todo el catálogo como JSON. Leer cada fila mediante cat_field,
+# srcst_field y cat_success_field lanzaba cientos de procesos en el teléfono.
+# Esta ruta hace una sola pasada por los índices y carga los estados runtime en
+# memoria dentro de awk, preservando los campos JSON y filtros de la CLI.
+cat_list_output() {
+  cat_ensure_index || return 1
+  awk -F '\t' \
+    -v custom_file="$CAT_CUSTOM" -v index_file="$CAT_INDEX" \
+    -v enabled_file="$CAT_ENABLED" -v status_file="$SRCST" -v success_file="$CAT_SUCCESS" \
+    -v filter_cat="$1" -v filter_maint="$(printf '%s' "$2" | tr 'A-Z' 'a-z')" \
+    -v only_enabled="$3" -v only_recommended="$4" -v only_archived="$5" \
+    -v search="$(printf '%s' "$6" | tr 'A-Z' 'a-z')" -v output="$7" \
+    -v group_filter="$8" '
+    function j(s, out, i, c) {
+      out = ""
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\\") out = out "\\\\"
+        else if (c == "\"") out = out "\\\""
+        else if (c == "\t") out = out "\\t"
+        else if (c == "\r") out = out "\\r"
+        else if (c == "\n") out = out "\\n"
+        else out = out c
+      }
+      return out
+    }
+    function num(v, fallback) { return (v ~ /^[0-9]+$/) ? v : fallback }
+    function emit(    id, name, maint, cats, agg, fmt, lic, upstream, recommended,
+                      mobile, archived, desc, source_name, source_group, subgroup,
+                      packs, formats, urls, url_count, act_blocked, enabled,
+                      license_blocked, runtime, domains, last_success, sha, bytes,
+                      hay, catlist, group_key) {
+      id=$1; name=$3; maint=$4; cats=$5; agg=$6; fmt=$7; lic=$9; upstream=$10
+      recommended=$11; mobile=$12; archived=$13; desc=$19
+      source_name=$20; source_group=$21; subgroup=$22
+      if (source_name=="") group_key="dcm"
+      else if (source_group=="") group_key="rethink_unassigned"
+      else group_key=source_group
+      packs=$23; gsub(/,/, "|", packs)
+      formats=$24; gsub(/,/, "|", formats)
+      urls=$25; gsub(/,/, "|", urls)
+      url_count=num($26, "0")
+      act_blocked=($27=="1" || $27=="true" || $27=="yes")
+      enabled=(id in active)
+      all_count++
+      if (enabled) active_count++
+      # La licencia se muestra como metadata, pero no bloquea el opt-in manual.
+      # El contenido no se empaqueta; se descarga del upstream cuando el usuario aplica.
+      license_blocked=0
+      runtime=(id in status) && status[id]!="" ? status[id] : "never_checked"
+      domains=(id in success) && success[id,7]!="" ? success[id,7] : ((id in status) && status[id,9]!="" ? status[id,9] : "-")
+      last_success=(id in success) && success[id,9]!="" ? success[id,9] : ((id in status) && status[id,4]!="" ? status[id,4] : "0")
+      sha=(id in success) ? success[id,4] : ""
+      bytes=(id in success) ? num(success[id,5], "0") : "0"
+
+      if (only_enabled && !enabled) return
+      if (only_recommended && recommended!="1") return
+      if (only_archived && archived!="1") return
+      if (group_filter!="" && group_key!=group_filter) return
+      if (filter_cat!="" && index("," cats ",", "," filter_cat ",")==0) return
+      if (filter_maint!="" && index(tolower(maint), filter_maint)==0) return
+      hay=tolower(id " " name " " desc " " cats)
+      if (search!="" && index(hay, search)==0) return
+
+      if (output == "text") {
+        printf "  [%s] %-34s %-12s %-9s %s/%s dom=%-8s %s%s\n", \
+          (enabled ? "si" : "no"), id, maint, agg, upstream, runtime, domains, \
+          (recommended=="1" ? "(recomendada) " : ""), (archived=="1" ? "(ARCHIVADA) " : "")
+        return
+      }
+      if (!first) printf ","
+      first=0
+      printf "{\"id\":\"%s\",\"name\":\"%s\",\"source_name\":\"%s\",\"source_group\":\"%s\",\"source_subgroup\":\"%s\",\"source_packs\":\"%s\",\"source_formats\":\"%s\",\"source_urls\":\"%s\",\"source_url_count\":%s,\"activation_blocked\":%s,\"maintainer\":\"%s\",\"categories\":\"%s\",\"aggressiveness\":\"%s\",\"format\":\"%s\",\"license\":\"%s\",\"license_blocked\":%s,\"upstream_status\":\"%s\",\"runtime_status\":\"%s\",\"mobile_suitability\":\"%s\",\"recommended\":%s,\"archived\":%s,\"enabled\":%s,\"valid_domains\":\"%s\",\"cache_domains\":\"%s\",\"last_success\":%s,\"sha256\":\"%s\",\"downloaded_bytes\":%s}", \
+        j(id), j(name), j(source_name), j(source_group), j(subgroup), j(packs), j(formats), j(urls), url_count, \
+        (act_blocked ? "true" : "false"), j(maint), j(cats), j(agg), j(fmt), j(lic), \
+        (license_blocked ? "true" : "false"), j(upstream), j(runtime), j(mobile), \
+        (recommended=="1" ? "true" : "false"), (archived=="1" ? "true" : "false"), \
+        (enabled ? "true" : "false"), j(domains), j(domains), num(last_success,"0"), j(sha), bytes
+    }
+    BEGIN {
+      first=1
+      if (output == "text") print "Catalogo de listas (marca [si/no] = activa):"
+      else print "{\"entries\":["
+    }
+    FILENAME == enabled_file { if ($1!="") active[$1]=1; next }
+    FILENAME == status_file {
+      if ($1!="") { status[$1]=$2; status[$1,4]=$4; status[$1,9]=$9 }
+      next
+    }
+    FILENAME == success_file {
+      if ($1!="") { success[$1]=1; success[$1,4]=$4; success[$1,5]=$5; success[$1,7]=$7; success[$1,9]=$9 }
+      next
+    }
+    /^#/ { next }
+    NF < 1 || $1 == "" { next }
+    FILENAME == custom_file { if (!seen[$1]++) emit(); next }
+    FILENAME == index_file { if (!seen[$1]++) emit(); next }
+    END {
+      if (output == "text") printf "Total: %d fuentes. Activas: %d.\n", all_count, active_count
+      else print "]}"
+    }
+  ' "$CAT_ENABLED" "$SRCST" "$CAT_SUCCESS" "$CAT_CUSTOM" "$CAT_INDEX"
 }
 
 # ---------------------------------------------------------------------------
@@ -103,7 +296,23 @@ cat_all_ids() {
 # ---------------------------------------------------------------------------
 cat_is_enabled() { grep -qxF "$1" "$CAT_ENABLED" 2>/dev/null; }
 
+cat_activation_blocked() {
+  case "$(cat_field "$1" 27)" in 1|true|yes) return 0 ;; esac
+  return 1
+}
+
+cat_activation_check() {
+  _id="$1"
+  if cat_activation_blocked "$_id"; then
+    echo "ERROR ($_id): fuente compuesta o sin transporte/formato compatible; requiere revisión antes de activarse." >&2
+    return 1
+  fi
+  return 0
+}
+
 cat_enable() {
+  cat_activation_check "$1" || return 1
+  cat_license_check "$1" || return 1
   cat_is_enabled "$1" && return 0
   _t="$CAT_ENABLED.tmp.$$"
   { cat "$CAT_ENABLED" 2>/dev/null; echo "$1"; } | awk '!seen[$0]++' > "$_t"
@@ -124,6 +333,51 @@ cat_enabled_lists() {
     _f="$CAT_CACHE_DIR/$_id.list"
     [ -s "$_f" ] && printf '%s\n' "$_f"
   done < "$CAT_ENABLED"
+}
+
+# Evita que la union del catalogo activo crezca sin limite en dispositivos
+# moviles. El conteo se deduplica antes de comparar; las categorias legacy
+# conservan su comportamiento y no se modifican con este limite.
+cat_active_stats() {
+  _raw="$RUN_DIR/catalog.active.raw.$$"; _unique="$RUN_DIR/catalog.active.unique.$$"
+  : > "$_raw" || return 1
+  cat_enabled_lists | while IFS= read -r _f; do [ -s "$_f" ] && cat "$_f" >> "$_raw"; done
+  sort -u "$_raw" > "$_unique" || { rm -f "$_raw" "$_unique"; return 1; }
+  _total=$(wc -l < "$_raw" | tr -d ' ')
+  _unique_count=$(wc -l < "$_unique" | tr -d ' ')
+  _bytes=$(wc -c < "$_raw" | tr -d ' ')
+  rm -f "$_raw" "$_unique"
+  printf '%s\t%s\t%s\n' "${_total:-0}" "${_unique_count:-0}" "${_bytes:-0}"
+}
+
+cat_active_unique_count() {
+  cat_active_stats | cut -f2
+}
+
+cat_validate_active_limit() {
+  case "$CAT_MAX_ACTIVE_DOMAINS" in ''|*[!0-9]*) CAT_MAX_ACTIVE_DOMAINS=5000000 ;; esac
+  case "$CAT_MAX_ACTIVE_SOURCE_ENTRIES" in ''|*[!0-9]*) CAT_MAX_ACTIVE_SOURCE_ENTRIES=10000000 ;; esac
+  case "$CAT_MAX_ACTIVE_SOURCE_BYTES" in ''|*[!0-9]*) CAT_MAX_ACTIVE_SOURCE_BYTES=1073741824 ;; esac
+  _stats=$(cat_active_stats) || { echo "ERROR: no se pudo medir el catálogo activo." >&2; return 1; }
+  _raw=$(printf '%s\n' "$_stats" | cut -f1)
+  _unique=$(printf '%s\n' "$_stats" | cut -f2)
+  _bytes=$(printf '%s\n' "$_stats" | cut -f3)
+  if [ "$_raw" -gt "$CAT_MAX_ACTIVE_SOURCE_ENTRIES" ] 2>/dev/null; then
+    echo "ERROR: las fuentes activas suman $_raw entradas normalizadas (incluye duplicados); el límite seguro es $CAT_MAX_ACTIVE_SOURCE_ENTRIES." >&2
+    log_msg "[BLOCKLIST] ERROR active source entries limit exceeded ($_raw > $CAT_MAX_ACTIVE_SOURCE_ENTRIES); active list preserved"
+    return 1
+  fi
+  if [ "$_bytes" -gt "$CAT_MAX_ACTIVE_SOURCE_BYTES" ] 2>/dev/null; then
+    echo "ERROR: las cachés activas suman $_bytes bytes; el límite seguro es $CAT_MAX_ACTIVE_SOURCE_BYTES." >&2
+    log_msg "[BLOCKLIST] ERROR active source bytes limit exceeded ($_bytes > $CAT_MAX_ACTIVE_SOURCE_BYTES); active list preserved"
+    return 1
+  fi
+  if [ "$_unique" -gt "$CAT_MAX_ACTIVE_DOMAINS" ] 2>/dev/null; then
+    echo "ERROR: el catálogo activo contiene $_unique dominios únicos; el límite seguro es $CAT_MAX_ACTIVE_DOMAINS. Desactiva fuentes redundantes o agresivas." >&2
+    log_msg "[BLOCKLIST] ERROR active catalog limit exceeded ($_unique > $CAT_MAX_ACTIVE_DOMAINS); active list preserved"
+    return 1
+  fi
+  return 0
 }
 
 # Orden CANONICO y estable de fuentes activas: prioridad explicita (recomendadas
@@ -316,9 +570,238 @@ srcst_clear() {
   mv -f "$_t" "$SRCST"; chmod 0600 "$SRCST" 2>/dev/null
 }
 
-cat_update_one() {
+# LICENSE_UNKNOWN es metadata informativa. Las fuentes siguen apagadas por
+# defecto y solo se descargan tras una seleccion explicita del usuario.
+cat_license_unknown() {
+  case "$(cat_field "$1" 9)" in ''|unknown|UNKNOWN|LICENSE_UNKNOWN) return 0 ;; esac
+  return 1
+}
+
+cat_license_check() {
   _id="$1"
   cat_exists "$_id" || { echo "ERROR: id desconocido en el catalogo: '$_id'" >&2; return 1; }
+  return 0
+}
+
+# Descarga controlada. La URL inicial debe ser HTTPS (file:// solo en tests);
+# los redirects de curl también quedan limitados a HTTPS. La respuesta nunca se
+# ejecuta y solo llega a una ruta temporal bajo RUN_DIR.
+cat_fetch_raw() {
+  _url="$1"; _dst="$2"
+  case "$CAT_MAX_SOURCE_BYTES" in ''|*[!0-9]*) CAT_MAX_SOURCE_BYTES=268435456 ;; esac
+  _fetch_cap=$((CAT_MAX_SOURCE_BYTES + 1))
+  CAT_FETCH_HTTP="-"
+  case "$_url" in
+    file://*)
+      [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ] || return 1
+      CAT_FETCH_HTTP=local
+      sec_download "$_url" "$_dst"
+      return $? ;;
+    https://*) : ;;
+    *) return 1 ;;
+  esac
+  # Hook determinista para fixtures: enumera código HTTP/RC y copia solo datos.
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ] && [ -n "${DNSCRYPT_TEST_CAT_BODY_FILE:-}" ]; then
+    CAT_FETCH_HTTP="${DNSCRYPT_TEST_CAT_HTTP:-200}"
+    _rc="${DNSCRYPT_TEST_CAT_RC:-0}"
+    case "$_rc" in ''|*[!0-9]*) _rc=1 ;; esac
+    case "$CAT_FETCH_HTTP" in 2[0-9][0-9]) : ;; *) return 1 ;; esac
+    # Simula fuentes lentas y mide solapamiento en la suite; esta rama solo
+    # existe con TEST_MODE y nunca se incluye en una ruta de producción.
+    if [ -n "${DNSCRYPT_TEST_CAT_CONCURRENCY_FILE:-}" ]; then
+      _tc="$DNSCRYPT_TEST_CAT_CONCURRENCY_FILE"; _tl="$_tc.lock"
+      while ! mkdir "$_tl" 2>/dev/null; do sleep 0.01; done
+      _ta=$(cat "$_tc.active" 2>/dev/null); case "$_ta" in ''|*[!0-9]*) _ta=0 ;; esac
+      _ta=$((_ta + 1)); printf '%s\n' "$_ta" > "$_tc.active"
+      _tm=$(cat "$_tc.max" 2>/dev/null); case "$_tm" in ''|*[!0-9]*) _tm=0 ;; esac
+      [ "$_ta" -le "$_tm" ] || printf '%s\n' "$_ta" > "$_tc.max"
+      rmdir "$_tl" 2>/dev/null
+      _td="${DNSCRYPT_TEST_CAT_DELAY:-1}"
+      case "$_td" in ''|*[!0-9]*) _td=1 ;; esac
+      sleep "$_td"
+    fi
+    [ "$_rc" = "0" ] || return 1
+    cp -f "$DNSCRYPT_TEST_CAT_BODY_FILE" "$_dst" 2>/dev/null || return 1
+    if [ -n "${DNSCRYPT_TEST_CAT_CONCURRENCY_FILE:-}" ]; then
+      _tc="$DNSCRYPT_TEST_CAT_CONCURRENCY_FILE"; _tl="$_tc.lock"
+      while ! mkdir "$_tl" 2>/dev/null; do sleep 0.01; done
+      _ta=$(cat "$_tc.active" 2>/dev/null); case "$_ta" in ''|*[!0-9]*) _ta=1 ;; esac
+      _ta=$((_ta - 1)); [ "$_ta" -ge 0 ] || _ta=0
+      printf '%s\n' "$_ta" > "$_tc.active"; rmdir "$_tl" 2>/dev/null
+    fi
+    [ -s "$_dst" ]
+    return $?
+  fi
+  _fetch_tag="${CAT_FETCH_TOKEN:-$$}"
+  if have curl; then
+    _headers="$RUN_DIR/cat.fetch.headers.$_fetch_tag"; _status="$RUN_DIR/cat.fetch.status.$_fetch_tag"
+    rm -f "$_headers" "$_status" 2>/dev/null
+    (
+      curl -sSL --proto '=https' --proto-redir '=https' \
+        --connect-timeout 15 --max-time 90 -D "$_headers" "$_url"
+      printf '%s\n' "$?" > "$_status"
+    ) | head -c "$_fetch_cap" > "$_dst"
+    _rc=$(cat "$_status" 2>/dev/null)
+    _http=$(awk '$1 ~ /^HTTP\// && $2 ~ /^[0-9][0-9][0-9]$/ {code=$2} END {print code}' "$_headers" 2>/dev/null)
+    CAT_FETCH_HTTP="${_http:-000}"
+    _sz=$(wc -c < "$_dst" 2>/dev/null | tr -d ' ')
+    rm -f "$_headers" "$_status" 2>/dev/null
+    case "$CAT_FETCH_HTTP" in
+      2[0-9][0-9])
+        # head limita el archivo en streaming incluso con curl anterior a 8.4,
+        # donde --max-filesize no cubria respuestas sin Content-Length.
+        if [ "${_sz:-0}" -gt "$CAT_MAX_SOURCE_BYTES" ] 2>/dev/null; then return 0; fi
+        [ "${_rc:-1}" = "0" ] && [ -s "$_dst" ]; return $? ;;
+    esac
+    rm -f "$_dst" 2>/dev/null
+    return 1
+  elif have wget; then
+    _wget_help=$(wget --help 2>&1)
+    if ! printf '%s\n' "$_wget_help" | grep -q -- '--max-redirect' \
+      || ! printf '%s\n' "$_wget_help" | grep -q -- '--server-response'; then
+      CAT_FETCH_HTTP=unknown
+      echo "ERROR: wget no permite limitar redirecciones; hace falta curl o GNU Wget compatible." >&2
+      return 1
+    fi
+    _headers="$RUN_DIR/cat.fetch.headers.$_fetch_tag"; _status="$RUN_DIR/cat.fetch.status.$_fetch_tag"
+    rm -f "$_headers" "$_status" 2>/dev/null
+    (
+      wget --max-redirect=0 --server-response -T 90 -O - "$_url" 2> "$_headers"
+      printf '%s\n' "$?" > "$_status"
+    ) | head -c "$_fetch_cap" > "$_dst"
+    _rc=$(cat "$_status" 2>/dev/null)
+    _http=$(awk '$1 ~ /^HTTP\// && $2 ~ /^[0-9][0-9][0-9]$/ {code=$2} END {print code}' "$_headers" 2>/dev/null)
+    CAT_FETCH_HTTP="${_http:-unknown}"
+    _sz=$(wc -c < "$_dst" 2>/dev/null | tr -d ' ')
+    rm -f "$_headers" "$_status" 2>/dev/null
+    case "$CAT_FETCH_HTTP" in
+      2[0-9][0-9])
+        if [ "${_sz:-0}" -gt "$CAT_MAX_SOURCE_BYTES" ] 2>/dev/null; then return 0; fi
+        [ "${_rc:-1}" = "0" ] && [ -s "$_dst" ]; return $? ;;
+    esac
+    rm -f "$_dst" 2>/dev/null
+    return 1
+  fi
+  echo "ERROR: ni curl ni wget disponibles para descargar" >&2
+  return 1
+}
+
+# Devuelve empty|html|json|text según el primer contenido no comentado.
+cat_payload_type() {
+  _file="$1"
+  awk '
+    /^[[:space:]]*$/ { next }
+    /^[[:space:]]*[#!;]/ { next }
+    {
+      s=tolower($0); sub(/^[[:space:]]+/, "", s)
+      if (s ~ /^<!doctype[[:space:]]+html/ || s ~ /^<html/ || s ~ /^<head/ || s ~ /^<body/ || s ~ /^<title/) print "html"
+      else if (s ~ /^\{/ || s ~ /^\[/) print "json"
+      else if (s ~ /cloudflare ray id|cf-browser-verification|enable javascript and cookies|access denied/) print "html"
+      else print "text"
+      exit
+    }
+    END { if (NR == 0) print "empty" }
+  ' "$_file" 2>/dev/null
+}
+
+cat_success_row() { awk -F'\t' -v id="$1" '$1==id {print; exit}' "$CAT_SUCCESS" 2>/dev/null; }
+cat_success_field() { cat_success_row "$1" | awk -F'\t' -v n="$2" '{print $n}'; }
+
+# source-success.tsv: id, URL, hash crudo, hash normalizado, bytes, reglas
+# crudas, dominios validos, ignorados, timestamp de exito, revision o '-'.
+cat_success_write() (
+  _id="$1"; _url="$(srcst_clean "$2")"; _raw="$3"; _norm="$4"; _bytes="$5"
+  _total="$6"; _valid="$7"; _invalid="$8"; _when="$9"; _revision="${10:--}"
+  _t="$CAT_SUCCESS.tmp.$$"
+  awk -F'\t' -v id="$_id" '$1 != id' "$CAT_SUCCESS" 2>/dev/null > "$_t"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$_id" "$_url" "$_raw" "$_norm" "$_bytes" "$_total" "$_valid" "$_invalid" "$_when" "$_revision" >> "$_t"
+  mv -f "$_t" "$CAT_SUCCESS" && chmod 0600 "$CAT_SUCCESS" 2>/dev/null
+)
+
+cat_success_clear() {
+  _t="$CAT_SUCCESS.tmp.$$"
+  awk -F'\t' -v id="$1" '$1 != id' "$CAT_SUCCESS" 2>/dev/null > "$_t"
+  mv -f "$_t" "$CAT_SUCCESS" && chmod 0600 "$CAT_SUCCESS" 2>/dev/null
+}
+
+# Artefacto runtime: hashes upstream/normalizado, conteos, URL y snapshot de
+# fuentes activas. Se reemplaza atómicamente y nunca contiene consultas DNS.
+cat_manifest_generate() (
+  cat_init_dirs
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ] && [ -n "${DNSCRYPT_TEST_CAT_MANIFEST_COUNTER:-}" ]; then
+    printf 'rebuild\n' >> "$DNSCRYPT_TEST_CAT_MANIFEST_COUNTER"
+  fi
+  _tmp="$CAT_MANIFEST.tmp.$$"
+  _now=$(sec_now)
+  printf '{"schema":1,"generated_at":%s,"active_sources":[' "$_now" > "$_tmp" || return 1
+  _first=1
+  if [ -s "$CAT_ENABLED" ]; then
+    while IFS= read -r _id; do
+      [ -n "$_id" ] || continue
+      [ "$_first" = 1 ] || printf ',' >> "$_tmp"
+      _first=0
+      printf '"%s"' "$(cat_json_escape "$_id")" >> "$_tmp"
+    done < "$CAT_ENABLED"
+  fi
+  printf '],"sources":[' >> "$_tmp"
+  _first=1
+  if [ -s "$CAT_SUCCESS" ]; then
+    while IFS="$(printf '\t')" read -r _id _url _raw _list _bytes _total _valid _invalid _when _rev; do
+      [ -n "$_id" ] || continue
+      [ "$_first" = 1 ] || printf ',' >> "$_tmp"
+      _first=0
+      _cats=$(cat_field "$_id" 5)
+      _license=$(cat_field "$_id" 9)
+      _runtime=$(srcst_status "$_id")
+      _cached="$CAT_CACHE_DIR/$_id.list"
+      _cache_count=0; [ -f "$_cached" ] && _cache_count=$(wc -l < "$_cached" | tr -d ' ')
+      [ -n "$_rev" ] && [ "$_rev" != "-" ] && _rev_json="\"$(cat_json_escape "$_rev")\"" || _rev_json=null
+      printf '{"id":"%s","url":"%s","categories":"%s","license":"%s","status":"%s","rules_downloaded":%s,"valid_domains":%s,"cached_domains":%s,"invalid_entries":%s,"downloaded_bytes":%s,"raw_sha256":"%s","normalized_sha256":"%s","last_success":%s,"revision":%s}' \
+        "$(cat_json_escape "$_id")" "$(cat_json_escape "$_url")" "$(cat_json_escape "$_cats")" \
+        "$(cat_json_escape "$_license")" "$_runtime" "${_total:-0}" "${_valid:-0}" "${_cache_count:-0}" \
+        "${_invalid:-0}" "${_bytes:-0}" "$_raw" "$_list" "${_when:-0}" "$_rev_json" >> "$_tmp"
+    done < "$CAT_SUCCESS"
+  fi
+  _blocked_count=0; _blocked_bytes=0; _blocked_sha=""
+  [ -f "$BL_BLOCKED" ] && { _blocked_count=$(wc -l < "$BL_BLOCKED" | tr -d ' '); _blocked_bytes=$(wc -c < "$BL_BLOCKED" | tr -d ' '); _blocked_sha=$(sec_sha256 "$BL_BLOCKED"); }
+  _prov_sha=""; [ -f "$CAT_PROVENANCE" ] && _prov_sha=$(sec_sha256 "$CAT_PROVENANCE")
+  printf '],"compiled":{"domains":%s,"bytes":%s,"sha256":"%s","provenance_sha256":"%s"}}\n' \
+    "${_blocked_count:-0}" "${_blocked_bytes:-0}" "$_blocked_sha" "$_prov_sha" >> "$_tmp"
+  mv -f "$_tmp" "$CAT_MANIFEST" || { rm -f "$_tmp"; return 1; }
+  chmod 0600 "$CAT_MANIFEST" 2>/dev/null
+)
+
+# Mapa auditable de cada dominio de una fuente activa a su id y clasificación
+# local. Un dominio presente en varias fuentes conserva una fila por fuente.
+cat_provenance_generate() {
+  _raw="$CAT_PROVENANCE.raw.$$"; _sorted="$CAT_PROVENANCE.sorted.$$"
+  : > "$_raw"
+  while IFS= read -r _id; do
+    [ -n "$_id" ] || continue
+    _list="$CAT_CACHE_DIR/$_id.list"; [ -s "$_list" ] || continue
+    _cats=$(cat_field "$_id" 5)
+    awk -v id="$_id" -v cats="$_cats" 'NF==1 {print $1 "\t" id "\t" cats}' "$_list" >> "$_raw" || {
+      rm -f "$_raw" "$_sorted"; return 1;
+    }
+  done < "$CAT_ENABLED"
+  sort -u -t "$(printf '\t')" -k1,1 -k2,2 -k3,3 "$_raw" > "$_sorted" || {
+    rm -f "$_raw" "$_sorted"; return 1;
+  }
+  mv -f "$_sorted" "$CAT_PROVENANCE" || { rm -f "$_raw" "$_sorted"; return 1; }
+  rm -f "$_raw"
+  chmod 0600 "$CAT_PROVENANCE" 2>/dev/null
+}
+
+cat_update_one() {
+  _id="$1"
+  if [ "${CAT_DOWNLOAD_ALL_WORKER:-0}" != "1" ] && cat_download_all_running; then
+    echo "ERROR ($_id): hay una descarga global del catálogo en curso; reintentá al finalizar." >&2
+    return 1
+  fi
+  cat_exists "$_id" || { echo "ERROR: id desconocido en el catalogo: '$_id'" >&2; return 1; }
+  cat_activation_check "$_id" || return 1
+  cat_license_check "$_id" || return 1
   # Fuentes marcadas broken/archived NO se descargan (evita reintentar un 404
   # permanente como si fuera temporal). Se conserva la ultima copia valida.
   _decl=$(cat_field "$_id" 10)
@@ -331,17 +814,28 @@ cat_update_one() {
   _url=$(cat_field "$_id" 8)
   _fmt=$(cat_field "$_id" 7)
   case "$_url" in https://*|file://*) : ;; *) echo "ERROR ($_id): url invalida" >&2; return 1 ;; esac
-  _http="-"; case "$_url" in file://*) _http="local" ;; esac
 
   _raw="$RUN_DIR/cat.$_id.raw.$$"
   _norm="$RUN_DIR/cat.$_id.norm.$$"
   # 1-2) descarga (reusa sec_download: file:// solo en TEST_MODE) + HTTP.
   # NO se toca cache/<id>.list salvo exito: una descarga fallida conserva la
   # ultima fuente valida.
-  if ! sec_download "$_url" "$_raw"; then
-    srcst_write "$_id" download_failed "$_http" 0 "" 0 0 0 0 "descarga fallida" "$_url" 0
-    echo "ERROR ($_id): descarga fallida" >&2; rm -f "$_raw"; return 1
+  if [ "${CAT_PREFETCH_ATTEMPTED:-0}" = "1" ]; then
+    _raw="${CAT_PREFETCH_RAW:-}"
+    _http="${CAT_PREFETCH_HTTP:-unknown}"
+    _fetch_ok="${CAT_PREFETCH_OK:-0}"
+  else
+    _raw="$RUN_DIR/cat.$_id.raw.$$"
+    if cat_fetch_raw "$_url" "$_raw"; then _fetch_ok=1; else _fetch_ok=0; fi
+    _http="${CAT_FETCH_HTTP:--}"
   fi
+  if [ "$_fetch_ok" != "1" ] || [ ! -s "$_raw" ]; then
+    srcst_write "$_id" download_failed "$_http" 0 "" 0 0 0 0 "HTTP $_http o descarga fallida" "$_url" 0
+    log_msg "[BLOCKLIST] ERROR source returned HTTP $_http; keeping previous valid copy ($_id)"
+    echo "ERROR ($_id): HTTP $_http o descarga fallida; se conserva la cache valida anterior." >&2
+    rm -f "$_raw"; return 1
+  fi
+  _http="${CAT_FETCH_HTTP:--}"
   # 3) tamano
   _sz=$(wc -c < "$_raw" 2>/dev/null | tr -d ' ')
   if ! { [ "$_sz" -ge "$CAT_MIN_SOURCE_BYTES" ] 2>/dev/null && [ "$_sz" -le "$CAT_MAX_SOURCE_BYTES" ] 2>/dev/null; }; then
@@ -353,10 +847,23 @@ cat_update_one() {
     srcst_write "$_id" validation_failed "$_http" "$_sz" "" 0 0 0 0 "contenido binario" "$_url" 0
     echo "ERROR ($_id): contenido binario" >&2; rm -f "$_raw"; return 1
   fi
+  _payload=$(cat_payload_type "$_raw")
+  case "$_payload" in
+    html|json|empty)
+      srcst_write "$_id" validation_failed "$_http" "$_sz" "" 0 0 0 0 "contenido $_payload inesperado" "$_url" 0
+      log_msg "[BLOCKLIST] ERROR unexpected $_payload response ($_id); keeping previous valid copy"
+      echo "ERROR ($_id): contenido $_payload inesperado; se conserva la cache valida anterior." >&2
+      rm -f "$_raw"; return 1 ;;
+  esac
   _sha=$(sec_sha256 "$_raw")
   _total=$(grep -cve '^[[:space:]]*$' "$_raw" 2>/dev/null)
   # 5) formato: si es 'auto' o vacio, detectar
   case "$_fmt" in ''|auto) _fmt=$(cat_detect_format "$_raw") ;; esac
+  case "$_fmt" in hosts|domains|abp) : ;; *)
+    srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" 0 "$_total" 0 "formato no soportado" "$_url" 0
+    echo "ERROR ($_id): formato no soportado; se conserva la cache valida anterior." >&2
+    rm -f "$_raw"; return 1 ;;
+  esac
   # 6-9) extraer + normalizar + validar + dedupe interno
   _partial=0
   if [ "$_fmt" = "abp" ]; then
@@ -373,15 +880,76 @@ cat_update_one() {
     srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" 0 "$_total" "$_partial" "0 dominios validos" "$_url" 0
     echo "ERROR ($_id): 0 dominios validos" >&2; rm -f "$_raw" "$_norm"; return 1
   fi
+  case "$CAT_MAX_SOURCE_DOMAINS" in ''|*[!0-9]*) CAT_MAX_SOURCE_DOMAINS=5000000 ;; esac
+  if [ "$_valid" -gt "$CAT_MAX_SOURCE_DOMAINS" ] 2>/dev/null; then
+    srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" "$_valid" 0 "$_partial" "demasiados dominios validos" "$_url" 0
+    echo "ERROR ($_id): $_valid dominios supera el maximo seguro $CAT_MAX_SOURCE_DOMAINS; se conserva la cache valida anterior." >&2
+    rm -f "$_raw" "$_norm"; return 1
+  fi
+  # 9b) Sanity check de evolución: una fuente que cae por debajo del 50% de
+  # su última caché válida necesita investigación; no se acepta en silencio.
+  _cached="$CAT_CACHE_DIR/$_id.list"
+  if [ -s "$_cached" ]; then
+    _prev_count=$(wc -l < "$_cached" | tr -d ' ')
+    case "$CAT_MIN_RETENTION_PCT" in ''|*[!0-9]*) CAT_MIN_RETENTION_PCT=50 ;; esac
+    [ "$CAT_MIN_RETENTION_PCT" -le 100 ] || CAT_MIN_RETENTION_PCT=50
+    if [ "$_prev_count" -ge 20 ] 2>/dev/null && [ $((_valid * 100)) -lt $((_prev_count * CAT_MIN_RETENTION_PCT)) ] 2>/dev/null; then
+      srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" "$_valid" 0 "$_partial" "caida de conteo: $_prev_count -> $_valid" "$_url" 0
+      log_msg "[BLOCKLIST] ERROR anomalous count drop ($_id): $_prev_count -> $_valid; keeping previous valid copy"
+      echo "ERROR ($_id): caída anómala de dominios ($_prev_count -> $_valid); se conserva la cache valida anterior." >&2
+      rm -f "$_raw" "$_norm"; return 1
+    fi
+  fi
   _invalid=$(( _total - _valid )); [ "$_invalid" -lt 0 ] && _invalid=0
   _shalist=$(sec_sha256 "$_norm")
-  # 10) guardar fuente normalizada (atomico) — solo aca se reemplaza la .list
-  mv -f "$_norm" "$CAT_CACHE_DIR/$_id.list" || {
-    srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" "$_valid" "$_invalid" "$_partial" "mv fallo" "$_url" 0
-    echo "ERROR ($_id): mv fallo" >&2; rm -f "$_raw"; return 1; }
-  chmod 0600 "$CAT_CACHE_DIR/$_id.list" 2>/dev/null
+  # 10) preservar cache/metadata anteriores y reemplazar la normalizada con mv
+  # en el mismo filesystem. Si metadata o manifest fallan, restaurar ambas.
+  _had_prev=0
+  if [ -f "$_cached" ]; then
+    _btmp="$CAT_CACHE_DIR/$_id.list.prev.tmp.$$"
+    cp -f "$_cached" "$_btmp" && mv -f "$_btmp" "$CAT_CACHE_DIR/$_id.list.prev" || {
+      rm -f "$_btmp" "$_raw" "$_norm"; echo "ERROR ($_id): no se pudo guardar rollback." >&2; return 1; }
+    _had_prev=1
+  fi
+  _oldrow=$(cat_success_row "$_id")
+  if [ -n "$_oldrow" ]; then printf '%s\n' "$_oldrow" > "$CAT_CACHE_DIR/$_id.meta.prev.tmp.$$" && mv -f "$CAT_CACHE_DIR/$_id.meta.prev.tmp.$$" "$CAT_CACHE_DIR/$_id.meta.prev"
+  else rm -f "$CAT_CACHE_DIR/$_id.meta.prev"; fi
+  _new="$CAT_CACHE_DIR/$_id.list.new.$$"
+  cat "$_norm" > "$_new" && mv -f "$_new" "$_cached" || {
+    rm -f "$_new" "$_raw" "$_norm"; echo "ERROR ($_id): no se pudo reemplazar la cache atómicamente." >&2; return 1; }
+  chmod 0600 "$_cached" 2>/dev/null
+  _when=$(sec_now)
+  if ! cat_success_write "$_id" "$_url" "$_sha" "$_shalist" "$_sz" "$_total" "$_valid" "$_invalid" "$_when" "-"; then
+    if [ "$_had_prev" = "1" ]; then
+      _restore="$CAT_CACHE_DIR/$_id.list.restore.$$"
+      cp -f "$CAT_CACHE_DIR/$_id.list.prev" "$_restore" \
+        && mv -f "$_restore" "$_cached" \
+        || { rm -f "$_restore"; log_msg "[BLOCKLIST] ERROR metadata write failed and cache restore failed ($_id)"; }
+    else rm -f "$_cached"; fi
+    _row_restore="$CAT_SUCCESS.restore.$$"
+    awk -F'\t' -v id="$_id" '$1 != id' "$CAT_SUCCESS" 2>/dev/null > "$_row_restore"
+    [ -f "$CAT_CACHE_DIR/$_id.meta.prev" ] && cat "$CAT_CACHE_DIR/$_id.meta.prev" >> "$_row_restore"
+    mv -f "$_row_restore" "$CAT_SUCCESS" && chmod 0600 "$CAT_SUCCESS" 2>/dev/null \
+      || { rm -f "$_row_restore"; log_msg "[BLOCKLIST] ERROR metadata rollback failed ($_id)"; }
+    rm -f "$_raw" "$_norm"; echo "ERROR ($_id): no se pudo escribir metadata; cache anterior conservada." >&2; return 1
+  fi
   srcst_write "$_id" verified "$_http" "$_sz" "$_shalist" "$_total" "$_valid" "$_invalid" "$_partial" "" "$_url" 1
+  if [ "${CAT_DEFER_MANIFEST:-0}" != "1" ] && ! cat_manifest_generate; then
+    if [ "$_had_prev" = "1" ]; then
+      cp -f "$CAT_CACHE_DIR/$_id.list.prev" "$CAT_CACHE_DIR/$_id.list.restore.$$" && mv -f "$CAT_CACHE_DIR/$_id.list.restore.$$" "$_cached"
+      awk -F'\t' -v id="$_id" '$1 != id' "$CAT_SUCCESS" > "$CAT_SUCCESS.restore.$$"
+      [ -f "$CAT_CACHE_DIR/$_id.meta.prev" ] && cat "$CAT_CACHE_DIR/$_id.meta.prev" >> "$CAT_SUCCESS.restore.$$"
+      mv -f "$CAT_SUCCESS.restore.$$" "$CAT_SUCCESS"
+    else
+      rm -f "$_cached"
+      cat_success_clear "$_id"
+    fi
+    cat_manifest_generate >/dev/null 2>&1
+    srcst_write "$_id" validation_failed "$_http" "$_sz" "$_sha" "$_total" "$_valid" "$_invalid" "$_partial" "metadata manifest fallo" "$_url" 0
+    rm -f "$_raw" "$_norm"; echo "ERROR ($_id): no se pudo guardar manifest; se restauró la cache anterior." >&2; return 1
+  fi
   rm -f "$_raw" 2>/dev/null
+  log_msg "[BLOCKLIST] Updated $_id: downloaded $_sz bytes, parsed $_total rules, kept $_valid valid DNS domains, ignored $_invalid"
   if [ "$_partial" = "1" ]; then
     echo "OK ($_id): $_valid dominios (formato ABP: cobertura DNS parcial)."
   else
@@ -389,6 +957,342 @@ cat_update_one() {
   fi
   log_msg "catalog update $_id: OK ($_valid dominios, fmt=$_fmt)"
   return 0
+}
+
+# Descarga únicamente el cuerpo de una fuente para permitir I/O concurrente.
+# El parseo, validación y publicación de caché siguen serializados en el worker
+# padre, evitando carreras en source-success.tsv y en el manifiesto.
+cat_download_fetch_worker() (
+  _id="$1"; _raw="$2"; _result="$3"
+  _url=$(cat_field "$_id" 8)
+  # $$ se mantiene igual dentro de shells POSIX en subshells; incluir el ID
+  # evita que las transferencias simultáneas compartan headers/status de curl.
+  CAT_FETCH_TOKEN="download-all.$_id.$$"
+  export CAT_FETCH_TOKEN
+  if cat_fetch_raw "$_url" "$_raw"; then
+    printf '1\t%s\n' "${CAT_FETCH_HTTP:-200}" > "$_result"
+  else
+    printf '0\t%s\n' "${CAT_FETCH_HTTP:-unknown}" > "$_result"
+    rm -f "$_raw" 2>/dev/null
+  fi
+)
+
+cat_download_parallelism() {
+  case "$CAT_DOWNLOAD_JOBS" in ''|*[!0-9]*) CAT_DOWNLOAD_JOBS=4 ;; esac
+  [ "$CAT_DOWNLOAD_JOBS" -ge 1 ] || CAT_DOWNLOAD_JOBS=1
+  [ "$CAT_DOWNLOAD_JOBS" -le 6 ] || CAT_DOWNLOAD_JOBS=6
+  case "$CAT_DOWNLOAD_RESERVE_KB" in ''|*[!0-9]*) CAT_DOWNLOAD_RESERVE_KB=524288 ;; esac
+  case "$CAT_MAX_SOURCE_BYTES" in ''|*[!0-9]*) CAT_MAX_SOURCE_BYTES=268435456 ;; esac
+  _free=$(cat_free_kb); case "$_free" in ''|*[!0-9]*) _free=0 ;; esac
+  _budget=$((_free - CAT_DOWNLOAD_RESERVE_KB))
+  _one_kb=$(((CAT_MAX_SOURCE_BYTES + 1023) / 1024))
+  [ "$_one_kb" -gt 0 ] || _one_kb=1
+  _by_space=$((_budget / _one_kb))
+  [ "$_by_space" -ge 1 ] || _by_space=1
+  [ "$CAT_DOWNLOAD_JOBS" -le "$_by_space" ] && printf '%s\n' "$CAT_DOWNLOAD_JOBS" || printf '%s\n' "$_by_space"
+}
+
+cat_download_drain_ready() {
+  _active="$1"; _remain="$_active.pending.$$"
+  CAT_DLW_READY_COUNT=0
+  : > "$_remain" || return 1
+  while IFS="$(printf '\t')" read -r _id _pid _raw _result; do
+    [ -n "$_id" ] || continue
+    if [ -f "$_result" ]; then
+      wait "$_pid" 2>/dev/null
+      _fetch_state=$(awk -F '\t' '{print $1; exit}' "$_result" 2>/dev/null)
+      _fetch_http=$(awk -F '\t' '{print $2; exit}' "$_result" 2>/dev/null)
+      case "$_fetch_state" in 1) _fetch_ok=1 ;; *) _fetch_ok=0 ;; esac
+      [ -n "$_fetch_http" ] || _fetch_http=unknown
+      CAT_PREFETCH_ATTEMPTED=1
+      CAT_PREFETCH_RAW="$_raw"
+      CAT_PREFETCH_HTTP="$_fetch_http"
+      CAT_PREFETCH_OK="$_fetch_ok"
+      if cat_update_one "$_id" >> "$CAT_DOWNLOAD_LOG" 2>&1; then
+        CAT_DLW_OK=$((CAT_DLW_OK + 1))
+      else
+        CAT_DLW_FAILED=$((CAT_DLW_FAILED + 1))
+      fi
+      unset CAT_PREFETCH_ATTEMPTED CAT_PREFETCH_RAW CAT_PREFETCH_HTTP CAT_PREFETCH_OK
+      rm -f "$_result" 2>/dev/null
+      CAT_DLW_DONE=$((CAT_DLW_DONE + 1))
+      CAT_DLW_PROCESSED=$((CAT_DLW_PROCESSED + 1))
+      CAT_DLW_INFLIGHT=$((CAT_DLW_INFLIGHT - 1))
+      CAT_DLW_READY_COUNT=$((CAT_DLW_READY_COUNT + 1))
+      cat_download_job_write running "$CAT_DLW_JOB" "$CAT_DLW_DONE" "$CAT_DLW_TOTAL" "$CAT_DLW_OK" "$CAT_DLW_FAILED" "$CAT_DLW_SKIPPED" "validando $_id"
+    else
+      printf '%s\t%s\t%s\t%s\n' "$_id" "$_pid" "$_raw" "$_result" >> "$_remain"
+    fi
+  done < "$_active"
+  mv -f "$_remain" "$_active" || { rm -f "$_remain"; return 1; }
+}
+
+# El usuario puede preparar las cachés verificadas de todas las fuentes
+# compatibles sin activarlas. El estado es persistente para que la WebUI pueda
+# consultar progreso solo mientras esta tarea explícita está en curso.
+cat_download_job_write() {
+  CAT_DJW_STATE="$1"; CAT_DJW_JOB="$2"; CAT_DJW_DONE="$3"; CAT_DJW_TOTAL="$4"; CAT_DJW_OK="$5"
+  CAT_DJW_FAILED="$6"; CAT_DJW_SKIPPED="$7"; CAT_DJW_CURRENT="$8"; CAT_DJW_WHEN="$(sec_now)"
+  CAT_DJW_TMP="$CAT_DOWNLOAD_STATUS.tmp.$$"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$CAT_DJW_STATE" "$CAT_DJW_JOB" "$CAT_DJW_DONE" "$CAT_DJW_TOTAL" "$CAT_DJW_OK" "$CAT_DJW_FAILED" "$CAT_DJW_SKIPPED" "$CAT_DJW_CURRENT" "$CAT_DJW_WHEN" > "$CAT_DJW_TMP" \
+    && mv -f "$CAT_DJW_TMP" "$CAT_DOWNLOAD_STATUS" || { rm -f "$CAT_DJW_TMP"; return 1; }
+  chmod 0600 "$CAT_DOWNLOAD_STATUS" 2>/dev/null
+}
+
+cat_download_job_field() {
+  awk -F '\t' -v n="$2" '{print $n; exit}' "$CAT_DOWNLOAD_STATUS" 2>/dev/null
+}
+
+cat_download_all_status_json() {
+  if [ -d "$CAT_DOWNLOAD_LOCK" ] && ! cat_download_all_running; then
+    _state=$(cat_download_job_field x 1)
+    case "$_state" in queued|running)
+      _job=$(cat_download_job_field x 2); _done=$(cat_download_job_field x 3)
+      _total=$(cat_download_job_field x 4); _ok=$(cat_download_job_field x 5)
+      _failed=$(cat_download_job_field x 6); _skipped=$(cat_download_job_field x 7)
+      _current=$(cat_download_job_field x 8)
+      cat_download_job_write partial "$_job" "$_done" "$_total" "$_ok" "$_failed" "$_skipped" interrumpida
+      printf '[BLOCKLIST] ERROR download-all worker interrupted; previous valid copies retained.\n' >> "$CAT_DOWNLOAD_LOG"
+      rm -rf "$CAT_DOWNLOAD_LOCK" 2>/dev/null ;;
+    esac
+  fi
+  if [ ! -s "$CAT_DOWNLOAD_STATUS" ]; then
+    printf '{"state":"idle","job_id":"","done":0,"total":0,"success":0,"failed":0,"skipped":0,"current":""}\n'
+    return 0
+  fi
+  _state=$(cat_download_job_field x 1); _job=$(cat_download_job_field x 2)
+  _done=$(cat_download_job_field x 3); _total=$(cat_download_job_field x 4)
+  _ok=$(cat_download_job_field x 5); _failed=$(cat_download_job_field x 6)
+  _skipped=$(cat_download_job_field x 7); _current=$(cat_download_job_field x 8)
+  case "$_done" in ''|*[!0-9]*) _done=0 ;; esac
+  case "$_total" in ''|*[!0-9]*) _total=0 ;; esac
+  case "$_ok" in ''|*[!0-9]*) _ok=0 ;; esac
+  case "$_failed" in ''|*[!0-9]*) _failed=0 ;; esac
+  case "$_skipped" in ''|*[!0-9]*) _skipped=0 ;; esac
+  printf '{"state":"%s","job_id":"%s","done":%s,"total":%s,"success":%s,"failed":%s,"skipped":%s,"current":"%s"}\n' \
+    "$(cat_json_escape "$_state")" "$(cat_json_escape "$_job")" \
+    "$_done" "$_total" "$_ok" "$_failed" "$_skipped" "$(cat_json_escape "$_current")"
+}
+
+cat_download_all_running() {
+  [ -d "$CAT_DOWNLOAD_LOCK" ] || return 1
+  _state=$(cat_download_job_field x 1)
+  case "$_state" in queued)
+    _when=$(cat_download_job_field x 9); _now=$(sec_now)
+    case "$_when" in ''|*[!0-9]*) return 1 ;; esac
+    [ $((_now - _when)) -le 120 ] 2>/dev/null && return 0
+    return 1 ;;
+    running)
+      _pid=$(cat "$CAT_DOWNLOAD_LOCK/worker.pid" 2>/dev/null)
+      case "$_pid" in ''|*[!0-9]*) return 1 ;; esac
+      kill -0 "$_pid" 2>/dev/null || return 1
+      if [ -r "/proc/$_pid/cmdline" ]; then
+        tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -q 'catalog download-all-worker' || return 1
+      fi
+      return 0 ;;
+  esac
+  return 1
+}
+
+cat_download_all_start() {
+  [ "${1:-}" = "--confirmed" ] || {
+    echo "Acción global. Usá: dnscrypt-manager catalog download-all --confirmed" >&2
+    return 2
+  }
+  if cat_download_all_running; then
+    echo "OK: ya hay una descarga global en curso."
+    cat_download_all_status_json
+    return 0
+  fi
+  mkdir -p "$CAT_DIR" "$RUN_DIR" 2>/dev/null || return 1
+  if [ -d "$CAT_DOWNLOAD_LOCK" ]; then
+    _lock_started=$(cat "$CAT_DOWNLOAD_LOCK/started" 2>/dev/null)
+    _now=$(sec_now)
+    case "$_lock_started" in
+      ''|*[!0-9]*) echo "OK: otra acción está inicializando la descarga global."; return 0 ;;
+      *)
+        if [ $((_now - _lock_started)) -le 120 ] 2>/dev/null; then
+          echo "OK: otra acción está inicializando la descarga global."
+          cat_download_all_status_json
+          return 0
+        fi
+        rm -rf "$CAT_DOWNLOAD_LOCK" 2>/dev/null ;;
+    esac
+  fi
+  mkdir "$CAT_DOWNLOAD_LOCK" 2>/dev/null || {
+    echo "OK: otra acción está iniciando la descarga global."
+    cat_download_all_status_json
+    return 0
+  }
+  printf '%s\n' "$(sec_now)" > "$CAT_DOWNLOAD_LOCK/started"
+  _job="$(sec_now)-$$"
+  cat_download_job_write queued "$_job" 0 0 0 0 0 preparando || {
+    rm -rf "$CAT_DOWNLOAD_LOCK"; return 1;
+  }
+  if command -v nohup >/dev/null 2>&1; then
+    if command -v nice >/dev/null 2>&1; then
+      nohup nice -n 10 "$DCM_SELF" catalog download-all-worker "$_job" </dev/null >/dev/null 2>&1 &
+    else
+      nohup "$DCM_SELF" catalog download-all-worker "$_job" </dev/null >/dev/null 2>&1 &
+    fi
+  else
+    if command -v nice >/dev/null 2>&1; then
+      nice -n 10 "$DCM_SELF" catalog download-all-worker "$_job" </dev/null >/dev/null 2>&1 &
+    else
+      "$DCM_SELF" catalog download-all-worker "$_job" </dev/null >/dev/null 2>&1 &
+    fi
+  fi
+  echo "OK: descarga global iniciada. Se guardan cachés verificadas; las fuentes nuevas no se activan."
+  echo "ID: $_job"
+  return 0
+}
+
+cat_download_all_worker() {
+  CAT_DLW_JOB="${1:-}"
+  case "$CAT_DLW_JOB" in ''|*[!0-9-]*) echo "ERROR: identificador de tarea inválido." >&2; return 2 ;; esac
+  [ "$(cat_download_job_field x 2)" = "$CAT_DLW_JOB" ] || {
+    echo "ERROR: no coincide la tarea global pendiente." >&2; return 1;
+  }
+  CAT_DOWNLOAD_ALL_WORKER=1
+  echo "$$" > "$CAT_DOWNLOAD_LOCK/worker.pid" 2>/dev/null
+  CAT_DLW_ALL="$RUN_DIR/catalog.download-all.ids.$$"
+  CAT_DLW_WORK="$RUN_DIR/catalog.download-all.work.$$"
+  cat_all_ids > "$CAT_DLW_ALL" || return 1
+  : > "$CAT_DLW_WORK"
+  if [ -s "$CAT_DOWNLOAD_LOG" ]; then
+    tail -n 500 "$CAT_DOWNLOAD_LOG" > "$CAT_DOWNLOAD_LOG.trim.$$" 2>/dev/null \
+      && mv -f "$CAT_DOWNLOAD_LOG.trim.$$" "$CAT_DOWNLOAD_LOG"
+  else : > "$CAT_DOWNLOAD_LOG"; fi
+  CAT_DLW_TOTAL=0; CAT_DLW_SKIPPED=0
+  while IFS= read -r CAT_DLW_ID; do
+    [ -n "$CAT_DLW_ID" ] || continue
+    CAT_DLW_TOTAL=$((CAT_DLW_TOTAL + 1))
+    CAT_DLW_DECL=$(cat_field "$CAT_DLW_ID" 10)
+    case "$CAT_DLW_DECL" in
+      broken|archived)
+        CAT_DLW_SKIPPED=$((CAT_DLW_SKIPPED + 1))
+        printf '[BLOCKLIST] SKIP %s: upstream=%s.\n' "$CAT_DLW_ID" "$CAT_DLW_DECL" >> "$CAT_DOWNLOAD_LOG"
+        continue ;;
+    esac
+    if cat_activation_check "$CAT_DLW_ID" >/dev/null 2>&1; then
+      case "$(cat_field "$CAT_DLW_ID" 8)" in https://*|file://*) printf '%s\n' "$CAT_DLW_ID" >> "$CAT_DLW_WORK" ;;
+        *) CAT_DLW_SKIPPED=$((CAT_DLW_SKIPPED + 1)); printf '[BLOCKLIST] SKIP %s: invalid transport URL.\n' "$CAT_DLW_ID" >> "$CAT_DOWNLOAD_LOG" ;; esac
+    else
+      CAT_DLW_SKIPPED=$((CAT_DLW_SKIPPED + 1))
+      printf '[BLOCKLIST] SKIP %s: source format or transport needs technical review.\n' "$CAT_DLW_ID" >> "$CAT_DOWNLOAD_LOG"
+    fi
+  done < "$CAT_DLW_ALL"
+  CAT_DLW_CANDIDATES=$(wc -l < "$CAT_DLW_WORK" | tr -d ' '); case "$CAT_DLW_CANDIDATES" in ''|*[!0-9]*) CAT_DLW_CANDIDATES=0 ;; esac
+  CAT_DLW_DONE="$CAT_DLW_SKIPPED"; CAT_DLW_OK=0; CAT_DLW_FAILED=0; CAT_DLW_PROCESSED=0; CAT_DLW_SPACE_SHORT=0
+  CAT_DLW_JOBS=$(cat_download_parallelism)
+  case "$CAT_DLW_JOBS" in ''|*[!0-9]*) CAT_DLW_JOBS=1 ;; esac
+  CAT_DEFER_MANIFEST=1
+  export CAT_DEFER_MANIFEST
+  CAT_DLW_ACTIVE="$RUN_DIR/catalog.download-all.active.$$"
+  : > "$CAT_DLW_ACTIVE"
+  CAT_DLW_INFLIGHT=0
+  CAT_DLW_NEXT=1
+  cat_download_job_write running "$CAT_DLW_JOB" "$CAT_DLW_DONE" "$CAT_DLW_TOTAL" "$CAT_DLW_OK" "$CAT_DLW_FAILED" "$CAT_DLW_SKIPPED" preparando
+  printf '[BLOCKLIST] Download-all started: %s compatible sources, %s skipped; up to %s concurrent downloads.\n' \
+    "$CAT_DLW_CANDIDATES" "$CAT_DLW_SKIPPED" "$CAT_DLW_JOBS" >> "$CAT_DOWNLOAD_LOG"
+  while [ "$CAT_DLW_NEXT" -le "$CAT_DLW_CANDIDATES" ] || [ "$CAT_DLW_INFLIGHT" -gt 0 ]; do
+    CAT_DLW_LAUNCHED=0
+    while [ "$CAT_DLW_NEXT" -le "$CAT_DLW_CANDIDATES" ] && [ "$CAT_DLW_INFLIGHT" -lt "$CAT_DLW_JOBS" ]; do
+      CAT_DLW_FREE=$(cat_free_kb); case "$CAT_DLW_FREE" in ''|*[!0-9]*) CAT_DLW_FREE=0 ;; esac
+      case "$CAT_DOWNLOAD_RESERVE_KB" in ''|*[!0-9]*) CAT_DOWNLOAD_RESERVE_KB=524288 ;; esac
+      if [ "$CAT_DLW_FREE" -lt "$CAT_DOWNLOAD_RESERVE_KB" ] 2>/dev/null; then
+        if [ "$CAT_DLW_INFLIGHT" -eq 0 ]; then
+          CAT_DLW_REMAINING=$((CAT_DLW_CANDIDATES - CAT_DLW_NEXT + 1))
+          CAT_DLW_SKIPPED=$((CAT_DLW_SKIPPED + CAT_DLW_REMAINING)); CAT_DLW_DONE=$((CAT_DLW_DONE + CAT_DLW_REMAINING)); CAT_DLW_SPACE_SHORT=1
+          printf '[BLOCKLIST] ERROR low free space (%s KiB); skipped remaining %s source(s).\n' "$CAT_DLW_FREE" "$CAT_DLW_REMAINING" >> "$CAT_DOWNLOAD_LOG"
+          cat_download_job_write running "$CAT_DLW_JOB" "$CAT_DLW_DONE" "$CAT_DLW_TOTAL" "$CAT_DLW_OK" "$CAT_DLW_FAILED" "$CAT_DLW_SKIPPED" espacio-insuficiente
+          CAT_DLW_NEXT=$((CAT_DLW_CANDIDATES + 1))
+        fi
+        break
+      fi
+      CAT_DLW_ID=$(sed -n "${CAT_DLW_NEXT}p" "$CAT_DLW_WORK" 2>/dev/null)
+      CAT_DLW_NEXT=$((CAT_DLW_NEXT + 1))
+      [ -n "$CAT_DLW_ID" ] || continue
+      CAT_DLW_RAW="$RUN_DIR/cat.download-all.$CAT_DLW_JOB.$CAT_DLW_ID.raw"
+      CAT_DLW_RESULT="$RUN_DIR/cat.download-all.$CAT_DLW_JOB.$CAT_DLW_ID.result"
+      rm -f "$CAT_DLW_RAW" "$CAT_DLW_RESULT" 2>/dev/null
+      cat_download_fetch_worker "$CAT_DLW_ID" "$CAT_DLW_RAW" "$CAT_DLW_RESULT" </dev/null >> "$CAT_DOWNLOAD_LOG" 2>&1 &
+      CAT_DLW_PID=$!
+      printf '%s\t%s\t%s\t%s\n' "$CAT_DLW_ID" "$CAT_DLW_PID" "$CAT_DLW_RAW" "$CAT_DLW_RESULT" >> "$CAT_DLW_ACTIVE"
+      CAT_DLW_INFLIGHT=$((CAT_DLW_INFLIGHT + 1))
+      CAT_DLW_LAUNCHED=$((CAT_DLW_LAUNCHED + 1))
+      cat_download_job_write running "$CAT_DLW_JOB" "$CAT_DLW_DONE" "$CAT_DLW_TOTAL" "$CAT_DLW_OK" "$CAT_DLW_FAILED" "$CAT_DLW_SKIPPED" "descargando $CAT_DLW_INFLIGHT fuente(s)"
+    done
+    cat_download_drain_ready "$CAT_DLW_ACTIVE" || {
+      printf '[BLOCKLIST] ERROR no se pudo actualizar el estado de descargas activas.\n' >> "$CAT_DOWNLOAD_LOG"
+      return 1
+    }
+    if [ "$CAT_DLW_READY_COUNT" -eq 0 ] && [ "$CAT_DLW_LAUNCHED" -eq 0 ]; then sleep 1; fi
+  done
+  rm -f "$CAT_DLW_ALL" "$CAT_DLW_WORK" "$CAT_DLW_ACTIVE"
+  CAT_DEFER_MANIFEST=0
+  if ! cat_manifest_generate >> "$CAT_DOWNLOAD_LOG" 2>&1; then
+    CAT_DLW_FAILED=$((CAT_DLW_FAILED + 1))
+    printf '[BLOCKLIST] ERROR final manifest update failed; valid per-source caches remain available.\n' >> "$CAT_DOWNLOAD_LOG"
+  fi
+  CAT_DLW_FINAL=done
+  if [ "$CAT_DLW_FAILED" -gt 0 ] || [ "$CAT_DLW_SPACE_SHORT" = 1 ]; then CAT_DLW_FINAL=partial; fi
+  cat_download_job_write "$CAT_DLW_FINAL" "$CAT_DLW_JOB" "$CAT_DLW_DONE" "$CAT_DLW_TOTAL" "$CAT_DLW_OK" "$CAT_DLW_FAILED" "$CAT_DLW_SKIPPED" listo
+  printf '[BLOCKLIST] Download-all %s: %s/%s valid, %s failed, %s skipped.\n' \
+    "$CAT_DLW_FINAL" "$CAT_DLW_OK" "$CAT_DLW_TOTAL" "$CAT_DLW_FAILED" "$CAT_DLW_SKIPPED" >> "$CAT_DOWNLOAD_LOG"
+  rm -rf "$CAT_DOWNLOAD_LOCK" 2>/dev/null
+  return 0
+}
+
+# Restaura la última caché verificada y su fila de metadata. La operación en
+# caché y source-success.tsv es atómica por archivo; el manifest se regenera al
+# terminar y nunca se modifica blocked-names.txt directamente.
+cat_restore_previous() {
+  _id="$1"; _cached="$CAT_CACHE_DIR/$_id.list"
+  _prev="$CAT_CACHE_DIR/$_id.list.prev"
+  if [ -s "$_prev" ]; then
+    _tmp="$CAT_CACHE_DIR/$_id.list.restore.$$"
+    cp -f "$_prev" "$_tmp" && mv -f "$_tmp" "$_cached" || { rm -f "$_tmp"; return 1; }
+  else
+    rm -f "$_cached"
+  fi
+  _t="$CAT_SUCCESS.restore.$$"
+  awk -F'\t' -v id="$_id" '$1 != id' "$CAT_SUCCESS" 2>/dev/null > "$_t"
+  [ -f "$CAT_CACHE_DIR/$_id.meta.prev" ] && cat "$CAT_CACHE_DIR/$_id.meta.prev" >> "$_t"
+  mv -f "$_t" "$CAT_SUCCESS" && chmod 0600 "$CAT_SUCCESS" 2>/dev/null || return 1
+  cat_manifest_generate
+}
+
+# Rollback manual de una fuente: PREPARE cache/metadata, compilar, y si falla
+# devolver los artefactos que estaban activos al inicio de la operación.
+cat_rollback_one() {
+  _id="$1"
+  cat_exists "$_id" || { echo "ERROR: id desconocido: '$_id'" >&2; return 1; }
+  _prev="$CAT_CACHE_DIR/$_id.list.prev"
+  [ -s "$_prev" ] || { echo "ERROR: no hay copia anterior para '$_id'." >&2; return 1; }
+  _cur="$CAT_CACHE_DIR/$_id.list"
+  _curbak="$CAT_CACHE_DIR/$_id.list.rollback-current.$$"
+  [ -f "$_cur" ] && cp -f "$_cur" "$_curbak"
+  _row=$(cat_success_row "$_id")
+  _rowbak="$CAT_CACHE_DIR/$_id.meta.rollback-current.$$"
+  [ -n "$_row" ] && printf '%s\n' "$_row" > "$_rowbak"
+  cat_restore_previous "$_id" || { rm -f "$_curbak" "$_rowbak"; return 1; }
+  if cat_is_enabled "$_id" && ! cat_compile; then
+    if [ -f "$_curbak" ]; then mv -f "$_curbak" "$_cur"
+    else rm -f "$_cur"; fi
+    _t="$CAT_SUCCESS.rollback.$$"
+    awk -F'\t' -v id="$_id" '$1 != id' "$CAT_SUCCESS" 2>/dev/null > "$_t"
+    [ -f "$_rowbak" ] && cat "$_rowbak" >> "$_t"
+    mv -f "$_t" "$CAT_SUCCESS"; cat_manifest_generate >/dev/null 2>&1
+    cat_compile >/dev/null 2>&1
+    rm -f "$_rowbak"
+    echo "ERROR: rollback de '$_id' rechazado por la compilación; se restauró el estado previo." >&2
+    return 1
+  fi
+  rm -f "$_curbak" "$_rowbak"
+  log_msg "[BLOCKLIST] ROLLBACK $_id restored previous validated copy"
+  echo "OK: '$_id' restaurada a la copia verificada anterior."
 }
 
 # ---------------------------------------------------------------------------
@@ -476,6 +1380,7 @@ cat_progress_set() {
 cat_compile_heavy() {
   command -v renice >/dev/null 2>&1 && renice -n 10 -p "$$" >/dev/null 2>&1
   command -v ionice >/dev/null 2>&1 && ionice -c 3 -p "$$" >/dev/null 2>&1
+  cat_validate_active_limit || return 1
   # Hook de prueba CONTROLADO (solo bajo TEST_MODE): valores numericos/booleanos,
   # nunca ejecucion de comandos arbitrarios. Permite probar cancelacion/timeout/
   # fallo/exito a traves de la CLI real sin tocar el pipeline de produccion.
@@ -489,7 +1394,7 @@ cat_compile_heavy() {
     return 0
   fi
   if command -v sec_regen_and_reload >/dev/null 2>&1; then
-    sec_regen_and_reload
+    sec_regen_and_reload --verify-dns
   else
     return 1
   fi
@@ -497,6 +1402,10 @@ cat_compile_heavy() {
 
 # Compilacion completa (accion explicita). NO se ejecuta en boot.
 cat_compile() {
+  if cat_download_all_running; then
+    echo "ERROR: no se puede compilar mientras la descarga global modifica cachés. Reintentá cuando termine." >&2
+    return 1
+  fi
   _to="${CAT_COMPILE_TIMEOUT:-$CAT_COMPILE_TIMEOUT_DEFAULT}"
   case "$_to" in ''|*[!0-9]*) _to="$CAT_COMPILE_TIMEOUT_DEFAULT" ;; esac
 
@@ -571,6 +1480,14 @@ cat_compile() {
     cat_progress_set done "$_cnt dominios en $((_t1 - _t0))s"
     echo "OK: compilacion terminada. $_cnt dominios activos en $((_t1 - _t0))s."
     log_msg "catalog compile: OK ($_cnt dominios, $((_t1 - _t0))s)"
+    if ! cat_provenance_generate; then
+      log_msg "[BLOCKLIST] ERROR could not regenerate source provenance after compile"
+      echo "AVISO: lista activa compilada, pero no se pudo actualizar source-provenance.tsv." >&2
+    fi
+    if ! cat_manifest_generate; then
+      log_msg "[BLOCKLIST] ERROR could not regenerate blocklists-manifest.json after compile"
+      echo "AVISO: lista activa compilada, pero no se pudo actualizar blocklists-manifest.json." >&2
+    fi
     # Estadisticas de aporte unico (best-effort; no altera el catalogo canonico).
     command -v cat_stats_compute >/dev/null 2>&1 && cat_stats_compute 2>/dev/null
   else
@@ -749,7 +1666,7 @@ cat_custom_add() {
   # Evitar colision de id
   if cat_exists "$_id"; then _id="custom_${_slug}_$(date +%s)"; fi
   # 19 columnas, mismo orden que el index
-  _row="$_id	custom	$_name	usuario	$_catg	medium	$_fmt	$_url	unknown	custom	0	unknown	0				$(date '+%Y-%m-%d')	Fuente personalizada agregada por el usuario."
+  _row="$_id	custom	$_name	usuario	$_catg	medium	$_fmt	$_url	LICENSE_UNKNOWN	custom	0	unknown	0				$(date '+%Y-%m-%d')	Fuente personalizada agregada por el usuario."
   printf '%s\n' "$_row" >> "$CAT_CUSTOM"
   chmod 0600 "$CAT_CUSTOM" 2>/dev/null
   echo "OK: fuente personalizada agregada con id '$_id'. Probala con: dnscrypt-manager catalog test $_id"
@@ -763,8 +1680,11 @@ cat_custom_remove() {
   _t="$CAT_CUSTOM.tmp.$$"
   awk -F'\t' -v id="$_id" '$1 != id' "$CAT_CUSTOM" > "$_t"
   mv -f "$_t" "$CAT_CUSTOM"; chmod 0600 "$CAT_CUSTOM" 2>/dev/null
+  _was=0; cat_is_enabled "$_id" && _was=1
   cat_disable "$_id"
-  rm -f "$CAT_CACHE_DIR/$_id.list" 2>/dev/null; command -v srcst_clear >/dev/null 2>&1 && srcst_clear "$_id"
+  rm -f "$CAT_CACHE_DIR/$_id.list" "$CAT_CACHE_DIR/$_id.list.prev" "$CAT_CACHE_DIR/$_id.meta.prev" 2>/dev/null
+  cat_success_clear "$_id"; srcst_clear "$_id"
+  if [ "$_was" = "1" ]; then cat_compile || return 1; else cat_provenance_generate; cat_manifest_generate; fi
   echo "OK: fuente '$_id' eliminada."
   log_msg "catalog custom remove $_id"
 }
@@ -804,11 +1724,29 @@ cmd_catalog() {
   cat_init_dirs
   _sub="${1:-list}"; shift 2>/dev/null
   case "$_sub" in
-    sync) cat_sync_index; echo "OK: index del catalogo sincronizado ($(cat_all_ids | wc -l | tr -d ' ') entradas)." ;;
+    sync)
+      cat_sync_index || return 1
+      echo "OK: index del catalogo sincronizado ($(cat_all_ids | wc -l | tr -d ' ') entradas)."
+      ;;
     audit) cat_audit ;;
 
+    groups)
+      _json=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --json) _json=1; shift ;;
+          *) shift ;;
+        esac
+      done
+      if [ "$_json" = "1" ]; then
+        cat_groups_output
+      else
+        cat_groups_output
+      fi
+      ;;
+
     list)
-      _json=0; _filter_cat=""; _filter_maint=""; _only_enabled=0; _only_recommended=0; _only_archived=0; _search=""
+      _json=0; _filter_cat=""; _filter_maint=""; _only_enabled=0; _only_recommended=0; _only_archived=0; _search=""; _source_group=""
       while [ $# -gt 0 ]; do
         case "$1" in
           --json) _json=1; shift ;;
@@ -818,9 +1756,15 @@ cmd_catalog() {
           --recommended) _only_recommended=1; shift ;;
           --archived) _only_archived=1; shift ;;
           --search) _search=$(printf '%s' "$2" | tr 'A-Z' 'a-z'); shift 2 ;;
+          --source-group) _source_group="$2"; shift 2 ;;
           *) shift ;;
         esac
       done
+      case "$_source_group" in
+        ""|Security|Privacy|ParentalControl|dcm|RethinkUnassigned|rethink_unassigned) : ;;
+        *) echo "ERROR: grupo de fuente invalido: '$_source_group'" >&2; return 2 ;;
+      esac
+      [ "$_source_group" = "RethinkUnassigned" ] && _source_group="rethink_unassigned"
       _print_one() {
         _id="$1"
         _row=$(cat_row "$_id"); [ -n "$_row" ] || return 0
@@ -830,6 +1774,13 @@ cmd_catalog() {
         _ups=$(cat_upstream_status "$_id"); _rt=$(cat_runtime_status "$_id"); _rec=$(printf '%s' "$_row" | cut -f11)
         _mob=$(printf '%s' "$_row" | cut -f12); _arch=$(printf '%s' "$_row" | cut -f13)
         _desc=$(printf '%s' "$_row" | cut -f19)
+        _source_name=$(printf '%s' "$_row" | cut -f20)
+        _source_group=$(printf '%s' "$_row" | cut -f21)
+        _source_subgroup=$(printf '%s' "$_row" | cut -f22)
+        _source_packs=$(printf '%s' "$_row" | cut -f23)
+        _source_formats=$(printf '%s' "$_row" | cut -f24)
+        _source_urls=$(printf '%s' "$_row" | cut -f25)
+        _source_url_count=$(printf '%s' "$_row" | cut -f26); [ -n "$_source_url_count" ] || _source_url_count=0
         # filtros
         [ "$_only_enabled" = "1" ] && { cat_is_enabled "$_id" || return 0; }
         [ "$_only_recommended" = "1" ] && [ "$_rec" != "1" ] && return 0
@@ -838,17 +1789,29 @@ cmd_catalog() {
         [ -n "$_filter_maint" ] && { printf '%s' "$_maint" | grep -qiF "$_filter_maint" || return 0; }
         [ -n "$_search" ] && { printf '%s' "$_id $_name $_desc $_cats" | tr 'A-Z' 'a-z' | grep -qF "$_search" || return 0; }
         _en=no; cat_is_enabled "$_id" && _en=si
-        _dom=$(srcst_field "$_id" 9); [ -n "$_dom" ] || _dom="-"
+        _dom=$(cat_success_field "$_id" 7); [ -n "$_dom" ] || _dom=$(srcst_field "$_id" 9); [ -n "$_dom" ] || _dom="-"
+        _last_success=$(cat_success_field "$_id" 9); [ -n "$_last_success" ] || _last_success=$(srcst_field "$_id" 4); [ -n "$_last_success" ] || _last_success=0
+        _sha_success=$(cat_success_field "$_id" 4)
+        _bytes_success=$(cat_success_field "$_id" 5); [ -n "$_bytes_success" ] || _bytes_success=0
         if [ "$_json" = "1" ]; then
           _enb=false; cat_is_enabled "$_id" && _enb=true
           _recb=false; [ "$_rec" = "1" ] && _recb=true
           _arb=false; [ "$_arch" = "1" ] && _arb=true
+          # La incertidumbre de licencia se conserva en el campo `license`;
+          # no es un bloqueo tecnico para una activacion manual.
+          _licblocked=false
+          _actblocked=false; cat_activation_check "$_id" >/dev/null 2>&1 || _actblocked=true
           [ "$CAT_JSON_FIRST" = "0" ] && printf ','
           CAT_JSON_FIRST=0
-          printf '{"id":"%s","name":"%s","maintainer":"%s","categories":"%s","aggressiveness":"%s","format":"%s","license":"%s","upstream_status":"%s","runtime_status":"%s","mobile_suitability":"%s","recommended":%s,"archived":%s,"enabled":%s,"valid_domains":"%s"}' \
-            "$(cat_json_escape "$_id")" "$(cat_json_escape "$_name")" "$(cat_json_escape "$_maint")" \
-            "$(cat_json_escape "$_cats")" "$_agg" "$_fmt" "$(cat_json_escape "$_lic")" "$_ups" "$_mob" \
-            "$_recb" "$_arb" "$_enb" "$_dom"
+          printf '{"id":"%s","name":"%s","source_name":"%s","source_group":"%s","source_subgroup":"%s","source_packs":"%s","source_formats":"%s","source_urls":"%s","source_url_count":%s,"activation_blocked":%s,"maintainer":"%s","categories":"%s","aggressiveness":"%s","format":"%s","license":"%s","license_blocked":%s,"upstream_status":"%s","runtime_status":"%s","mobile_suitability":"%s","recommended":%s,"archived":%s,"enabled":%s,"valid_domains":"%s","cache_domains":"%s","last_success":%s,"sha256":"%s","downloaded_bytes":%s}' \
+            "$(cat_json_escape "$_id")" "$(cat_json_escape "$_name")" \
+            "$(cat_json_escape "$_source_name")" "$(cat_json_escape "$_source_group")" \
+            "$(cat_json_escape "$_source_subgroup")" "$(cat_json_escape "$(printf '%s' "$_source_packs" | tr ',' '|')")" \
+            "$(cat_json_escape "$(printf '%s' "$_source_formats" | tr ',' '|')")" \
+            "$(cat_json_escape "$(printf '%s' "$_source_urls" | tr ',' '|')")" "$_source_url_count" "$_actblocked" \
+            "$(cat_json_escape "$_maint")" "$(cat_json_escape "$_cats")" "$_agg" "$_fmt" "$(cat_json_escape "$_lic")" "$_licblocked" "$_ups" "$_rt" \
+            "$_mob" "$_recb" "$_arb" "$_enb" "$_dom" "$_dom" "$_last_success" \
+            "$(cat_json_escape "$_sha_success")" "$_bytes_success"
         else
           printf '  [%s] %-34s %-12s %-9s %s/%s dom=%-8s %s%s\n' \
             "$_en" "$_id" "$_maint" "$_agg" "$_ups" "$_rt" "$_dom" \
@@ -857,14 +1820,11 @@ cmd_catalog() {
         fi
       }
       if [ "$_json" = "1" ]; then
-        CAT_JSON_FIRST=1
-        printf '{"entries":['
-        cat_all_ids | while IFS= read -r _id; do _print_one "$_id"; done
-        printf ']}\n'
+        cat_list_output "$_filter_cat" "$_filter_maint" "$_only_enabled" \
+          "$_only_recommended" "$_only_archived" "$_search" json "$_source_group" || return $?
       else
-        echo "Catalogo de listas (marca [si/no] = activa):"
-        cat_all_ids | while IFS= read -r _id; do _print_one "$_id"; done
-        echo "Total: $(cat_all_ids | wc -l | tr -d ' ') fuentes. Activas: $(grep -c . "$CAT_ENABLED" 2>/dev/null)."
+        cat_list_output "$_filter_cat" "$_filter_maint" "$_only_enabled" \
+          "$_only_recommended" "$_only_archived" "$_search" text "$_source_group" || return $?
       fi
       # adult_advertising: no existe una fuente dedicada verificable.
       if [ "$_filter_cat" = "adult_advertising" ]; then
@@ -896,6 +1856,10 @@ cmd_catalog() {
       echo "conflictos   : $(printf '%s' "$_row" | cut -f17)"
       echo "activa       : $( cat_is_enabled "$_id" && echo si || echo no )"
       echo "descripcion  : $(printf '%s' "$_row" | cut -f19)"
+      echo "cache valida : $(cat_success_field "$_id" 7) dominios"
+      echo "cache sha256 : $(cat_success_field "$_id" 4)"
+      echo "cache bytes  : $(cat_success_field "$_id" 5)"
+      echo "cache éxito  : $(cat_success_field "$_id" 9)"
       if [ -n "$(srcst_row "$_id")" ]; then
         echo "--- ultimo intento (persistente, source-status.tsv) ---"
         echo "  total_source   : $(srcst_field "$_id" 8)"
@@ -917,12 +1881,21 @@ cmd_catalog() {
       _id="$1"
       cat_exists "$_id" || { echo "ERROR: id desconocido: '$_id'" >&2; return 1; }
       [ "$(cat_field "$_id" 13)" = "1" ] && echo "AVISO: '$_id' esta ARCHIVADA (legado). Se activa igual, pero no es recomendable."
-      cat_enable "$_id"
+      cat_enable "$_id" || return 1
       if [ ! -s "$CAT_CACHE_DIR/$_id.list" ]; then
         echo "'$_id' habilitada, pero aun sin descargar. Descargando…"
-        cat_update_one "$_id" || { echo "AVISO: la descarga fallo; quedara activa pero sin aportar dominios hasta actualizar." >&2; }
+        cat_update_one "$_id" || {
+          cat_disable "$_id"
+          cat_compile >/dev/null 2>&1
+          echo "ERROR: no se pudo validar la primera copia; fuente desactivada." >&2
+          return 1
+        }
       fi
-      cat_compile || return 1
+      if ! cat_compile; then
+        cat_disable "$_id"; cat_compile >/dev/null 2>&1
+        echo "ERROR: la compilación falló; se revirtió la activación de '$_id'." >&2
+        return 1
+      fi
       echo "OK: '$_id' activada y compilada."
       ;;
 
@@ -930,27 +1903,64 @@ cmd_catalog() {
       _id="$1"
       cat_is_enabled "$_id" || { echo "'$_id' no estaba activa."; return 0; }
       cat_disable "$_id"
-      cat_compile || return 1
+      if ! cat_compile; then
+        cat_enable "$_id"; cat_compile >/dev/null 2>&1
+        echo "ERROR: la compilación falló; se restauró la activación de '$_id'." >&2
+        return 1
+      fi
       echo "OK: '$_id' desactivada y recompilada."
       ;;
 
     update)
       _tgt="${1:-enabled}"
       if [ "$_tgt" = "enabled" ] || [ "$_tgt" = "all" ]; then
-        _fails=0; _n=0
+        _fails=0; _n=0; _updated="$RUN_DIR/cat.updated.$$"; : > "$_updated"
         while IFS= read -r _id; do
           [ -n "$_id" ] || continue
           _n=$((_n+1))
-          cat_update_one "$_id" || _fails=$((_fails+1))
+          if cat_update_one "$_id"; then printf '%s\n' "$_id" >> "$_updated"
+          else _fails=$((_fails+1)); fi
         done < "$CAT_ENABLED"
-        [ "$_n" = "0" ] && { echo "(no hay fuentes activas para actualizar)"; return 0; }
-        cat_compile || _fails=$((_fails+1))
+        [ "$_n" = "0" ] && { rm -f "$_updated"; echo "(no hay fuentes activas para actualizar)"; return 0; }
+        if ! cat_compile; then
+          _fails=$((_fails+1))
+          while IFS= read -r _rid; do [ -n "$_rid" ] && cat_restore_previous "$_rid" >/dev/null 2>&1; done < "$_updated"
+          cat_compile >/dev/null 2>&1 || log_msg "[BLOCKLIST] ERROR rollback compile failed after source update batch"
+        fi
+        rm -f "$_updated"
         [ "$_fails" = "0" ] && echo "OK: $_n fuente(s) activa(s) actualizada(s) y compiladas." || { echo "ERROR: $_fails fallo(s)." >&2; return 1; }
       else
         cat_update_one "$_tgt" || return 1
-        cat_is_enabled "$_tgt" && cat_compile
+        if cat_is_enabled "$_tgt" && ! cat_compile; then
+          cat_restore_previous "$_tgt" >/dev/null 2>&1
+          cat_compile >/dev/null 2>&1 || log_msg "[BLOCKLIST] ERROR rollback compile failed for $_tgt"
+          echo "ERROR: la compilación falló; se restauró la caché previa de '$_tgt'." >&2
+          return 1
+        fi
       fi
       ;;
+
+    download-all)
+      case "${1:-}" in
+        --confirmed) cat_download_all_start --confirmed ;;
+        status)
+          [ "${2:-}" = "--json" ] && cat_download_all_status_json || cat_download_all_status_json ;;
+        *)
+          echo "Acción global: descarga y valida las fuentes compatibles sin activarlas." >&2
+          echo "Uso: dnscrypt-manager catalog download-all --confirmed" >&2
+          echo "     dnscrypt-manager catalog download-all status --json" >&2
+          return 2 ;;
+      esac
+      ;;
+    download-all-worker) cat_download_all_worker "${1:-}" ;;
+
+    rollback) cat_rollback_one "$1" ;;
+    manifest)
+      [ -s "$CAT_MANIFEST" ] || cat_manifest_generate || return 1
+      cat "$CAT_MANIFEST" ;;
+    provenance)
+      [ -s "$CAT_PROVENANCE" ] || cat_provenance_generate || return 1
+      cat "$CAT_PROVENANCE" ;;
 
     compile) cat_compile ;;
     compile-status) cat_compile_status ;;
@@ -989,7 +1999,7 @@ cmd_catalog() {
       esac ;;
 
     *)
-      echo "Uso: dnscrypt-manager catalog {list [--json][--search S][--category C][--maintainer M][--enabled][--recommended][--archived]|info <id>|enable <id>|disable <id>|update [id|enabled|all]|compile|conflicts [id1 id2]|metrics <id>|test <id>|custom ...|sync}" >&2
+      echo "Uso: dnscrypt-manager catalog {list [--json][--search S][--category C][--maintainer M][--enabled][--recommended][--archived]|info <id>|enable <id>|disable <id>|update [id|enabled|all]|download-all --confirmed|download-all status --json|rollback <id>|manifest|provenance|compile|conflicts [id1 id2]|metrics <id>|test <id>|custom ...|sync}" >&2
       return 1 ;;
   esac
 }

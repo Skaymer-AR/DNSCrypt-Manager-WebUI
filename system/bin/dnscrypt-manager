@@ -1179,7 +1179,8 @@ DNSCrypt Manager - comandos
   Catalogo de listas (v0.2.0-RC2):
     catalog list [--json][--search S][--category C][--maintainer M][--enabled][--recommended][--archived]
     catalog info <id> | enable <id> | disable <id>
-    catalog update [id|enabled|all] | compile
+    catalog update [id|enabled|all] | download-all --confirmed
+    catalog download-all status --json | compile
     catalog conflicts [id1 id2] | metrics <id> | test <id>
     catalog compile-status | catalog compile-cancel
     catalog overlap <fuente_a> <fuente_b>   (comparacion exacta, bajo demanda)

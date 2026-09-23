@@ -69,9 +69,9 @@ echo "== A. Generador y paridad JSON/TSV (dev/CI) =="
 _dups=$(awk -F'\t' '!/^#/{print $1}' config/catalog/blocklists.index.tsv | sort | uniq -d | wc -l | tr -d ' ')
 [ "$_dups" = "0" ] && ok "A4 IDs unicos en TSV" || bad "A4 IDs duplicados: $_dups"
 _cols=$(awk -F'\t' '!/^#/{print NF}' config/catalog/blocklists.index.tsv | sort -u | tr '\n' ' ')
-[ "$_cols" = "19 " ] && ok "A5 TSV tiene 19 columnas consistentes" || bad "A5 columnas inconsistentes: $_cols"
+[ "$_cols" = "27 " ] && ok "A5 TSV tiene 27 columnas consistentes" || bad "A5 columnas inconsistentes: $_cols"
 # URLs unicas
-_udups=$(awk -F'\t' '!/^#/{print $8}' config/catalog/blocklists.index.tsv | sort | uniq -d | wc -l | tr -d ' ')
+_udups=$(awk -F'\t' '!/^#/ && $8!=""{print $8}' config/catalog/blocklists.index.tsv | sort | uniq -d | wc -l | tr -d ' ')
 [ "$_udups" = "0" ] && ok "A6 sin URLs duplicadas" || bad "A6 URLs duplicadas: $_udups"
 
 # =====================================================================
@@ -79,6 +79,39 @@ echo "== B. index sincronizado + list/info (solo lectura) =="
 [ -f "$DATA/catalog/blocklists.index.tsv" ] && ok "B1 index copiado al dispositivo por migrate" || bad "B1 index no sincronizado"
 cli catalog list --recommended > "$TR/o" 2>&1
 grep -q "recomendada" "$TR/o" && ok "B2 list --recommended muestra recomendadas" || bad "B2 list recomendadas"
+cli catalog list --json > "$TR/catalog-list.json" 2>"$TR/catalog-list.err"
+"$PY" - "$TR/catalog-list.json" <<'PY' >/dev/null 2>&1
+import json, sys
+d=json.load(open(sys.argv[1], encoding='utf-8'))
+rows=d['entries']; rethink=[e for e in rows if e.get('source_name')]
+assert len(rows)==252 and len(rethink)==197
+assert sum(e.get('source_group')=='Security' for e in rethink)==44
+assert sum(e.get('source_group')=='Privacy' for e in rethink)==85
+assert sum(e.get('source_group')=='ParentalControl' for e in rethink)==67
+assert sum(e.get('source_group')=='' for e in rethink)==1
+assert sum(e.get('license')=='LICENSE_UNKNOWN' for e in rethink)==182
+assert sum(e.get('license_blocked') is True for e in rethink)==0
+assert sum(e.get('activation_blocked') is True for e in rethink)==43
+assert all(e.get('enabled') is False for e in rethink)
+PY
+[ "$?" = "0" ] && ok "B2b JSON CLI conserva 197 fuentes, licencia informativa y bloqueos técnicos (OFF)" || bad "B2b metadata JSON de Rethink invalida"
+cli catalog groups --json > "$TR/catalog-groups.json" 2>"$TR/catalog-groups.err"
+"$PY" - "$TR/catalog-groups.json" <<'PY' >/dev/null 2>&1
+import json, sys
+g={x['key']:x for x in json.load(open(sys.argv[1], encoding='utf-8'))['groups']}
+assert g['Security']['count']==44 and g['Privacy']['count']==85
+assert g['ParentalControl']['count']==67 and g['dcm']['count']==55
+assert g['rethink_unassigned']['count']==1
+PY
+[ "$?" = "0" ] && ok "B2c resumen de grupos es pequeno y conserva los contadores reales" || bad "B2c resumen de grupos invalido"
+cli catalog list --json --source-group Privacy > "$TR/catalog-privacy.json" 2>"$TR/catalog-privacy.err"
+"$PY" - "$TR/catalog-privacy.json" <<'PY' >/dev/null 2>&1
+import json, sys
+r=json.load(open(sys.argv[1], encoding='utf-8'))['entries']
+assert len(r)==85 and all(x.get('source_group')=='Privacy' for x in r)
+PY
+[ "$?" = "0" ] && ok "B2d carga por categoria devuelve solo Privacy (sin transportar todo el catalogo)" || bad "B2d filtro de grupo invalido"
+if cli catalog list --json --source-group invalid >"$TR/catalog-invalid.out" 2>&1; then bad "B2e grupo invalido aceptado"; else ok "B2e grupo invalido rechazado"; fi
 cli catalog list --archived > "$TR/o" 2>&1
 grep -qi "antipopads\|ARCHIVADA" "$TR/o" && ok "B3 list --archived muestra archivadas" || bad "B3 list archivadas"
 cli catalog info dandelionsprout_antimalware > "$TR/o" 2>&1
@@ -97,6 +130,16 @@ SHA_JSON_BEFORE=$(sha256sum config/catalog/blocklists.json | cut -d' ' -f1)
 inlib "cat_update_one rc1_urlhaus" > "$TR/o" 2>&1
 grep -q "OK (rc1_urlhaus): 5 dominios" "$TR/o" && ok "C1 descarga+valida+dedupe+minusculas (5 dominios)" || bad "C1 update ($(cat $TR/o))"
 grep -q "^rc1_urlhaus	verified" "$DATA/catalog/source-status.tsv" && ok "C2 verified registrado en source-status.tsv" || bad "C2 verified no persistido"
+cli catalog list --json > "$TR/catalog-runtime.json" 2>"$TR/catalog-runtime.err"
+"$PY" - "$TR/catalog-runtime.json" <<'PY' >/dev/null 2>&1
+import json, sys
+d=json.load(open(sys.argv[1], encoding='utf-8'))
+e=next(x for x in d['entries'] if x['id']=='rc1_urlhaus')
+assert e['runtime_status']=='verified'
+assert e['valid_domains']=='5' and e['cache_domains']=='5'
+assert int(e['last_success'])>0 and len(e['sha256'])==64
+PY
+[ "$?" = "0" ] && ok "C2b JSON runtime refleja estado, dominios, último éxito y hash" || bad "C2b JSON runtime incorrecto"
 SHA_JSON_AFTER=$(sha256sum config/catalog/blocklists.json | cut -d' ' -f1)
 [ "$SHA_JSON_BEFORE" = "$SHA_JSON_AFTER" ] && ok "C3 catalogo generado inmutable (SHA JSON intacto)" || bad "C3 catalogo mutado"
 # update del modulo no borra historial (source-status vive en DATA)

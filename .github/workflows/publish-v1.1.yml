@@ -1,0 +1,177 @@
+name: Publish DNSCrypt Manager v1.1.0 stable
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1.1.yml'
+      - 'module.prop'
+      - 'README.md'
+      - 'release/v1.1.0/**'
+      - 'scripts/**'
+      - 'system/**'
+      - 'webroot/**'
+      - 'config/**'
+      - 'tests/**'
+      - 'tools/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-dnscrypt-manager-v1.1.0
+  cancel-in-progress: false
+
+jobs:
+  validate-build-publish:
+    if: github.repository == 'Skaymer-AR/DNSCrypt-Manager-WebUI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAG: v1.1.0
+      VERSION: v1.1.0
+      VERSION_CODE: '11010'
+      OFFICIAL_ARM64_SHA256: 940b650911cfa55cbc0544a9025ceb866101590a88031a90a7e1ca05f5781cbc
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout complete source history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard stable version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = main
+          grep -qx 'id=dnscrypt_manager' module.prop
+          grep -qx "version=$VERSION" module.prop
+          grep -qx "versionCode=$VERSION_CODE" module.prop
+          grep -qx 'author=Skaymer AR' module.prop
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite a stable release." >&2
+            exit 1
+          fi
+
+      - name: Install build and test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            zip unzip binutils file iproute2 nodejs python3 ca-certificates
+
+      - name: Verify bundled ARM64 dnscrypt-proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s bin/arm64/dnscrypt-proxy
+          echo "$OFFICIAL_ARM64_SHA256  bin/arm64/dnscrypt-proxy" | sha256sum -c -
+          file bin/arm64/dnscrypt-proxy | grep -Eq 'ARM aarch64|ARM64|AArch64'
+
+      - name: Run complete local package gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/v1.1-assets"
+          DCM_OUTPUT="$RUNNER_TEMP/v1.1-assets/DNSCrypt-Manager-v1.1.0.zip" \
+            bash tools/build-module.sh | tee "$RUNNER_TEMP/build.log"
+          node tests/smoke-test-v1-scope.cjs | tee "$RUNNER_TEMP/v1-scope.log"
+          python3 tools/build-catalog.py --check
+
+      - name: Verify and prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSETS="$RUNNER_TEMP/v1.1-assets"
+          ZIP="$ASSETS/DNSCrypt-Manager-v1.1.0.zip"
+          unzip -tq "$ZIP"
+          unzip -p "$ZIP" module.prop | tr -d '\r' > "$RUNNER_TEMP/module.prop.release"
+          grep -qx 'id=dnscrypt_manager' "$RUNNER_TEMP/module.prop.release"
+          grep -qx "version=$VERSION" "$RUNNER_TEMP/module.prop.release"
+          grep -qx "versionCode=$VERSION_CODE" "$RUNNER_TEMP/module.prop.release"
+          grep -qx 'author=Skaymer AR' "$RUNNER_TEMP/module.prop.release"
+          unzip -Z1 "$ZIP" | grep -qx 'module.prop'
+          if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|dist|fixtures|bootstrap|release)/'; then
+            echo 'Development files leaked into the installable ZIP' >&2
+            exit 1
+          fi
+          (cd "$ASSETS" && sha256sum DNSCrypt-Manager-v1.1.0.zip > DNSCrypt-Manager-v1.1.0.zip.sha256)
+
+          cp release/v1.1.0/RELEASE_NOTES_v1.1.0_ES.md "$ASSETS/"
+          cp release/v1.1.0/RELEASE_NOTES_v1.1.0_EN.md "$ASSETS/"
+          cp release/v1.1.0/ANDROID_USER_VALIDATION_v1.1.0.md "$ASSETS/"
+          cp release/v1.1.0/TEST_RESULTS_v1.1.0.md "$ASSETS/"
+
+          git branch -f release-v1.1-bundle "$GITHUB_SHA"
+          git bundle create "$ASSETS/DNSCrypt-Manager-v1.1.0.bundle" refs/heads/release-v1.1-bundle
+          git bundle verify "$ASSETS/DNSCrypt-Manager-v1.1.0.bundle"
+          git format-patch --stdout v1.0.0.."$GITHUB_SHA" > "$ASSETS/DNSCrypt-Manager-v1.1.0.patch"
+          test -s "$ASSETS/DNSCrypt-Manager-v1.1.0.patch"
+
+          (
+            cd "$ASSETS"
+            sha256sum \
+              DNSCrypt-Manager-v1.1.0.zip \
+              DNSCrypt-Manager-v1.1.0.zip.sha256 \
+              DNSCrypt-Manager-v1.1.0.bundle \
+              DNSCrypt-Manager-v1.1.0.patch \
+              RELEASE_NOTES_v1.1.0_ES.md \
+              RELEASE_NOTES_v1.1.0_EN.md \
+              ANDROID_USER_VALIDATION_v1.1.0.md \
+              TEST_RESULTS_v1.1.0.md \
+              > DNSCrypt-Manager-v1.1.0-files.sha256
+          )
+
+          cat "$ASSETS/RELEASE_NOTES_v1.1.0_ES.md" > "$RUNNER_TEMP/release-body.md"
+          printf '\n\n---\n\n' >> "$RUNNER_TEMP/release-body.md"
+          cat "$ASSETS/RELEASE_NOTES_v1.1.0_EN.md" >> "$RUNNER_TEMP/release-body.md"
+
+      - name: Create official stable GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" "$RUNNER_TEMP/v1.1-assets"/* \
+            -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title 'DNSCrypt Manager v1.1.0' \
+            --notes-file "$RUNNER_TEMP/release-body.md" \
+            --draft=false --prerelease=false --latest
+
+      - name: Download and verify published release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERIFY="$RUNNER_TEMP/release-verify"
+          mkdir -p "$VERIFY"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D "$VERIFY"
+          cd "$VERIFY"
+          sha256sum -c DNSCrypt-Manager-v1.1.0-files.sha256
+          sha256sum -c DNSCrypt-Manager-v1.1.0.zip.sha256
+          unzip -tq DNSCrypt-Manager-v1.1.0.zip
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" \
+            --json url,tagName,isDraft,isPrerelease,isLatest,targetCommitish \
+            > "$VERIFY/release.json"
+          python3 - "$VERIFY/release.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert data['tagName'] == 'v1.1.0', data
+          assert data['isDraft'] is False, data
+          assert data['isPrerelease'] is False, data
+          assert data['isLatest'] is True, data
+          print('Published stable release verified:', data['url'])
+          PY
+
+      - name: Preserve build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DNSCrypt-Manager-v1.1.0-publication-evidence
+          path: |
+            ${{ runner.temp }}/build.log
+            ${{ runner.temp }}/v1-scope.log
+            ${{ runner.temp }}/v1.1-assets
+            ${{ runner.temp }}/release-verify
+          if-no-files-found: warn

@@ -11,7 +11,8 @@
 # y preservacion de la ultima lista valida ante fallo (rollback).
 #
 # Escala configurable:   SCALE=100000 bash tests/scale-test-compile.sh
-#   dev: 100000 (default).  Cierre: 500000 / 1000000 / 2500000 (una sola vez).
+#   dev: 100000 (default). Cierre: SCALE=3570714 SKIP_MECH=1 genera
+#   4999998 dominios finales con estas proporciones de fixtures.
 #
 # Exit: 0 OK, 1 fallo, 99 arnes roto.
 ##############################################################################
@@ -107,6 +108,7 @@ fi
 _t1=$(date +%s); DUR=$(( _t1 - _t0 ))
 BL="$DATA/security/active/blocked-names.txt"
 GOT=$(wc -l < "$BL" 2>/dev/null | tr -d ' ')
+BLOCKED_BYTES=$(wc -c < "$BL" 2>/dev/null | tr -d ' ')
 [ "$GOT" = "$EXP_UNIQUE" ] && ok "1.1 conteo exacto de dominios unicos ($GOT)" || bad "1.1 conteo ($GOT != $EXP_UNIQUE)"
 LC_ALL=C sort -c "$BL" 2>/dev/null && ok "1.2 salida ordenada" || bad "1.2 no ordenada"
 _dups=$(LC_ALL=C uniq -d "$BL" | head -1)
@@ -116,7 +118,7 @@ SHA_TSV1=$(sha256sum config/catalog/blocklists.index.tsv | cut -d' ' -f1)
 # temporales del compilador limpios
 _temps=$(ls "$DATA/run/" 2>/dev/null | grep -cE 'cat\.|stats\.' | tr -d ' ')
 [ "${_temps:-0}" = "0" ] && ok "1.5 sin temporales residuales en RUN_DIR" || bad "1.5 temporales residuales: $_temps"
-echo "     [medicion] tiempo=${DUR}s  maxRSS=${MAXRSS}  dominios=${GOT}"
+echo "     [medicion] tiempo=${DUR}s  maxRSS=${MAXRSS}  dominios=${GOT}  bytes=${BLOCKED_BYTES}"
 
 # ---------------------------------------------------------------------------
 echo "== 2. Aporte unico + allowlist (estadistico) =="

@@ -1,0 +1,54 @@
+name: Blocklist engine checks
+
+on:
+  push:
+    branches: [feat/blocklist-engine]
+    paths:
+      - '.github/workflows/blocklist-engine.yml'
+      - 'scripts/catalog.sh'
+      - 'scripts/security.sh'
+      - 'config/catalog/**'
+      - 'tools/build-catalog.py'
+      - 'tests/smoke-test-blocklist-engine.sh'
+      - 'tests/smoke-test-catalog-bootstrap.sh'
+      - 'tests/smoke-test-webui.sh'
+      - 'tests/fixtures/webui-harness.cjs'
+      - 'service.sh'
+      - 'tests/run-syntax-checks.sh'
+      - 'webroot/js/app.js'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/blocklist-engine.yml'
+      - 'scripts/catalog.sh'
+      - 'scripts/security.sh'
+      - 'config/catalog/**'
+      - 'tools/build-catalog.py'
+      - 'tests/smoke-test-blocklist-engine.sh'
+      - 'tests/smoke-test-catalog-bootstrap.sh'
+      - 'tests/smoke-test-webui.sh'
+      - 'tests/fixtures/webui-harness.cjs'
+      - 'service.sh'
+      - 'tests/run-syntax-checks.sh'
+      - 'webroot/js/app.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parser-and-runtime-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parser, download validation, provenance and rollback fixtures
+        run: bash tests/smoke-test-blocklist-engine.sh
+      - name: Catalog reproducibility
+        run: python3 tools/build-catalog.py --check
+      - name: Upgraded installation with schema 3 and missing catalog index
+        run: bash tests/smoke-test-catalog-bootstrap.sh
+      - name: WebUI against real CLI with missing catalog index
+        run: bash tests/smoke-test-webui.sh
+      - name: Syntax and structure
+        run: bash tests/run-syntax-checks.sh

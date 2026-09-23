@@ -37,9 +37,10 @@ final temporal → **prueba la config con `dnscrypt-proxy -check`** → backup d
 versión anterior → reemplazo atómico (`mv`) → reinicio → prueba DNS real → si
 algo falla, **rollback automático** a la versión anterior.
 
-Nunca queda una lista incompleta o vacía como activa. Límites: hasta 25 MB por
-archivo y 500 000 dominios (evita agotar RAM/almacenamiento). Líneas de más de
-512 caracteres se descartan.
+Nunca queda una lista incompleta o vacía como activa. Límites de las fuentes
+legacy: hasta 256 MiB por archivo y 5.000.000 de dominios. Líneas de más de
+512 caracteres se descartan. El archivo final fusionado también tiene un tope
+global de 5.000.000 de dominios.
 
 ```
 dnscrypt-manager blocklists update            # todas las activas
@@ -50,6 +51,68 @@ dnscrypt-manager blocklists sources
 ```
 
 Fuentes documentadas en `BLOCKLIST_SOURCES.md`.
+
+### Catálogo de fuentes upstream
+
+El catálogo separado (`dnscrypt-manager catalog ...`) conserva la procedencia
+de cada feed: fuente, categorías, licencia, formato, URL, hashes y cantidades.
+Las fuentes se activan una por una, quedan apagadas mientras no se elijan y se
+actualizan bajo demanda. Una categoría como `spyware`, `trackers` o `telemetry`
+es la clasificación declarada por su fuente; no demuestra que cada dominio
+sea dañino. Las listas pueden dar falsos positivos y no sustituyen un antivirus.
+
+```sh
+dnscrypt-manager catalog list --json
+dnscrypt-manager catalog info hagezi_multi_pro
+dnscrypt-manager catalog download-all --confirmed
+dnscrypt-manager catalog download-all status --json
+dnscrypt-manager catalog enable hagezi_multi_pro
+dnscrypt-manager catalog update enabled
+dnscrypt-manager catalog disable hagezi_multi_pro
+dnscrypt-manager catalog rollback hagezi_multi_pro
+dnscrypt-manager catalog manifest
+dnscrypt-manager catalog provenance
+dnscrypt-manager allowlist add example.org
+```
+
+El parser descarga únicamente por HTTPS, limita cada fuente a 256 MiB y
+5.000.000 de dominios válidos, limita las fuentes activas del catálogo a
+10.000.000 de entradas normalizadas/1 GiB, la unión deduplicada a 5.000.000
+dominios y el archivo final a 5.000.000 tras fusionar fuentes legacy y controles
+activos. La compilación exige al menos 512 MiB libres para staging/rollback.
+Rechaza respuestas HTTP fallidas, vacías, HTML o JSON
+inesperado, hostname inválido, IP-only, localhost, TLD demasiado amplio y
+reglas AdBlock que no se convierten fielmente a DNS. Una reducción superior al
+50% respecto de una caché previa de al menos 20 dominios se trata como
+anomalía. El error conserva la última copia válida.
+
+**Descargar todas las fuentes** procesa en segundo plano el catálogo compatible,
+conserva cachés válidas si alguna descarga falla y muestra el progreso; no
+activa fuentes nuevas ni cambia los bloqueos activos. Las entradas rotas,
+archivadas o que requieren revisión técnica se omiten. Las fuentes seleccionadas
+individualmente o por categoría se activan con **Aplicar cambios**.
+
+El máximo de 5.000 líneas que muestra `allowlist import` limita ese archivo de
+importación; no limita las fuentes de bloqueo ni `blocked-names.txt`.
+
+El módulo no edita `/system/etc/hosts`. Genera `blocked-names.txt` y configura
+DNSCrypt Proxy con `[blocked_names]` y `blocked_names_file`; las consultas se
+filtran dentro del proxy DNS. La allowlist se configura con `[allowed_names]` y
+tiene precedencia sobre los nombres bloqueados.
+
+La lista activa se construye en staging, valida el TOML con
+`dnscrypt-proxy -check` y recién entonces reemplaza los archivos activos. Si
+falla el reinicio o la verificación DNS, se restaura el snapshot previo. La
+allowlist personal llega a `[allowed_names]`; DNSCrypt Proxy especifica que las
+coincidencias de `allowed_names` evitan los filtros de nombre e IP.
+
+Los artefactos runtime están en `catalog/blocklists-manifest.json` y
+`catalog/source-provenance.tsv`. El primero incluye fecha, URL, hashes y
+conteos; el segundo conserva una fila por combinación dominio/fuente/categoría.
+No se registran consultas DNS en el proceso de actualización ni se envían
+aplicaciones instaladas o historial DNS al upstream. El motor no descarga ni
+ejecuta código de las listas. Las fuentes con licencia `LICENSE_UNKNOWN` no se
+descargan ni se activan automáticamente.
 
 ## 3. Allowlist
 
