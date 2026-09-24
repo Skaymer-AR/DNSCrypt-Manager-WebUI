@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.1.0
+
+Versión estable del catálogo de blocklists DNS. Mantiene DNSCrypt Proxy como
+único motor DNS y añade la selección por categorías, descarga y validación de
+fuentes upstream, compilación explícita, allowlist prioritaria y rollback. El
+archivo DNS final admite hasta 5 millones de dominios únicos. Las descargas
+masivas pueden volver lenta la WebUI en el teléfono; se ejecutan en segundo
+plano, con hasta cuatro transferencias simultáneas, y no cambian el bloqueo
+activo hasta aplicar y compilar las listas.
+
+### Historial de candidatas v1.1.0
+
+| Versión | Cambio principal |
+| --- | --- |
+| [RC1](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc1) | Primer paquete de prueba del catálogo. |
+| [RC2](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc2) | Carga de contadores antes de consultar las fuentes por categoría. |
+| [RC3](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc3) | Categorías visibles al entrar en Listas. |
+| [RC4](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc4) | Consulta del catálogo compatible con `awk` de Android. |
+| [RC5](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc5) | Selección de todas las fuentes de una categoría o de cada lista individual. |
+| [RC6](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc6) | Recuperación del índice local faltante en instalaciones ya migradas. |
+| [RC7](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc7) | Modo Simple/Avanzado y filtros del catálogo. |
+| [RC8](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc8) | Selección manual de fuentes con etiqueta `LICENSE_UNKNOWN`. |
+| [RC9](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc9) | Descarga global en segundo plano y límite de 5 millones de dominios. |
+| [RC10](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0-rc10) | Hasta cuatro descargas simultáneas y un solo manifiesto al terminar. |
+
+Cada release histórica conserva su ZIP original y SHA-256. No se conservaron
+commits fuente individuales de las candidatas: los archivos **Source code**
+generados automáticamente por GitHub desde sus tags apuntan al `main` posterior,
+no al estado exacto de cada RC. Para instalar, se recomienda la
+[v1.1.0 estable](https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/tag/v1.1.0).
+
 ## v1.0.0
 
 Primera versión estable de **DNSCrypt Manager**, creada por **Skaymer AR**.
