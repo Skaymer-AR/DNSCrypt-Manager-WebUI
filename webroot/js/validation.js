@@ -12,6 +12,7 @@
 'use strict';
 
 const DCMValidate = (() => {
+  const vtr = (key, fallback) => (typeof I18N !== 'undefined' && I18N.t) ? I18N.t(key) : fallback;
   const RE = {
     nextdnsId: /^[0-9a-fA-F]{4,12}$/,
     ipv4: /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/,
@@ -22,9 +23,9 @@ const DCMValidate = (() => {
 
   function nextdnsId(v) {
     const s = String(v == null ? '' : v).trim();
-    if (!s) return { ok: false, msg: 'Ingresa el Configuration ID de NextDNS.' };
+    if (!s) return { ok: false, msg: vtr('validation.nextdns.required', 'Ingresa el Configuration ID de NextDNS.') };
     if (!RE.nextdnsId.test(s)) {
-      return { ok: false, msg: 'Debe ser hexadecimal de 4 a 12 caracteres (ej: abcdef).' };
+      return { ok: false, msg: vtr('validation.nextdns.format', 'Debe ser hexadecimal de 4 a 12 caracteres (ej: abcdef).') };
     }
     return { ok: true, msg: '' };
   }
@@ -33,26 +34,26 @@ const DCMValidate = (() => {
     const s = String(v == null ? '' : v).trim();
     if (RE.ipv4.test(s)) return { ok: true, msg: '' };
     if (RE.ipv6.test(s) && s.includes(':') && s.length <= 45) return { ok: true, msg: '' };
-    return { ok: false, msg: 'Direccion IP invalida (IPv4 o IPv6).' };
+    return { ok: false, msg: vtr('validation.ip', 'Direccion IP invalida (IPv4 o IPv6).') };
   }
 
   function host(v) {
     const s = String(v == null ? '' : v).trim();
     if (s.length && s.length <= 253 && RE.host.test(s)) return { ok: true, msg: '' };
-    return { ok: false, msg: 'Nombre de host invalido.' };
+    return { ok: false, msg: vtr('validation.host', 'Nombre de host invalido.') };
   }
 
   function doh(v) {
     const s = String(v == null ? '' : v).trim();
-    if (!s.startsWith('https://')) return { ok: false, msg: 'La URL DoH debe empezar con https://' };
-    if (/[\s;&|$`<>()"'\\]/.test(s)) return { ok: false, msg: 'La URL contiene caracteres no permitidos.' };
-    if (s.length > 512) return { ok: false, msg: 'URL demasiado larga.' };
+    if (!s.startsWith('https://')) return { ok: false, msg: vtr('validation.doh.scheme', 'La URL DoH debe empezar con https://') };
+    if (/[\s;&|$`<>()"'\\]/.test(s)) return { ok: false, msg: vtr('validation.doh.chars', 'La URL contiene caracteres no permitidos.') };
+    if (s.length > 512) return { ok: false, msg: vtr('validation.doh.length', 'URL demasiado larga.') };
     return { ok: true, msg: '' };
   }
 
   function stamp(v) {
     const s = String(v == null ? '' : v).trim();
-    if (!RE.stamp.test(s) || s.length > 1024) return { ok: false, msg: 'DNS stamp invalido (formato sdns://...).' };
+    if (!RE.stamp.test(s) || s.length > 1024) return { ok: false, msg: vtr('validation.stamp', 'DNS stamp invalido (formato sdns://...).') };
     return { ok: true, msg: '' };
   }
 
@@ -63,11 +64,11 @@ const DCMValidate = (() => {
   const RE_DOMAIN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
   function isValidDomain(v) {
     const s = String(v == null ? '' : v).trim().toLowerCase();
-    if (!s) return { ok: false, msg: 'Ingresa un dominio (ej: example.com).' };
-    if (s.length > 253) return { ok: false, msg: 'Dominio demasiado largo.' };
-    if (RE.ipv4.test(s)) return { ok: false, msg: 'Es una IP, no un dominio. Usa un nombre como example.com.' };
+    if (!s) return { ok: false, msg: vtr('validation.domain.required', 'Ingresa un dominio (ej: example.com).') };
+    if (s.length > 253) return { ok: false, msg: vtr('validation.domain.length', 'Dominio demasiado largo.') };
+    if (RE.ipv4.test(s)) return { ok: false, msg: vtr('validation.domain.ip', 'Es una IP, no un dominio. Usa un nombre como example.com.') };
     if (!RE_DOMAIN.test(s)) {
-      return { ok: false, msg: 'Dominio invalido. Formato: example.com o sub.example.com (sin http://, barras ni comodines).' };
+      return { ok: false, msg: vtr('validation.domain.format', 'Dominio invalido. Formato: example.com o sub.example.com (sin http://, barras ni comodines).') };
     }
     return { ok: true, msg: '', value: s };
   }
