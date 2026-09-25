@@ -62,7 +62,7 @@ private enum class Tab(val label: String, val glyph: String) {
 }
 
 @Composable
-fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
+internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
     var tabIndex by rememberSaveable { mutableIntStateOf(0) }
 
@@ -130,7 +130,7 @@ private fun HomeScreen(
     ) {
         Header("DNSCrypt Manager", "Local DNS control")
         StatusHero(status.running && status.listening, status.redirectActive)
-        MetricsRow(snapshot)
+        MetricsRow(state)
         ProviderCard(status.server, status.version, onRefresh)
         ActivityCard(
             enabled = status.activityEnabled,
