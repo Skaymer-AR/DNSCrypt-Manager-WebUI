@@ -12,13 +12,13 @@
     <div class="glyph">D</div>
     <div>
       <h1>DNSCrypt Manager</h1>
-      <p class="sub">dnscrypt-proxy como servicio del sistema</p>
+      <p class="sub" data-i18n="ui.sub">dnscrypt-proxy como servicio del sistema</p>
     </div>
   </header>
 
-  <div class="ui-mode-switch" role="group" aria-label="Modo de interfaz">
-    <button id="uiModeSimple" type="button" aria-pressed="true">Simple</button>
-    <button id="uiModeAdvanced" type="button" aria-pressed="false">Avanzado</button>
+  <div class="ui-mode-switch" role="group" data-i18n-aria="ui.mode.aria" aria-label="Modo de interfaz">
+    <button id="uiModeSimple" type="button" aria-pressed="true" data-i18n="ui.simple">Simple</button>
+    <button id="uiModeAdvanced" type="button" aria-pressed="false" data-i18n="ui.advanced">Avanzado</button>
   </div>
 
   <div id="ksuBanner" class="banner banner-warn hidden"></div>
@@ -26,14 +26,12 @@
   <div id="disabledBanner" class="banner banner-danger hidden">
     <span id="disabledBannerText"></span>
     <div style="margin-top:8px;">
-      <button id="btnEnable" class="small">Habilitar</button>
+      <button id="btnEnable" class="small" data-i18n="ui.enable">Habilitar</button>
     </div>
   </div>
 
   <div id="binMissingBanner" class="banner banner-warn hidden">
-    No se encontro el binario de dnscrypt-proxy. Instalalo con
-    <code>su -c dnscrypt-manager fetch-binary</code> (ver README) y luego
-    reinicia el servicio.
+    <span data-i18n="ui.bin.missing">No se encontro el binario de dnscrypt-proxy. Instalalo con su -c dnscrypt-manager fetch-binary (ver README) y luego reinicia el servicio.</span>
   </div>
 
   <!-- ============================ PANEL PRINCIPAL ============================ -->
@@ -41,7 +39,7 @@
   <div class="route" id="route-status" data-route="status">
 
 <section class="card">
-    <h2>Panel principal</h2>
+    <h2 data-i18n="ui.main">Panel principal</h2>
 
     <div class="status-row">
       <span id="statusDot" class="dot dot-red"></span>
@@ -50,18 +48,18 @@
 
     <div class="kv-grid">
       <div class="kv ui-advanced-only"><div class="k">PID</div><div class="v" id="pidText">—</div></div>
-      <div class="kv ui-advanced-only"><div class="k">Escucha</div><div class="v" id="listeningText">—</div></div>
-      <div class="kv ui-advanced-only"><div class="k">Direccion local</div><div class="v" id="listenText">—</div></div>
-      <div class="kv ui-advanced-only"><div class="k">Version</div><div class="v" id="versionText">—</div></div>
-      <div class="kv"><div class="k">Servidor activo</div><div class="v" id="serverText">—</div></div>
-      <div class="kv ui-advanced-only"><div class="k">Backend firewall</div><div class="v" id="backendText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k" data-i18n="ui.status.listen">Escucha</div><div class="v" id="listeningText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k" data-i18n="ui.status.address">Direccion local</div><div class="v" id="listenText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k" data-i18n="ui.status.version">Version</div><div class="v" id="versionText">—</div></div>
+      <div class="kv"><div class="k" data-i18n="ui.status.server">Servidor activo</div><div class="v" id="serverText">—</div></div>
+      <div class="kv ui-advanced-only"><div class="k" data-i18n="ui.status.firewall">Backend firewall</div><div class="v" id="backendText">—</div></div>
     </div>
 
     <div class="btn-row">
-      <button id="btnStart" class="primary">Iniciar</button>
-      <button id="btnStop">Detener</button>
-      <button id="btnRestart" class="ghost">Reiniciar</button>
-      <button id="btnTestDns" class="wide">Probar DNS</button>
+      <button id="btnStart" class="primary" data-i18n="ui.start">Iniciar</button>
+      <button id="btnStop" data-i18n="ui.stop">Detener</button>
+      <button id="btnRestart" class="ghost" data-i18n="ui.restart">Reiniciar</button>
+      <button id="btnTestDns" class="wide" data-i18n="ui.testdns">Probar DNS</button>
     </div>
 
     <div id="testDnsOutput" class="hint" style="margin-top:12px;"></div>
@@ -73,7 +71,7 @@
 <section class="card">
     <h2 data-i18n="dns.resolver">Servidores</h2>
 
-    <p class="hint ui-advanced-only" style="margin:0 0 10px;">Proveedores preestablecidos (stamp con IP embebida):</p>
+    <p class="hint ui-advanced-only" style="margin:0 0 10px;" data-i18n="ui.dns.presets">Proveedores preestablecidos (stamp con IP embebida):</p>
     <div class="btn-row" style="margin-bottom:16px;">
       <button data-provider="cloudflare">Cloudflare</button>
       <button data-provider="quad9">Quad9</button>
@@ -83,11 +81,11 @@
 
     <div class="field">
       <label for="nextdnsId">NextDNS — Configuration ID</label>
-      <input type="text" id="nextdnsId" placeholder="ej: abcdef" maxlength="12" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <input type="text" id="nextdnsId" data-i18n-ph="ui.nextdns.placeholder" placeholder="ej: abcdef" maxlength="12" autocapitalize="off" autocorrect="off" spellcheck="false">
       <div class="err" id="nextdnsError"></div>
     </div>
-    <button id="btnNextdnsApply" class="wide">Aplicar NextDNS</button>
-    <p class="hint">Cambiar de servidor requiere reiniciar el servicio para tomar efecto.</p>
+    <button id="btnNextdnsApply" class="wide" data-i18n="ui.dns.nextdns">Aplicar NextDNS</button>
+    <p class="hint" data-i18n="ui.dns.restart">Cambiar de servidor requiere reiniciar el servicio para tomar efecto.</p>
   </section>
 
 <section class="card">
@@ -99,25 +97,25 @@
     </div>
 
     <div class="btn-row" style="margin-bottom:16px;">
-      <button id="btnRedirectApply" class="primary">Aplicar redireccion</button>
-      <button id="btnRedirectRemove">Quitar redireccion</button>
+      <button id="btnRedirectApply" class="primary" data-i18n="ui.redirect.apply">Aplicar redireccion</button>
+      <button id="btnRedirectRemove" data-i18n="ui.redirect.remove">Quitar redireccion</button>
     </div>
 
     <div class="field-row">
       <span class="switch">
         <input type="checkbox" id="bootRedirectToggle">
-        Redirigir automaticamente al iniciar Android
+        <span data-i18n="ui.redirect.boot">Redirigir automaticamente al iniciar Android</span>
       </span>
     </div>
 
     <div class="field">
-      <label for="ipv6ModeSelect">IPv6 al redirigir</label>
+      <label for="ipv6ModeSelect" data-i18n="ui.redirect.ipv6">IPv6 al redirigir</label>
       <select id="ipv6ModeSelect">
-        <option value="redirect">Redirigir tambien IPv6 al proxy</option>
-        <option value="block">Bloquear DNS por IPv6 (evita fugas)</option>
+        <option value="redirect" data-i18n="ui.redirect.ipv6.proxy">Redirigir tambien IPv6 al proxy</option>
+        <option value="block" data-i18n="ui.redirect.ipv6.block">Bloquear DNS por IPv6 (evita fugas)</option>
       </select>
     </div>
-    <p class="hint ui-advanced-only">
+    <p class="hint ui-advanced-only" data-i18n="ui.redirect.hint">
       "Redirigir" usa el mismo proxy para IPv4 e IPv6. "Bloquear" corta las
       consultas DNS por IPv6 para que no se escapen sin cifrar; el resto del
       trafico IPv6 no se toca.
@@ -125,12 +123,8 @@
   </section>
 
 <section class="card">
-    <h2>Proteccion web</h2>
-    <p class="hint" style="margin-top:0;">
-      Bloqueo de dominios por categoria. Malware, phishing y estafas vienen
-      activados; rastreadores, publicidad y criptomineria, desactivados para no
-      romper apps ni paginas legitimas.
-    </p>
+    <h2 data-i18n="ui.protect.title">Proteccion web</h2>
+    <p class="hint" style="margin-top:0;" data-i18n="ui.protect.hint">Bloqueo de dominios por categoria. Malware, phishing y estafas vienen activados; rastreadores, publicidad y criptomineria, desactivados para no romper apps ni paginas legitimas.</p>
     <div id="protectionList" class="toggle-list">
       <div class="hint">Cargando…</div>
     </div>
@@ -138,8 +132,8 @@
   </section>
 
   <details class="card ui-advanced-only">
-    <summary>Diagnostico — Private DNS de Android</summary>
-    <button id="btnPrivateDns" class="small" style="margin-bottom:10px;">Verificar Private DNS</button>
+    <summary data-i18n="ui.private.title">Diagnostico — Private DNS de Android</summary>
+    <button id="btnPrivateDns" class="small" style="margin-bottom:10px;" data-i18n="ui.private.button">Verificar Private DNS</button>
     <div id="privateDnsText" class="hint">Toca el boton para consultar.</div>
   </details>
 
@@ -147,43 +141,43 @@
   <div class="route" id="route-lists" data-route="lists" hidden>
   <section class="card catalog-card">
     <h2 data-i18n="lists.catalog">Protección por listas</h2>
-    <p class="hint" style="margin-top:0;">Las categorías están a la vista. Podés activar una categoría completa o elegir listas individuales; nada cambia hasta confirmar.</p>
+    <p class="hint" style="margin-top:0;" data-i18n="cat.intro">Las categorías están a la vista. Podés activar una categoría completa o elegir listas individuales; nada cambia hasta confirmar.</p>
     <div class="catalog-tools">
       <label class="catalog-search" for="catSearch">
         <span class="catalog-search-icon" aria-hidden="true">&#8981;</span>
-        <input type="text" id="catSearch" placeholder="Buscar en las listas" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <input type="text" id="catSearch" data-i18n-ph="cat.search.placeholder" placeholder="Buscar en las listas" autocapitalize="off" autocorrect="off" spellcheck="false">
       </label>
-      <button id="btnCatFilter" type="button" class="catalog-filter-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="catFilterSheet" aria-label="Filtrar listas">
+      <button id="btnCatFilter" type="button" class="catalog-filter-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="catFilterSheet" data-i18n-aria="cat.filter.aria" aria-label="Filtrar listas">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>
-        <span>Filtrar</span>
+        <span data-i18n="cat.filter.button">Filtrar</span>
         <span id="catFilterBadge" class="catalog-filter-badge" hidden>0</span>
       </button>
     </div>
     <div id="catActiveFilters" class="catalog-active-filters" hidden></div>
-    <div class="catalog-selection-tabs" role="group" aria-label="Fuentes del catálogo">
-      <button id="btnCatAll" type="button" aria-pressed="true">Todas</button>
-      <button id="btnCatSelected" type="button" aria-pressed="false">Seleccionadas</button>
+    <div class="catalog-selection-tabs" role="group" data-i18n-aria="cat.tabs.aria" aria-label="Fuentes del catálogo">
+      <button id="btnCatAll" type="button" aria-pressed="true" data-i18n="cat.tab.all">Todas</button>
+      <button id="btnCatSelected" type="button" aria-pressed="false" data-i18n="cat.tab.selected">Seleccionadas</button>
     </div>
     <div class="catalog-download-all">
-      <button id="btnCatDownloadAll" type="button" class="small">Descargar todas las fuentes</button>
-      <p class="hint">Descarga y valida las fuentes compatibles en segundo plano, hasta 4 a la vez según el espacio disponible. No activa listas nuevas ni cambia los bloqueos actuales; conserva 512 MiB libres. Las fuentes que requieren revisión técnica se informan como omitidas.</p>
+      <button id="btnCatDownloadAll" type="button" class="small" data-i18n="cat.download.button">Descargar todas las fuentes</button>
+      <p class="hint" data-i18n="cat.download.hint">Descarga y valida las fuentes compatibles en segundo plano, hasta 4 a la vez según el espacio disponible. No activa listas nuevas ni cambia los bloqueos actuales; conserva 512 MiB libres. Las fuentes que requieren revisión técnica se informan como omitidas.</p>
       <div id="catDownloadStatus" class="hint" aria-live="polite"></div>
     </div>
-    <div id="catResults" class="catalog-groups hint" aria-live="polite">Cargando categorías…</div>
+    <div id="catResults" class="catalog-groups hint" aria-live="polite">Loading categories…</div>
     <div class="btn-row" style="margin:12px 0 8px;">
-      <button id="btnCatAddSelected" class="primary" disabled>Aplicar cambios (0)</button>
-      <button id="btnCatClearSelection" class="small" disabled>Limpiar selección</button>
+      <button id="btnCatAddSelected" class="primary" disabled>Apply changes (0)</button>
+      <button id="btnCatClearSelection" class="small" disabled data-i18n="cat.apply.clear">Limpiar selección</button>
     </div>
-    <div id="catSelectionStatus" class="hint" aria-live="polite">No hay fuentes seleccionadas.</div>
+    <div id="catSelectionStatus" class="hint" aria-live="polite">No sources selected.</div>
     <div id="catApplyStatus" class="hint" aria-live="polite"></div>
     <details class="catalog-options">
-      <summary>Actualizar, compilar y otras opciones</summary>
+      <summary data-i18n="cat.options.title">Actualizar, compilar y otras opciones</summary>
       <div class="btn-row" style="margin-bottom:10px;">
-        <button id="btnCatUpdate" class="primary">Actualizar activas</button>
-        <button id="btnCatCompile">Compilar</button>
-        <button id="btnCatConflicts" class="small">Conflictos</button>
+        <button id="btnCatUpdate" class="primary" data-i18n="cat.options.update">Actualizar activas</button>
+        <button id="btnCatCompile" data-i18n="cat.options.compile">Compilar</button>
+        <button id="btnCatConflicts" class="small" data-i18n="cat.options.conflicts">Conflictos</button>
       </div>
-      <p class="hint">Las listas se descargan desde sus fuentes y se validan antes de activarse. <code>LICENSE_UNKNOWN</code> informa que no se verificó la licencia upstream; podés seleccionar la lista y se descarga al aplicar. <code>REQUIERE REVISIÓN</code> y <code>ROTA</code> indican que esa fuente todavía no es técnicamente utilizable. Una casilla marcada prepara el cambio; solo se ejecuta al confirmar.</p>
+      <p class="hint" data-i18n="cat.options.hint">Las listas se descargan desde sus fuentes y se validan antes de activarse. <code>LICENSE_UNKNOWN</code> informa que no se verificó la licencia upstream; podés seleccionar la lista y se descarga al aplicar. <code>REQUIERE REVISIÓN</code> y <code>ROTA</code> indican que esa fuente todavía no es técnicamente utilizable. Una casilla marcada prepara el cambio; solo se ejecuta al confirmar.</p>
     </details>
     <div id="catConflicts" class="hint" style="margin-top:8px;"></div>
   </section>
@@ -208,65 +202,61 @@
   </section>
 
 <section class="card">
-    <h2>Listas de bloqueo</h2>
+    <h2 data-i18n="ui.blocks.title">Listas de bloqueo</h2>
     <div class="btn-row" style="margin-bottom:12px;">
-      <button id="btnBlocklistsUpdate" class="primary">Actualizar activas</button>
-      <button id="btnBlocklistsValidate">Validar</button>
+      <button id="btnBlocklistsUpdate" class="primary" data-i18n="cat.options.update">Actualizar activas</button>
+      <button id="btnBlocklistsValidate" data-i18n="ui.blocks.validate">Validar</button>
     </div>
-    <div id="blocklistsTable" class="hint">Toca “Actualizar activas” para descargar y verificar las listas.</div>
-    <p class="hint">
-      Cada actualizacion se descarga a un archivo temporal, se verifica (tamaño,
-      SHA-256, sintaxis), se prueba con dnscrypt-proxy y solo entonces se aplica.
-      Si algo falla, se restaura la version anterior automaticamente.
-    </p>
+    <div id="blocklistsTable" class="hint" data-i18n="ui.blocks.prompt">Toca “Actualizar activas” para descargar y verificar las listas.</div>
+    <p class="hint" data-i18n="ui.blocks.hint">Cada actualizacion se descarga a un archivo temporal, se verifica (tamaño, SHA-256, sintaxis), se prueba con dnscrypt-proxy y solo entonces se aplica. Si algo falla, se restaura la version anterior automaticamente.</p>
   </section>
 
 <section class="card">
     <h2 data-i18n="lists.allowlist">Allowlist</h2>
-    <p class="hint" style="margin-top:0;">Dominios que nunca se bloquean.</p>
+    <p class="hint" style="margin-top:0;" data-i18n="ui.allow.hint">Dominios que nunca se bloquean.</p>
     <div class="field">
-      <label for="allowInput">Dominio</label>
-      <input type="text" id="allowInput" placeholder="ej: example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <label for="allowInput" data-i18n="ui.domain">Dominio</label>
+      <input type="text" id="allowInput" data-i18n-ph="ui.domain.placeholder" placeholder="ej: example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
       <div class="err" id="allowError"></div>
     </div>
     <div class="btn-row" style="margin-bottom:12px;">
-      <button id="btnAllowAdd" class="primary">Agregar</button>
-      <button id="btnAllowSearch">Buscar</button>
+      <button id="btnAllowAdd" class="primary" data-i18n="ui.add">Agregar</button>
+      <button id="btnAllowSearch" data-i18n="ui.search">Buscar</button>
     </div>
     <div class="field">
-      <label for="allowImport">Importar (un dominio por linea, hasta 200)</label>
+      <label for="allowImport" data-i18n="ui.allow.import">Importar (un dominio por linea, hasta 200)</label>
       <textarea id="allowImport" rows="3" placeholder="dominio1.com&#10;dominio2.com" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
     </div>
     <div class="btn-row" style="margin-bottom:12px;">
-      <button id="btnAllowImport">Importar lista</button>
-      <button id="btnAllowExport" class="small">Exportar</button>
+      <button id="btnAllowImport" data-i18n="ui.allow.import.button">Importar lista</button>
+      <button id="btnAllowExport" class="small" data-i18n="ui.export">Exportar</button>
     </div>
     <div id="allowList" class="hint">—</div>
   </section>
 
 <section class="card">
     <h2 data-i18n="lists.exceptions">Excepciones temporales</h2>
-    <p class="hint" style="margin-top:0;">Permitir un dominio por un rato, sin quitarlo del bloqueo permanente.</p>
+    <p class="hint" style="margin-top:0;" data-i18n="ui.temp.hint">Permitir un dominio por un rato, sin quitarlo del bloqueo permanente.</p>
     <div class="field">
       <label for="tempInput">Dominio</label>
       <input type="text" id="tempInput" placeholder="ej: example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
       <div class="err" id="tempError"></div>
     </div>
     <div class="field">
-      <label for="tempDuration">Duracion</label>
+      <label for="tempDuration" data-i18n="ui.temp.duration">Duracion</label>
       <select id="tempDuration">
-        <option value="5m">5 minutos</option>
-        <option value="15m" selected>15 minutos</option>
-        <option value="1h">1 hora</option>
-        <option value="boot">Hasta reiniciar</option>
-        <option value="perm">Permanente (allowlist)</option>
+        <option value="5m" data-i18n="ui.temp.5m">5 minutos</option>
+        <option value="15m" selected data-i18n="ui.temp.15m">15 minutos</option>
+        <option value="1h" data-i18n="ui.temp.1h">1 hora</option>
+        <option value="boot" data-i18n="ui.temp.boot">Hasta reiniciar</option>
+        <option value="perm" data-i18n="ui.temp.perm">Permanente (allowlist)</option>
       </select>
     </div>
     <div class="field">
-      <label for="tempReason">Motivo (opcional)</label>
-      <input type="text" id="tempReason" placeholder="ej: descarga puntual" maxlength="80" autocapitalize="off" spellcheck="false">
+      <label for="tempReason" data-i18n="ui.temp.reason">Motivo (opcional)</label>
+      <input type="text" id="tempReason" data-i18n-ph="ui.temp.reason.placeholder" placeholder="ej: descarga puntual" maxlength="80" autocapitalize="off" spellcheck="false">
     </div>
-    <button id="btnTempAdd" class="wide primary" style="margin-bottom:12px;">Crear excepcion</button>
+    <button id="btnTempAdd" class="wide primary" style="margin-bottom:12px;" data-i18n="ui.temp.add">Crear excepcion</button>
     <div id="tempList" class="hint">—</div>
   </section>
 
@@ -274,32 +264,28 @@
     <h2 data-i18n="lists.custom">Fuentes personalizadas</h2>
     <div class="field">
       <label for="customUrl">URL (https://)</label>
-      <input type="text" id="customUrl" placeholder="https://ejemplo.net/lista.txt" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <input type="text" id="customUrl" data-i18n-ph="ui.custom.url.placeholder" placeholder="https://ejemplo.net/lista.txt" autocapitalize="off" autocorrect="off" spellcheck="false">
       <div class="err" id="customError"></div>
     </div>
     <div class="field">
-      <label for="customName">Nombre (opcional)</label>
-      <input type="text" id="customName" placeholder="Mi lista" maxlength="60" autocapitalize="off" spellcheck="false">
+      <label for="customName" data-i18n="ui.custom.name">Nombre (opcional)</label>
+      <input type="text" id="customName" data-i18n-ph="ui.custom.name.placeholder" placeholder="Mi lista" maxlength="60" autocapitalize="off" spellcheck="false">
     </div>
-    <button id="btnCustomAdd" class="wide primary" style="margin-bottom:12px;">Agregar fuente</button>
+    <button id="btnCustomAdd" class="wide primary" style="margin-bottom:12px;" data-i18n="ui.custom.add">Agregar fuente</button>
     <div id="customList" class="hint">—</div>
   </section>
 
 <section class="card">
     <h2 data-i18n="lists.bindhosts">Importar BindHosts</h2>
-    <p class="hint" style="margin-top:0;">
-      Analiza <code>sources.txt</code>, <code>blacklist.txt</code>,
-      <code>whitelist.txt</code> y <code>custom.txt</code> de un directorio.
-      El analisis no modifica nada.
-    </p>
+    <p class="hint" style="margin-top:0;" data-i18n="ui.bind.hint">Analyze sources.txt, blacklist.txt, whitelist.txt and custom.txt from a directory. Analysis does not change anything.</p>
     <div class="field">
-      <label for="bhDir">Directorio (ruta absoluta)</label>
+      <label for="bhDir" data-i18n="ui.bind.dir">Directorio (ruta absoluta)</label>
       <input type="text" id="bhDir" placeholder="/data/adb/bindhosts" autocapitalize="off" autocorrect="off" spellcheck="false">
       <div class="err" id="bhError"></div>
     </div>
     <div class="btn-row" style="margin-bottom:10px;">
-      <button id="btnBhAnalyze" class="primary">Analizar (dry-run)</button>
-      <button id="btnBhImport" class="danger">Importar</button>
+      <button id="btnBhAnalyze" class="primary" data-i18n="ui.bind.analyze">Analizar (dry-run)</button>
+      <button id="btnBhImport" class="danger" data-i18n="ui.bind.import">Importar</button>
     </div>
     <div id="bhResults" class="hint" style="white-space:pre-wrap;">—</div>
   </section>
@@ -311,10 +297,10 @@
   <section class="card ui-advanced-only">
     <h2 data-i18n="activity.leaks">Auditoria de fugas DNS</h2>
     <div class="btn-row" style="margin-bottom:12px;">
-      <button id="btnLeakTest" class="primary">Ejecutar prueba</button>
-      <button id="btnLeakCopy" class="small">Copiar diagnostico</button>
+      <button id="btnLeakTest" class="primary" data-i18n="ui.leak.run">Ejecutar prueba</button>
+      <button id="btnLeakCopy" class="small" data-i18n="ui.leak.copy">Copiar diagnostico</button>
     </div>
-    <div id="leakResults" class="hint">Toca “Ejecutar prueba” para auditar posibles fugas.</div>
+    <div id="leakResults" class="hint" data-i18n="ui.leak.prompt">Toca “Ejecutar prueba” para auditar posibles fugas.</div>
   </section>
 
 <section class="card">
@@ -325,13 +311,13 @@
     </button>
     <div id="evBody" class="v-collapse-body" hidden>
       <div class="btn-row" style="margin-bottom:10px;">
-        <button id="btnEventsRefresh" class="primary">Actualizar</button>
-        <button id="btnEventsStats">Estadisticas</button>
-        <button id="btnEventsClear" class="small danger">Borrar historial</button>
+        <button id="btnEventsRefresh" class="primary" data-i18n="ui.events.refresh">Actualizar</button>
+        <button id="btnEventsStats" data-i18n="ui.events.stats">Estadisticas</button>
+        <button id="btnEventsClear" class="small danger" data-i18n="ui.events.clear">Borrar historial</button>
       </div>
       <div class="field">
-        <label for="eventsFilter">Filtrar por dominio</label>
-        <input type="text" id="eventsFilter" placeholder="ej: ejemplo" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <label for="eventsFilter" data-i18n="ui.events.filter">Filtrar por dominio</label>
+        <input type="text" id="eventsFilter" data-i18n-ph="ui.events.filter.placeholder" placeholder="ej: ejemplo" autocapitalize="off" autocorrect="off" spellcheck="false">
       </div>
       <div id="eventsStats" class="hint" style="margin-bottom:8px;"></div>
       <div id="eventsList" class="hint"></div>
@@ -342,42 +328,38 @@
 <section class="card">
     <h2 data-i18n="settings.privacy">Privacidad e historial</h2>
     <div class="field">
-      <label for="histModeSelect">Que se registra</label>
+      <label for="histModeSelect" data-i18n="ui.history.label">Que se registra</label>
       <select id="histModeSelect">
-        <option value="off">Nada (historial desactivado)</option>
-        <option value="blocked">Solo bloqueos</option>
-        <option value="blocked_errors">Bloqueos y errores</option>
-        <option value="diag">Diagnostico temporal (24 h)</option>
+        <option value="off" data-i18n="ui.history.off">Nada (historial desactivado)</option>
+        <option value="blocked" data-i18n="ui.history.blocked">Solo bloqueos</option>
+        <option value="blocked_errors" data-i18n="ui.history.errors">Bloqueos y errores</option>
+        <option value="diag" data-i18n="ui.history.diag">Diagnostico temporal (24 h)</option>
       </select>
     </div>
     <div class="field">
-      <label for="histDaysSelect">Retencion</label>
+      <label for="histDaysSelect" data-i18n="ui.history.retention">Retencion</label>
       <select id="histDaysSelect">
-        <option value="1">1 dia</option>
-        <option value="3">3 dias</option>
-        <option value="7">7 dias</option>
+        <option value="1" data-i18n="ui.history.1d">1 dia</option>
+        <option value="3" data-i18n="ui.history.3d">3 dias</option>
+        <option value="7" data-i18n="ui.history.7d">7 dias</option>
       </select>
     </div>
     <div class="field">
-      <label for="histMaxInput">Maximo de eventos (50–10000)</label>
+      <label for="histMaxInput" data-i18n="ui.history.max">Maximo de eventos (50–10000)</label>
       <input type="number" id="histMaxInput" min="50" max="10000" step="50" value="1000" inputmode="numeric">
     </div>
     <div class="btn-row">
-      <button id="btnHistApply" class="primary">Guardar preferencias</button>
-      <button id="btnEventsExport" class="small">Exportar historial</button>
+      <button id="btnHistApply" class="primary" data-i18n="ui.history.save">Guardar preferencias</button>
+      <button id="btnEventsExport" class="small" data-i18n="ui.history.export">Exportar historial</button>
     </div>
-    <p class="hint">
-      Todo el historial es local: nada sale del telefono, no hay telemetria.
-      DNS cifrado no es una VPN, DNSSEC no vuelve segura una pagina, y bloquear
-      dominios no reemplaza a un antivirus. Detalle en <code>PRIVACY.md</code>.
-    </p>
+    <p class="hint" data-i18n="ui.history.hint">Todo el historial es local: nada sale del telefono, no hay telemetria. DNS cifrado no es una VPN, DNSSEC no vuelve segura una pagina, y bloquear dominios no reemplaza a un antivirus. Detalle en PRIVACY.md.</p>
   </section>
 
 <details class="card ui-advanced-only">
     <summary>Logs</summary>
     <div class="btn-row" style="margin-bottom:12px;">
-      <button id="btnLogs" class="small">Ver logs recientes</button>
-      <button id="btnLogsClear" class="small danger">Borrar logs</button>
+      <button id="btnLogs" class="small" data-i18n="ui.logs.show">Ver logs recientes</button>
+      <button id="btnLogsClear" class="small danger" data-i18n="ui.logs.clear">Borrar logs</button>
     </div>
     <div id="logsOutput" class="hint"></div>
   </details>
@@ -402,25 +384,21 @@
   </section>
 
 <section class="card">
-    <h2>Perfiles de seguridad</h2>
-    <p class="hint" style="margin-top:0;">Perfil aplicado: <span id="profileCurrent">—</span></p>
+    <h2 data-i18n="ui.profiles.title">Perfiles de seguridad</h2>
+    <p class="hint" style="margin-top:0;"><span data-i18n="ui.profile.current">Perfil aplicado:</span> <span id="profileCurrent">—</span></p>
     <div class="btn-row" style="margin-bottom:10px;">
-      <button data-profile="balanced">Equilibrado</button>
-      <button data-profile="strict" class="danger">Estricto</button>
-      <button data-profile="privacy">Privacidad</button>
+      <button data-profile="balanced" data-i18n="ui.settings.balanced">Equilibrado</button>
+      <button data-profile="strict" class="danger" data-i18n="ui.settings.strict">Estricto</button>
+      <button data-profile="privacy" data-i18n="ui.settings.privacy">Privacidad</button>
     </div>
     <div id="profilePlan" class="hint" style="white-space:pre-wrap;"></div>
-    <p class="hint">
-      El perfil <strong>Estricto</strong> activa fail-closed: si DNSCrypt deja de
-      funcionar, el telefono puede quedarse sin resolucion DNS hasta restaurar la
-      red manualmente. Se te pedira confirmacion.
-    </p>
+    <p class="hint" data-i18n="ui.profiles.hint">El perfil Estricto activa fail-closed: si DNSCrypt deja de funcionar, el telefono puede quedarse sin resolucion DNS hasta restaurar la red manualmente. Se te pedira confirmacion.</p>
   </section>
 
 <section class="card about-card">
     <div class="about-title">DNSCrypt Manager</div>
-    <div class="about-author">Creado por <strong>Skaymer AR</strong></div>
-    <div class="hint" style="margin-top:6px;">
+    <div class="about-author"><span data-i18n="ui.author">Creado por</span> <strong>Skaymer AR</strong></div>
+    <div class="hint" style="margin-top:6px;" data-i18n="ui.about.subtitle">
       dnscrypt-proxy como servicio de sistema · KernelSU / KernelSU Next / APatch / Magisk
     </div>
   </section>
@@ -449,34 +427,31 @@
 
   <!-- ================================ EMERGENCIA ================================= -->
   <section class="card danger">
-    <h2>Emergencia</h2>
-    <p class="hint" style="margin-top:0;">
-      Detiene todo, quita cualquier redireccion, restaura el DNS normal del
-      sistema y deshabilita el modulo hasta que lo reactives.
-    </p>
-    <button id="btnPanic" class="danger wide">PANIC — Restaurar red y deshabilitar</button>
+    <h2 data-i18n="ui.emergency.title">Emergencia</h2>
+    <p class="hint" style="margin-top:0;" data-i18n="ui.emergency.hint">Detiene todo, quita cualquier redireccion, restaura el DNS normal del sistema y deshabilita el modulo hasta que lo reactives.</p>
+    <button id="btnPanic" class="danger wide" data-i18n="ui.emergency.button">PANIC — Restaurar red y deshabilitar</button>
   </section>
 
   <!-- ================================ ACERCA DE ================================= -->
   
 
   <footer>
-    DNSCrypt Manager · Creado por Skaymer AR
+    DNSCrypt Manager · <span data-i18n="ui.author">Creado por</span> Skaymer AR
   </footer>
 
   <div id="catFilterBackdrop" class="filter-backdrop" hidden></div>
   <section id="catFilterSheet" class="filter-sheet" role="dialog" aria-modal="true" aria-labelledby="catFilterTitle" aria-hidden="true" hidden tabindex="-1">
     <div class="filter-sheet-handle" aria-hidden="true"></div>
     <div class="filter-sheet-head">
-      <h3 id="catFilterTitle">Filtrar listas</h3>
-      <button id="btnCatFilterClose" type="button" class="filter-close" aria-label="Cerrar filtros">&#215;</button>
+      <h3 id="catFilterTitle" data-i18n="cat.filter.title">Filtrar listas</h3>
+      <button id="btnCatFilterClose" type="button" class="filter-close" data-i18n-aria="cat.filter.close.aria" aria-label="Cerrar filtros">&#215;</button>
     </div>
-    <p class="hint">Elegí uno o más valores reales del catálogo. Se combinan con OR dentro de cada grupo y con AND entre grupos.</p>
-    <div id="catFilterStatus" class="hint" aria-live="polite">Cargando opciones del catálogo…</div>
+    <p class="hint" data-i18n="cat.filter.description">Elegí uno o más valores reales del catálogo. Se combinan con OR dentro de cada grupo y con AND entre grupos.</p>
+    <div id="catFilterStatus" class="hint" aria-live="polite">Loading catalog options…</div>
     <div id="catFilterOptions" class="filter-options"></div>
     <div class="filter-actions">
-      <button id="btnCatFilterClear" type="button">Limpiar</button>
-      <button id="btnCatFilterApply" type="button" class="primary">Aplicar</button>
+      <button id="btnCatFilterClear" type="button" data-i18n="cat.filter.clear.button">Limpiar</button>
+      <button id="btnCatFilterApply" type="button" class="primary" data-i18n="cat.filter.apply.button">Aplicar</button>
     </div>
   </section>
 

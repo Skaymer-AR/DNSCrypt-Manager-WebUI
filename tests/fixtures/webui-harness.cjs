@@ -193,6 +193,7 @@ window.ksu = {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const context = vm.createContext({
   window, document, console, confirm: () => true,
+  I18N: { t: (key) => require(path.join(WEBROOT, 'i18n/es.json'))[key] || key },
   setTimeout, clearTimeout, setInterval, clearInterval, Promise,
 });
 for (const f of ['js/validation.js', 'js/api.js', 'js/router.js', 'js/app.js']) {
@@ -262,7 +263,7 @@ async function waitForRunningListeningPid() {
         () => fs.existsSync(path.join(TEST_DATA_DIR, 'catalog/blocklists.index.tsv')) &&
           registry.get('catResults').children.length === 5 && !!findCatalogGroup('Seguridad'));
   check('botón global de descarga y estado aparecen en el catálogo',
-        () => html.indexOf('id="btnCatDownloadAll" type="button" class="small">Descargar todas las fuentes</button>') >= 0 &&
+        () => /id="btnCatDownloadAll"[^>]*data-i18n="cat\.download\.button"/.test(html) &&
           !!registry.get('btnCatDownloadAll') && !!registry.get('catDownloadStatus'));
   check('categorías empiezan cerradas, sin filas montadas',
         () => registry.get('catResults').children.every((g) =>

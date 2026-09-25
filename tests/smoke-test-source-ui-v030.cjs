@@ -21,7 +21,7 @@ d.last_valid_domains==='1234' ? ok('parseDoctor conserva last_valid_domains') : 
 // 3) Catalog status keeps last success/cache visible and distinguishes no-cache failures.
 const fs=require('fs'), app=fs.readFileSync(require('path').join(__dirname,'../webroot/js/app.js'),'utf8');
 app.includes('e.cache_domains') && app.includes('e.last_success') ? ok('catalog UI muestra caché y último éxito') : bad('catalog cache metadata');
-app.includes('ERROR · usa caché') && app.includes('ERROR · sin caché') ? ok('catalog UI distingue el error con caché válida del error sin caché') : bad('catalog stale status');
+app.includes("tr('cat.state.cache_error')") && app.includes("tr('cat.state.no_cache')") ? ok('catalog UI distingue el error con caché válida del error sin caché') : bad('catalog stale status');
 // 4) Catálogo Rethink: 197 feeds con grupos originales y acordeones lazy.
 const html=fs.readFileSync(require('path').join(__dirname,'../webroot/index.html'),'utf8');
 html.indexOf('id="catSearch"') < html.indexOf('id="catResults"') &&
@@ -53,7 +53,7 @@ app.includes('const catSelection = new Set()') && app.includes('const catDisable
   app.includes('catSelection.add(e.id)') && app.includes('DCM.runCatalogEnable(action.id)') &&
   app.includes('DCM.runCatalogDisable(action.id)')
   ? ok('catalog UI permite activar/desactivar fuentes y aplicar cambios solo al confirmar') : bad('catalog staged selection');
-app.includes('catalog-group-pick') && app.includes('catToggleGroupSelection') && app.includes('Activar o desactivar todas las listas')
+app.includes('catalog-group-pick') && app.includes('catToggleGroupSelection') && app.includes("trf('cat.group.toggle'")
   ? ok('catalog UI tiene checkbox maestro por categoría') : bad('catalog category master checkbox');
 app.includes('!e.activation_blocked') && !app.includes('!e.license_blocked') &&
   app.includes("e.upstream_status !== 'broken'") && app.includes("e.upstream_status !== 'archived'")

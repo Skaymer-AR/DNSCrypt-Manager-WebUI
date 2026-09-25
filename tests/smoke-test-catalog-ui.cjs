@@ -23,6 +23,7 @@ const ids = Object.create(null);
 const storage = Object.create(null);
 const context = {
   console,
+  I18N: { t: (key) => require('../webroot/i18n/en.json')[key] || key },
   window: { localStorage: { getItem: (key) => storage[key] || null, setItem: (key, value) => { storage[key] = String(value); } } },
   document: {
     body: new FakeElement('body'),
@@ -47,11 +48,17 @@ const expose = `\nglobalThis.__catalogUi = {
   filteredIds() { return catFiltered().map(e => e.id); },
   facets(kind) { return catFacetValues(kind); },
   renderOptions() { catRenderFilterOptions(); return document.getElementById('catFilterOptions'); },
+  renderCatalog() { catRender(); return document.getElementById('catResults'); },
+  progress(info) { return catDownloadProgressText(info); },
+  status(entry) { return catStateLabel(entry); },
   canAdd(entry) { return catCanAdd(entry); },
   setMode(value) { setUiMode(value); }
 };`;
 vm.runInNewContext(app + expose, context, { timeout: 3000 });
 const ui = context.__catalogUi;
+assert(ui.status({ enabled: false, activation_blocked: true }) === 'NEEDS REVIEW' &&
+  ui.progress({ state: 'done', success: 4, skipped: 2 }).includes('4 sources verified'),
+  'estados y avance de descarga se muestran en inglés');
 
 assert(/<button[^>]*id="btnCatDownloadAll"[^>]*>Descargar todas las fuentes<\/button>/.test(html) &&
   /id="catDownloadStatus"[^>]*aria-live="polite"/.test(html), 'el catálogo muestra descarga global y estado accesibles');
@@ -84,7 +91,13 @@ assert(subgroups.some((v) => v.label === 'TrackingDomains') && packs.some((v) =>
 const facetRoot = ui.renderOptions();
 function treeText(node) { return [node.textContent].concat(node.children.map(treeText)).join(' '); }
 const optionText = treeText(facetRoot);
-assert(optionText.includes('Categoría') && optionText.includes('Subgrupo') && optionText.includes('Etiquetas del catálogo'), 'el panel muestra grupos de filtros con sus etiquetas');
+assert(optionText.includes('Category') && optionText.includes('Subgroup') && optionText.includes('Catalog tags'), 'el panel muestra grupos de filtros en inglés');
+context.I18N.t = (key) => require('../webroot/i18n/es.json')[key] || key;
+const spanishOptions = treeText(ui.renderOptions());
+assert(spanishOptions.includes('Categoría') && spanishOptions.includes('Subgrupo') && spanishOptions.includes('Etiquetas del catálogo'), 'el panel cambia sus etiquetas a español');
+assert(ui.status({ enabled: false, activation_blocked: true }) === 'REQUIERE REVISIÓN' &&
+  ui.progress({ state: 'done', success: 4, skipped: 2 }).includes('4 fuentes verificadas'),
+  'estados y avance de descarga cambian a español');
 assert(ui.canAdd({ id: 'unknown', license: 'LICENSE_UNKNOWN', license_blocked: true, enabled: false, activation_blocked: false, upstream_status: 'unverified' }), 'LICENSE_UNKNOWN queda seleccionable por opt-in manual');
 assert(!ui.canAdd({ id: 'unsupported', license: 'MIT', enabled: false, activation_blocked: true, upstream_status: 'unverified' }), 'la incompatibilidad técnica sigue bloqueando fuentes no convertibles');
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.1-rc1 — parche de idioma (candidata)
+
+- Integra el inglés en las pantallas agregadas al catálogo: grupos, filtros,
+  selección, estados, procedencia, descarga global y fuentes personalizadas.
+- Traduce controles y descripciones visibles del panel, DNS, listas, actividad
+  y ajustes. Al cambiar el idioma se vuelven a dibujar las fichas del catálogo.
+- Conserva las claves técnicas, URLs y nombres originales de las fuentes.
+  Validación automatizada completada; instalación y uso en teléfono pendientes.
+
 ## v1.1.0
 
 Versión estable del catálogo de blocklists DNS. Mantiene DNSCrypt Proxy como
