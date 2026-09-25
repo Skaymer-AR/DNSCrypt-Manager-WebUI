@@ -416,6 +416,40 @@ process.exit(0);
 " && ok "G evento atribuido a categoria 'malware' por la regla" || bad "G categorizacion de evento incorrecta"
 call_cap "$SCRATCH/g_stats.json" events stats --json
 json_ok "$SCRATCH/g_stats.json" && ok "G events stats --json valido" || bad "G JSON stats invalido"
+
+# Actividad DNS opt-in para la app nativa: el modo por defecto no registra
+# consultas; al activarlo, la CLI expone consultas, bloqueos y allowlist en
+# un JSON acotado. Esto sigue siendo simulacion local, no prueba Android.
+call_cap "$SCRATCH/g_activity_off.json" activity status --json
+json_ok "$SCRATCH/g_activity_off.json" && ok "G activity status --json valido" || bad "G activity status JSON invalido"
+"$NODE_BIN" -e "
+const d=JSON.parse(require('fs').readFileSync('$SCRATCH/g_activity_off.json','utf8'));
+if(d.enabled!==false){console.error('activity deberia estar apagada por defecto');process.exit(1);}
+" && ok "G actividad DNS apagada por defecto" || bad "G actividad DNS no esta apagada por defecto"
+call_cli allowlist add allowed.example >/dev/null 2>&1
+call_cli activity enable >/dev/null 2>&1 && grep -q 'DCM:query_activity BEGIN' "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml" \
+  && ok "G activity enable agrega query_log gestionado" || bad "G activity enable no aplico query_log"
+QLOG="$DNSCRYPT_TEST_DATA_DIR/security/query-activity/queries.tsv"
+ALOG="$DNSCRYPT_TEST_DATA_DIR/security/query-activity/allowed.tsv"
+_qa_ts="[$(date '+%Y-%m-%d %H:%M:%S')]"
+printf '%s\t127.0.0.1\tmalone.example\tA\tNOERROR\t1ms\tcloudflare\t-\n' "$_qa_ts" > "$QLOG"
+printf '%s\t127.0.0.1\tclear.example\tA\tNOERROR\t2ms\tcloudflare\t-\n' "$_qa_ts" >> "$QLOG"
+printf '%s\t127.0.0.1\tallowed.example\tA\tNOERROR\t3ms\tcloudflare\t-\n' "$_qa_ts" >> "$QLOG"
+printf '%s\t127.0.0.1\tmalone.example\tmalone.example\n' "$_qa_ts" >> "$DNSCRYPT_TEST_DATA_DIR/security/events/blocked.log"
+printf '%s\t127.0.0.1\tallowed.example\tallowed.example\n' "$_qa_ts" > "$ALOG"
+call_cap "$SCRATCH/g_activity.json" activity list --limit 20 --json
+json_ok "$SCRATCH/g_activity.json" && ok "G activity list --json valido" || bad "G activity list JSON invalido"
+"$NODE_BIN" -e "
+const d=JSON.parse(require('fs').readFileSync('$SCRATCH/g_activity.json','utf8'));
+const s=new Set((d.events||[]).map(e=>e.status));
+for(const k of ['blocked','allowed','allowlisted']) if(!s.has(k)){console.error('falta estado '+k, [...s]);process.exit(1);}
+" && ok "G actividad distingue bloqueada, permitida y allowlist" || bad "G actividad no distingue estados"
+call_cap "$SCRATCH/g_activity_stats.json" activity stats --json
+json_ok "$SCRATCH/g_activity_stats.json" && ok "G activity stats --json valido" || bad "G activity stats JSON invalido"
+call_cli activity disable >/dev/null 2>&1 && ! grep -q 'DCM:query_activity BEGIN' "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml" \
+  && ok "G activity disable retira query_log sin tocar listas" || bad "G activity disable no retiro query_log"
+call_cli set-flag query_max 10001 >/dev/null 2>&1; [ $? -ne 0 ] && ok "G query_max fuera de rango rechazado" || bad "G query_max invalido aceptado"
+call_cli set-flag query_days 5 >/dev/null 2>&1; [ $? -ne 0 ] && ok "G query_days invalido rechazado" || bad "G query_days invalido aceptado"
 call_cli events pause >/dev/null 2>&1 && [ "$(grep '^hist_mode=' "$DNSCRYPT_TEST_DATA_DIR/run/state.env" | cut -d= -f2)" = "off" ] && ok "G pause -> hist_mode off" || bad "G pause fallo"
 call_cli events resume >/dev/null 2>&1 && [ "$(grep '^hist_mode=' "$DNSCRYPT_TEST_DATA_DIR/run/state.env" | cut -d= -f2)" != "off" ] && ok "G resume restaura hist_mode" || bad "G resume fallo"
 # set-flag hist_max fuera de rango

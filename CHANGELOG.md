@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.1-rc2 — contrato de actividad DNS y base para app nativa (candidata)
+
+- Agrega `dnscrypt-manager activity` para exponer consultas DNS, bloqueos,
+  respuestas permitidas y bypass de allowlist en JSON local.
+- La captura completa queda apagada por defecto; al activarla usa `query_log`
+  de dnscrypt-proxy, retención acotada, archivos 0600 y borrado explícito.
+- Mantiene DNSCrypt Proxy como único motor, la descarga global sin activación
+  automática, el catálogo, allowlist, rollback y los límites existentes.
+- Agrega un esqueleto Android nativo separado de la WebUI. El build APK y la
+  instalación en el Motorola Edge 40 Pro siguen pendientes.
+- Esta candidata no es una release oficial ni debe marcarse estable sin prueba
+  física en el teléfono.
+
 ## v1.1.1-rc1 — parche de idioma (candidata)
 
 - Integra el inglés en las pantallas agregadas al catálogo: grupos, filtros,

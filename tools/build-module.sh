@@ -17,7 +17,7 @@
 #
 # Si todo pasa: limpia temporales, fija permisos, y genera el ZIP con los
 # archivos en la RAIZ del archivo (sin carpeta contenedora), excluyendo
-# tests/, tools/, dist/ y placeholders de arquitecturas no incluidas.
+# tests/, tools/, dist/, android-app/ y placeholders de arquitecturas no incluidas.
 #
 # Uso:  bash tools/build-module.sh
 # Exit: 0 si genero el ZIP. Cualquier otro valor: abortado, ver mensaje.
@@ -156,7 +156,7 @@ step "6) Ningun fixture debe colarse en el instalable"
 ##############################################################################
 FIXTURE_LEAK=$(python3 -c "
 import os
-EXCLUDE = {'tests', 'tools', 'dist', '.git'}
+EXCLUDE = {'tests', 'tools', 'dist', 'android-app', '.git'}
 MARK = b'ARCHIVO DE PRUEBA'
 bad = []
 for root, dirs, files in os.walk('$ROOT'):
@@ -213,7 +213,7 @@ echo "  OK: staging creado y permisos fijados sin modificar el arbol fuente"
 ##############################################################################
 step "9) Empaquetar ZIP limpio (sin artefactos de desarrollo ni placeholders)"
 ##############################################################################
-rm -rf "$STAGE/tests" "$STAGE/tools" "$STAGE/dist" "$STAGE/release" "$STAGE/.git"
+rm -rf "$STAGE/tests" "$STAGE/tools" "$STAGE/dist" "$STAGE/release" "$STAGE/android-app" "$STAGE/.git"
 # Artefactos de desarrollo que NUNCA deben ir en el ZIP instalable.
 rm -f "$STAGE"/WORK_PROGRESS*.md "$STAGE"/*.bundle "$STAGE"/*.patch "$STAGE"/*.sha256 "$STAGE"/*.rc2bak 2>/dev/null
 find "$STAGE" -maxdepth 2 -name '*.rc2bak' -delete 2>/dev/null
@@ -229,7 +229,7 @@ rm -rf "$STAGE"
 # Verificar que la raiz del ZIP es correcta (module.prop en la raiz, SIN
 # carpeta contenedora, y SIN artefactos de desarrollo ni placeholders).
 TOPLEVEL_OK=$(unzip -l "$OUTPUT" | awk 'NR>3 {print $4}' | grep -c '^module.prop$')
-LEAKED_DIRS=$(unzip -l "$OUTPUT" | awk 'NR>3 {print $4}' | grep -cE '^(tests|tools|dist|fixtures|bootstrap)/')
+LEAKED_DIRS=$(unzip -l "$OUTPUT" | awk 'NR>3 {print $4}' | grep -cE '^(tests|tools|dist|android-app|fixtures|bootstrap)/')
 PLACEHOLDERS=$(unzip -Z1 "$OUTPUT" | grep -cE '(^|/)COLOCAR_BINARIO_AQUI\.md$')
 [ "$TOPLEVEL_OK" -ge 1 ] || fail "module.prop no quedo en la raiz del ZIP (carpeta contenedora incorrecta)"
 [ "$LEAKED_DIRS" -eq 0 ] || fail "el ZIP contiene directorios de desarrollo ($LEAKED_DIRS entradas)"

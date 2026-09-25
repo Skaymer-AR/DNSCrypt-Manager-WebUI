@@ -148,7 +148,7 @@ echo "=== 7) Ningun fixture debe estar entre los archivos destinados al ZIP ==="
 python3 << 'PYEOF' || FAIL=1
 import os, sys
 
-EXCLUDE_DIRS = {"tests", "tools", ".git"}
+EXCLUDE_DIRS = {"tests", "tools", "android-app", ".git"}
 FIXTURE_MARKER = "ARCHIVO DE PRUEBA"
 
 installable = []

@@ -1110,15 +1110,23 @@ cmd_set_flag() {
     hist_max)
       case "$2" in ''|*[!0-9]*) echo "ERROR: hist_max debe ser numerico (50..10000)" >&2; return 1 ;; esac
       { [ "$2" -ge 50 ] && [ "$2" -le 10000 ]; } 2>/dev/null || { echo "ERROR: hist_max fuera de rango (50..10000)" >&2; return 1; } ;;
+    query_mode)
+      case "$2" in all|off) : ;; *) echo "ERROR: query_mode acepta all|off" >&2; return 1 ;; esac ;;
+    query_days)
+      case "$2" in 1|3|7) : ;; *) echo "ERROR: query_days acepta 1|3|7" >&2; return 1 ;; esac ;;
+    query_max)
+      case "$2" in ''|*[!0-9]*) echo "ERROR: query_max debe ser numerico (50..10000)" >&2; return 1 ;; esac
+      { [ "$2" -ge 50 ] && [ "$2" -le 10000 ]; } 2>/dev/null || { echo "ERROR: query_max fuera de rango (50..10000)" >&2; return 1; } ;;
     *) echo "ERROR: flag no reconocido: $1" >&2
        echo "Flags: boot_redirect {0|1} | ipv6_mode {redirect|block} | prerouting {0|1}" >&2
        echo "       hist_mode {off|blocked|blocked_errors|diag} | hist_days {1|3|7} | hist_max {50..10000}" >&2
+       echo "       query_mode {off|all} | query_days {1|3|7} | query_max {50..10000}" >&2
        return 1 ;;
   esac
   set_flag "$1" "$2"
   echo "OK: $1 = $(get_flag "$1")"
   # Los flags de historial cambian el TOML (log on/off): regenerar si aplica.
-  case "$1" in hist_mode) command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload >/dev/null 2>&1 ;; esac
+  case "$1" in hist_mode|query_mode) command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload >/dev/null 2>&1 ;; esac
 }
 
 ##############################################################################
@@ -1174,6 +1182,7 @@ DNSCrypt Manager - comandos
     failclosed {status|enable [--confirmed]|disable}
     leak-test [--json]
     events [list [--limit N] [--filter S] [--json]|clear|export|stats|pause|resume]
+    activity {status [--json]|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|clear|prune}
     migrate
 
   Catalogo de listas (v0.2.0-RC2):
@@ -1189,7 +1198,7 @@ DNSCrypt Manager - comandos
     import-bindhosts <directorio> [--dry-run|--confirmed]
     service {list [--json]|info <id>|set <id> <normal|15m|1h|boot|perm>|conflicts}
 
-    set-flag {boot_redirect|ipv6_mode|prerouting|hist_mode|hist_days|hist_max} <valor>
+    set-flag {boot_redirect|ipv6_mode|prerouting|hist_mode|hist_days|hist_max|query_mode|query_days|query_max} <valor>
     get-flag <clave>
     version | help
 EOF
@@ -1457,6 +1466,7 @@ cmd_odoh() {
     failclosed)       require_seclib; cmd_failclosed "$@" ;;
     leak-test)        require_seclib; cmd_leak_test "$@" ;;
     events)           require_seclib; cmd_events "$@" ;;
+    activity)         require_seclib; cmd_activity "$@" ;;
     security-regen)   require_seclib; sec_regen_and_reload "$@" ;;
     migrate)          require_seclib; sec_migrate "$@" ;;
     catalog)          require_catlib; cmd_catalog "$@" ;;
