@@ -1,96 +1,64 @@
-# DNSCrypt Manager — app nativa y backend compartido
+# DNSCrypt Manager: aplicación nativa
 
-Estado: diseño e integración inicial, todavía sin prueba física en el Motorola Edge 40 Pro.
+Estado del diseño al 25/09/2026. La app nativa se desarrolla primero para el Motorola Edge 40 Pro `rtwo` con Android 16. Compatibilidad genérica con otros teléfonos queda para después de la prueba física.
 
-## Objetivo
-
-La app nativa será el panel principal de uso diario. El módulo seguirá siendo el único responsable de:
-
-- ejecutar `dnscrypt-proxy`;
-- aplicar la redirección DNS systemless;
-- compilar y activar blocklists;
-- aplicar allowlist, excepciones y rollback;
-- conservar el estado en `/data/adb/dnscrypt-manager`.
-
-La WebUI no se elimina. Queda como panel avanzado, rescate y alternativa cuando la app no tenga acceso root.
-
-La app no usará una VPN. No se agregará `VpnService`, inspección HTTPS ni firewall de aplicaciones en esta primera etapa.
-
-## Decisiones de producto
-
-### Primera etapa — segura y medible
-
-La app muestra y modifica solamente capacidades que el módulo ya puede sostener:
-
-1. estado de DNSCrypt y redirección;
-2. proveedor activo, incluido NextDNS;
-3. actividad DNS local: consultas, bloqueos, respuestas permitidas y bypass por allowlist;
-4. catálogo por categorías, fuentes recomendadas y fuentes seleccionadas;
-5. allowlist y excepciones temporales;
-6. perfiles de seguridad, fail-closed, validación y rollback;
-7. acceso al panel avanzado de la WebUI.
-
-La actividad completa es opt-in. `activity` queda apagado por defecto, conserva como máximo una ventana corta y utiliza archivos locales con permisos 0600. El módulo no envía telemetría.
-
-### Segunda etapa — monitor de aplicaciones
-
-“Qué app hizo cada consulta” no se puede deducir de un log DNS local de forma fiable: varias aplicaciones pueden compartir resolutores, procesos o UID, y una consulta no contiene por sí sola una identidad de aplicación.
-
-Por eso la atribución por app queda separada y experimental. Antes de implementarla habrá que medir en el teléfono si la combinación Android 16 + KernelSU Next + kernel actual permite obtener UID/paquetes sin convertir el producto en VPN ni tocar firmware. La pantalla podrá mostrar `No disponible todavía` sin inventar datos.
-
-## Contrato compartido
-
-La app nativa y la WebUI llaman a la misma CLI del módulo mediante comandos allowlisted.
-
-Lecturas iniciales:
+## Arquitectura
 
 ```text
-dnscrypt-manager status --json
-dnscrypt-manager activity status --json
-dnscrypt-manager activity list --limit 100 --json
-dnscrypt-manager activity stats --json
-dnscrypt-manager catalog list --json
-dnscrypt-manager blocklists status --json
-dnscrypt-manager allowlist list --json
+App Android (Kotlin + Compose)
+          │ operaciones root allowlisted
+          ▼
+CLI dnscrypt-manager del módulo
+          │ estado y configuración compartidos
+          ▼
+dnscrypt-proxy + catálogo + allowlist
 ```
 
-Operaciones de escritura que la app podrá habilitar progresivamente:
+El módulo sigue siendo el único motor DNS y conserva el estado. La app no mantiene un segundo proceso DNS, no usa `VpnService` y no edita archivos de configuración directamente. La WebUI existente se conserva como panel avanzado y respaldo.
 
-```text
-dnscrypt-manager activity enable|disable
-dnscrypt-manager catalog enable <id>
-dnscrypt-manager catalog disable <id>
-dnscrypt-manager allowlist add|remove <domain>
-dnscrypt-manager temporary-allow add <domain> <duration>
-dnscrypt-manager restart
-```
+## Funciones conectadas en el cliente Android
 
-La app no aceptará comandos libres. El puente root tendrá una lista cerrada de operaciones y validará límites, IDs y dominios antes de construir cada llamada.
+| Pantalla | Lecturas | Acciones |
+|---|---|---|
+| Inicio | Servicio, escucha, redirección, resolver, versión, actividad y estadísticas | Actualizar estado; activar o pausar registro local |
+| Actividad | Eventos DNS recientes y estadísticas | Buscar y filtrar eventos; borrar con confirmación |
+| Catálogo | Grupos y fuentes reales, consultados por categoría | Buscar, filtrar recomendadas/activas, activar o desactivar con confirmación, preparar todas las cachés y ver progreso |
+| Permitidos | Dominios de allowlist | Agregar o quitar un dominio; el CLI valida y aplica el cambio |
+| Ajustes | Resolver actual, versión y estado del registro | Cambiar entre Cloudflare, Quad9, AdGuard, Mullvad o NextDNS; el cambio confirmado reinicia `dnscrypt-proxy` |
 
-## Navegación visual
+Los comandos se limitan a `status`, `activity`, `catalog groups/list/enable/disable/download-all`, `allowlist list/add/remove`, `provider`, `nextdns` y `restart`. Los grupos, IDs, proveedores, dominios, IDs NextDNS y tiempos se validan antes de construir una llamada root.
 
-La experiencia será una app Android nativa, no una WebView disfrazada:
+La lectura del catálogo se hace por grupo, como en la WebUI, para no transportar su JSON entero en cada carga. “Preparar todas” descarga cachés verificadas y consulta el progreso; no activa fuentes. Una activación individual requiere una confirmación visible porque puede cambiar qué dominios se bloquean. Las etiquetas y licencias upstream se presentan como metadata del feed, no como una auditoría propia.
 
-- **Inicio:** estado grande protegido/detenido, contador de consultas, bloqueos y permitidas, proveedor activo y acciones rápidas.
-- **Actividad:** pestañas `Todas`, `Bloqueadas` y `Permitidas`; búsqueda local; filas compactas con dominio, hora, motivo y lista.
-- **Listas:** categorías, recomendadas, seleccionadas, estado de caché y descarga global; ninguna descarga activa una fuente automáticamente.
-- **DNS:** proveedor, NextDNS, modo IPv4/IPv6, prueba DNS y estado de red.
-- **Ajustes:** perfil, allowlist, excepciones, fail-closed, rollback, idioma y enlace al panel WebUI avanzado.
+## Diseño de interfaz
 
-La dirección visual será oscura, limpia y orientada a estado: navegación inferior, tipografía fuerte para métricas, chips de estado y animaciones breves. Se inspira en la claridad de Rethink, pero no copia código, recursos de marca ni una VPN que el módulo no utiliza.
+- Textos y navegación en español, navegación inferior con Inicio, Actividad, Listas y Ajustes.
+- Tema oscuro azul verdoso, estado de protección destacado, métricas legibles y tarjetas compactas.
+- Búsqueda local y filtros directos para reducir pasos.
+- Confirmaciones antes de borrar eventos, modificar allowlist, activar listas o cambiar el resolver.
+- Errores y operaciones en curso se muestran al usuario; no se presentan categorías ficticias ni atribución de aplicación inexistente.
 
-## Estado de evidencia
+La dirección visual se inspira en la jerarquía clara de estado y registros de Rethink, sin incorporar su código, marca, VPN o firewall. Rethink separa sus registros de solicitudes DNS de su firewall de red ([documentación del firewall](https://docs.rethinkdns.com/firewall/), [preguntas frecuentes](https://rethinkdns.com/faq)); esta app empieza únicamente por el flujo DNS que sí entrega el módulo.
 
-| Elemento | Evidencia actual |
+## Límites y trabajo posterior
+
+- No hay conexiones IP/TCP/UDP completas, reglas por UID, bloqueo por aplicación ni inspección HTTPS.
+- La actividad DNS no atribuye con fiabilidad una consulta a un paquete Android. `app-policy` del módulo continúa en modo `RECORDED-ONLY`.
+- No se exponen todavía desde la app los perfiles de seguridad, el modo fail-closed, las excepciones temporales, rollback, pruebas de fugas ni diagnóstico avanzado. La WebUI sigue disponible para esas operaciones.
+- La app no valida automáticamente la calidad de un resolver nuevo con una prueba DNS antes de considerarlo operativo; informa el resultado real de reinicio y el usuario debe comprobar la conectividad.
+- Los cambios DNS deben probarse físicamente en Wi‑Fi, datos y hotspot. La compilación no demuestra que el acceso root, el backend o la red funcionen en Android.
+
+## Build y evidencia
+
+El workflow `.github/workflows/build-android-app.yml` compila el APK debug con JDK 17, Gradle 8.9 y Android SDK 35. También ejecuta el gate del módulo y sube la candidata del módulo como artefacto independiente. `android-app/` queda fuera del ZIP del módulo.
+
+| Elemento | Evidencia |
 |---|---|
-| DNSCrypt Proxy como motor | prueba física previa de v1.0.0; validación estructural/CI posterior |
-| WebUI, catálogo y descargas | validación local, simulación y reportes previos; la prueba física de v1.1.1 sigue pendiente |
-| Nuevo comando `activity` | validación local aislada: 70 OK, 0 FAIL en `smoke-test-security.sh` |
-| App Android nativa | diseño y esqueleto; no compilada en este entorno |
-| Actividad en Android real | pendiente: consumo, latencia, formato del log y persistencia |
-| Atribución por aplicación | pendiente y experimental; no se afirma soporte |
+| Diseño y puente root | revisión estructural del código fuente |
+| Comandos de actividad | pruebas locales previas del CLI: 70 checks de seguridad/actividad, 0 fallos |
+| Catálogo, cachés, allowlist y motor DNS | CI/simulación existente del módulo; no sustituye prueba en el teléfono |
+| APK de cada revisión | verificar la ejecución correspondiente de GitHub Actions; CI no prueba operación en el teléfono |
+| Instalación, permiso KernelSU Next y operación Android 16 | pendiente de prueba física |
+| Wi‑Fi, datos, hotspot, Tailscale y rollback | pendiente de prueba física de esta app y del módulo candidato |
 
-## Rescate y rollback
-
-La app no modifica firmware, kernel, TWRP ni módulos de root. Todo cambio de configuración pasa por la CLI del módulo, que mantiene sus validaciones, backups, `-check`, prueba DNS y rollback. TWRP sigue siendo la plataforma de rescate físico.
-
+Antes de publicar una versión estable, compilar, instalar, probar cada acción, registrar versión y SHA-256, verificar conectividad, confirmar recuperación por TWRP y revisar el workflow de publicación. El candidato no es una actualización estable por el mero hecho de generar un APK.
