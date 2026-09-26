@@ -2,6 +2,7 @@ package ar.skaymer.dnscryptmanager
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,12 +27,15 @@ internal class DnsCryptViewModel : ViewModel() {
                     snapshot = repository.loadSnapshot(),
                     error = null,
                 )
+                refreshActivityData()
             } catch (error: RootBridgeException) {
                 _state.value = _state.value.copy(
                     loading = false,
                     rootAvailable = false,
                     error = error.message ?: "No se pudo conectar con el módulo.",
                 )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
                 _state.value = _state.value.copy(
                     loading = false,
@@ -222,8 +226,38 @@ internal class DnsCryptViewModel : ViewModel() {
         _state.value = _state.value.copy(loading = true)
         try {
             _state.value = _state.value.copy(snapshot = repository.loadSnapshot(), loading = false, rootAvailable = true)
+            refreshActivityData()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             _state.value = _state.value.copy(loading = false, error = error.message ?: "No se pudo actualizar el estado.")
+        }
+    }
+
+    private suspend fun refreshActivityData() {
+        val snapshot = _state.value.snapshot ?: return
+        if (!snapshot.activitySupported) {
+            _state.value = _state.value.copy(activityLoading = false, activityError = null)
+            return
+        }
+        if (_state.value.activityLoading) return
+
+        _state.value = _state.value.copy(activityLoading = true, activityError = null)
+        try {
+            val activity = repository.loadActivityData()
+            val latestSnapshot = _state.value.snapshot ?: snapshot
+            _state.value = _state.value.copy(
+                snapshot = latestSnapshot.copy(events = activity.events, stats = activity.stats),
+                activityLoading = false,
+                activityError = null,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(
+                activityLoading = false,
+                activityError = error.message ?: "No se pudieron leer los registros DNS.",
+            )
         }
     }
 }

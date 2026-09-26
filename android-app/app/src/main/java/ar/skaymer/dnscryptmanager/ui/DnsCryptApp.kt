@@ -229,7 +229,11 @@ private fun HomeScreen(
             onToggle = onActivityToggle,
         )
         SectionHeading("Actividad reciente", "Consultas DNS de este dispositivo", onOpenActivity)
-        if (snapshot.events.isEmpty()) {
+        if (state.activityLoading && snapshot.events.isEmpty()) {
+            QuietCard(Icons.Outlined.History, "Leyendo actividad", "El estado del módulo ya está disponible. Los registros se están cargando aparte.")
+        } else if (!state.activityError.isNullOrBlank() && snapshot.events.isEmpty()) {
+            QuietCard(Icons.Outlined.Info, "Actividad no disponible", state.activityError)
+        } else if (snapshot.events.isEmpty()) {
             QuietCard(
                 icon = Icons.Outlined.History,
                 title = "Todavía no hay consultas registradas",
@@ -475,7 +479,18 @@ private fun ActivityScreen(
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-        if (filtered.isEmpty()) {
+        if (state.activityLoading && snapshot.events.isEmpty()) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator()
+                    Text("Cargando actividad DNS…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else if (!state.activityError.isNullOrBlank() && snapshot.events.isEmpty()) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                EmptyState("No se pudo leer la actividad", state.activityError ?: "Volvé a intentar.")
+            }
+        } else if (filtered.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 EmptyState("No hay resultados", "Probá otra búsqueda o filtro.")
             }
@@ -1007,6 +1022,12 @@ private fun LoadingScreen() {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(13.dp)) {
             CircularProgressIndicator()
             Text("Conectando con el módulo…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "Si KernelSU Next pide permiso root, tocá Permitir. Si la conexión no responde en unos segundos, aparecerá un mensaje para reintentar.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 28.dp),
+            )
         }
     }
 }
@@ -1019,12 +1040,12 @@ private fun RootRequiredScreen(message: String?, onRetry: () -> Unit) {
                 Icon(Icons.Outlined.Security, contentDescription = null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
             }
             Spacer(Modifier.height(18.dp))
-            Text("Hace falta acceso root", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("No se pudo conectar con el módulo", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            Text("Esta app se conecta al módulo DNSCrypt del teléfono. Aprobá el acceso root en KernelSU y asegurate de tener instalado el módulo.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Comprobá que DNSCrypt Manager esté instalado y activo, y que KernelSU Next haya concedido acceso root a esta app.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (!message.isNullOrBlank()) Text(message, Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(18.dp))
-            Button(onClick = onRetry) { Text("Volver a intentar") }
+            Button(onClick = onRetry) { Text("Reintentar conexión") }
         }
     }
 }

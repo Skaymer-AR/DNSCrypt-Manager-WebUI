@@ -2,8 +2,9 @@ package ar.skaymer.dnscryptmanager
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeUnit
 
 /**
@@ -23,13 +24,23 @@ internal class RootShell {
         val args: List<String>
         val timeoutSeconds: Long get() = 30
 
-        data object Status : Command { override val args = listOf("status", "--json") }
-        data object ActivityStatus : Command { override val args = listOf("activity", "status", "--json") }
+        data object Status : Command {
+            override val args = listOf("status", "--json")
+            override val timeoutSeconds = 20L
+        }
+        data object ActivityStatus : Command {
+            override val args = listOf("activity", "status", "--json")
+            override val timeoutSeconds = 10L
+        }
         data class ActivityList(val limit: Int = 100) : Command {
             init { require(limit in 1..200) }
             override val args = listOf("activity", "list", "--limit", limit.toString(), "--json")
+            override val timeoutSeconds = 15L
         }
-        data object ActivityStats : Command { override val args = listOf("activity", "stats", "--json") }
+        data object ActivityStats : Command {
+            override val args = listOf("activity", "stats", "--json")
+            override val timeoutSeconds = 10L
+        }
         data object ActivityEnable : Command { override val args = listOf("activity", "enable") }
         data object ActivityDisable : Command { override val args = listOf("activity", "disable") }
         data object ActivityClear : Command { override val args = listOf("activity", "clear") }
@@ -99,18 +110,46 @@ internal class RootShell {
         val outputReader = async(Dispatchers.IO) {
             process.inputStream.bufferedReader().use { it.readText() }.trim()
         }
-        val finished = process.waitFor(command.timeoutSeconds, TimeUnit.SECONDS)
-        if (!finished) {
+        runCatching { process.outputStream.close() }
+        try {
+            val finished = process.waitFor(command.timeoutSeconds, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                val partialOutput = withTimeoutOrNull(2_000) { runCatching { outputReader.await() }.getOrNull() }
+                if (partialOutput == null) {
+                    runCatching { process.inputStream.close() }
+                    outputReader.cancel()
+                }
+                return@withContext Result(
+                    -1,
+                    listOf(partialOutput.orEmpty(), "El comando tardó demasiado. Revisá el permiso root y que el módulo esté activo.")
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n"),
+                    timedOut = true,
+                )
+            }
+
+            // En algunos gestores root el proceso puede terminar y dejar stdout
+            // abierto por un descendiente. Nunca dejar la pantalla inicial esperando
+            // indefinidamente a readText()/await().
+            val output = withTimeoutOrNull(2_000) { outputReader.await() }
+            if (output == null) {
+                process.destroyForcibly()
+                runCatching { process.inputStream.close() }
+                outputReader.cancel()
+                return@withContext Result(
+                    -1,
+                    "El proceso root no cerró su respuesta. Cerrá y volvé a abrir la app; si sigue, revisá KernelSU Next.",
+                    timedOut = true,
+                )
+            }
+            Result(process.exitValue(), output)
+        } catch (cancelled: CancellationException) {
             process.destroyForcibly()
-            val partialOutput = runCatching { withTimeout(3_000) { outputReader.await() } }.getOrDefault("")
-            return@withContext Result(
-                -1,
-                listOf(partialOutput, "Se agotó el tiempo de espera.").filter { it.isNotBlank() }.joinToString("\n"),
-                timedOut = true,
-            )
+            runCatching { process.inputStream.close() }
+            outputReader.cancel()
+            throw cancelled
         }
-        val output = runCatching { outputReader.await() }.getOrElse { "No se pudo leer la respuesta del módulo." }
-        Result(process.exitValue(), output)
     }
 
     private fun buildScript(args: List<String>): String {

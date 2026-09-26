@@ -70,10 +70,17 @@ data class DashboardSnapshot(
     val stats: ActivityStats,
 )
 
+data class ActivityData(
+    val events: List<ActivityEvent>,
+    val stats: ActivityStats,
+)
+
 data class DnsCryptUiState(
     val loading: Boolean = true,
     val rootAvailable: Boolean = true,
     val snapshot: DashboardSnapshot? = null,
+    val activityLoading: Boolean = false,
+    val activityError: String? = null,
     val error: String? = null,
     val notice: String? = null,
     val busyAction: String? = null,

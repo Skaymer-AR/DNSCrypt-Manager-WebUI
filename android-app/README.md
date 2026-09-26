@@ -15,6 +15,8 @@ Aplicación nativa en español para manejar el módulo DNSCrypt desde el teléfo
 
 La interfaz usa Kotlin, Jetpack Compose y Material 3. El puente root ejecuta únicamente operaciones concretas y validadas del CLI `dnscrypt-manager`; no acepta comandos escritos libremente.
 
+Al iniciar, la app consulta primero el estado del módulo y carga la actividad local en segundo plano. Si KernelSU Next solicita acceso root, hay que aprobarlo; si una orden no responde, la app muestra un diagnóstico y permite reintentar.
+
 ## Límites actuales
 
 - La actividad es de consultas DNS. No muestra conexiones TCP/UDP completas ni identifica de forma confiable qué aplicación originó cada consulta.

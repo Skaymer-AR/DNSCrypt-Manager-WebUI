@@ -28,6 +28,8 @@ El módulo sigue siendo el único motor DNS y conserva el estado. La app no mant
 
 Los comandos se limitan a `status`, `activity`, `catalog groups/list/enable/disable/download-all`, `allowlist list/add/remove`, `provider`, `nextdns` y `restart`. Los grupos, IDs, proveedores, dominios, IDs NextDNS y tiempos se validan antes de construir una llamada root.
 
+Al abrir la app, Inicio muestra primero el estado del servicio; los eventos y estadísticas locales se consultan después, sin bloquear la pantalla principal. Cada ejecución root y la lectura de su respuesta tienen límites de tiempo para que un proceso trabado no deje un indicador girando indefinidamente.
+
 La lectura del catálogo se hace por grupo, como en la WebUI, para no transportar su JSON entero en cada carga. “Preparar todas” descarga cachés verificadas y consulta el progreso; no activa fuentes. Una activación individual requiere una confirmación visible porque puede cambiar qué dominios se bloquean. Las etiquetas y licencias upstream se presentan como metadata del feed, no como una auditoría propia.
 
 ## Diseño de interfaz

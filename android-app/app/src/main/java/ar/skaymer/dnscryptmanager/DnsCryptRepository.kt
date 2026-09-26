@@ -14,17 +14,6 @@ internal class DnsCryptRepository(
         val statusJson = JSONObject(statusResult.output)
         val activityStatus = shell.run(RootShell.Command.ActivityStatus)
         val activityJson = if (activityStatus.ok) JSONObject(activityStatus.output) else null
-        val eventsResult = if (activityStatus.ok) {
-            shell.run(RootShell.Command.ActivityList(100))
-        } else {
-            RootShell.Result(1, "La actividad DNS no está disponible en esta versión del módulo.")
-        }
-        val statsResult = if (activityStatus.ok) {
-            shell.run(RootShell.Command.ActivityStats)
-        } else {
-            RootShell.Result(1, "La actividad DNS no está disponible en esta versión del módulo.")
-        }
-
         val status = ModuleStatus(
             running = statusJson.optBoolean("running", false),
             listening = statusJson.optBoolean("listening", false),
@@ -36,6 +25,23 @@ internal class DnsCryptRepository(
         return DashboardSnapshot(
             status = status,
             activitySupported = activityStatus.ok,
+            events = emptyList(),
+            stats = ActivityStats(),
+        )
+    }
+
+    suspend fun loadActivityData(): ActivityData {
+        val eventsResult = shell.run(RootShell.Command.ActivityList(100))
+        val statsResult = shell.run(RootShell.Command.ActivityStats)
+        if (!eventsResult.ok && !statsResult.ok) {
+            throw ModuleOperationException(
+                listOf(eventsResult.output, statsResult.output)
+                    .filter { it.isNotBlank() }
+                    .joinToString("\n")
+                    .ifBlank { "No se pudieron leer los registros DNS." },
+            )
+        }
+        return ActivityData(
             events = if (eventsResult.ok) parseEvents(eventsResult.output) else emptyList(),
             stats = if (statsResult.ok) parseStats(statsResult.output) else ActivityStats(),
         )
