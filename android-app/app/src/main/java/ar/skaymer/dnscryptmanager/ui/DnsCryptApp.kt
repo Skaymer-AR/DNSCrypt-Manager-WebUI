@@ -679,7 +679,7 @@ private fun FirewallScreen(
             placeholder = { Text("Buscar una aplicación") },
             shape = RoundedCornerShape(17.dp),
         )
-        if (appInventory == null) {
+        if (appResult == null) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }

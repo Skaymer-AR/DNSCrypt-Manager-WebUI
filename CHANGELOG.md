@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.1.1-rc3 — firewall por aplicación y correcciones de actividad (candidata)
+
+- Corrige la lectura de actividad para que un error de registro no convierta
+  estadísticas disponibles en ceros falsos.
+- Agrega un firewall opcional por aplicación, con controles separados para
+  IPv4 e IPv6 y reglas limitadas a las UID elegidas.
+- Repara una condición de carrera al capturar la salida de comandos root que
+  interrumpía la pantalla Actividad.
+- Esta candidata requiere validación final en un teléfono Motorola antes de
+  considerarse estable.
+
 ## v1.1.1-rc2 — contrato de actividad DNS y base para app nativa (candidata)
 
 - Agrega `dnscrypt-manager activity` para exponer consultas DNS, bloqueos,

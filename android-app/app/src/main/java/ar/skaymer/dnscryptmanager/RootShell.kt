@@ -189,8 +189,6 @@ internal class RootShell(private val tempDirectory: File) {
     private fun shellQuote(value: String): String =
         "'${value.replace("'", "'\"'\"'")}'"
 
-    private fun validPackageName(value: String): Boolean = PACKAGE_NAME.matches(value)
-
     private companion object {
         val CATALOG_GROUPS = setOf("Security", "Privacy", "ParentalControl", "dcm", "RethinkUnassigned")
         val PROVIDERS = setOf("cloudflare", "quad9", "adguard", "mullvad")
@@ -201,6 +199,8 @@ internal class RootShell(private val tempDirectory: File) {
         val DOMAIN = Regex("^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
         fun validCatalogId(id: String): Boolean = CATALOG_ID.matches(id)
+
+        fun validPackageName(value: String): Boolean = PACKAGE_NAME.matches(value)
 
         fun validDomain(domain: String): Boolean = DOMAIN.matches(domain.lowercase()) &&
             !Regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}$").matches(domain)

@@ -32,7 +32,7 @@ jobs:
 
       - name: Run module gate and package candidate
         env:
-          DCM_OUTPUT: ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc2.zip
+          DCM_OUTPUT: ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc3.zip
         shell: bash
         run: |
           set -euo pipefail
@@ -40,18 +40,18 @@ jobs:
           test -s "$DCM_OUTPUT"
           unzip -tq "$DCM_OUTPUT"
           unzip -p "$DCM_OUTPUT" module.prop | tr -d '\r' > "$RUNNER_TEMP/module.prop"
-          grep -qx 'version=v1.1.1-rc2' "$RUNNER_TEMP/module.prop"
-          grep -qx 'versionCode=11012' "$RUNNER_TEMP/module.prop"
+          grep -qx 'version=v1.1.1-rc3' "$RUNNER_TEMP/module.prop"
+          grep -qx 'versionCode=11013' "$RUNNER_TEMP/module.prop"
           module_zip="$(basename "$DCM_OUTPUT")"
           (cd "$(dirname "$DCM_OUTPUT")" && sha256sum "$module_zip" > "$module_zip.sha256")
 
       - name: Upload module candidate
         uses: actions/upload-artifact@v4
         with:
-          name: DNSCrypt-Manager-v1.1.1-rc2-candidate
+          name: DNSCrypt-Manager-v1.1.1-rc3-candidate
           path: |
-            ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc2.zip
-            ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc2.zip.sha256
+            ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc3.zip
+            ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc3.zip.sha256
             ${{ runner.temp }}/build-module.log
           if-no-files-found: error
           retention-days: 14
