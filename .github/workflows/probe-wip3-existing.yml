@@ -1,0 +1,27 @@
+name: Probe canonical WIP3 commit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/probe-wip3-existing.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify canonical WIP3 commit exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin probe/wip3-existing
+          test "$(git rev-parse FETCH_HEAD)" = "34df8e428bb76880d1887f01ffc5ec97956a030d"
+          git show --no-patch --oneline FETCH_HEAD
+          git show FETCH_HEAD:module.prop | grep -qx 'version=v0.2.0-RC2'
+          git show FETCH_HEAD:module.prop | grep -qx 'versionCode=202'

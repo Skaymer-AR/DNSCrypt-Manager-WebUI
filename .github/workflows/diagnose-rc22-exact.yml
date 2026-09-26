@@ -1,0 +1,36 @@
+name: Diagnose exact RC2.2 chunks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-rc22-exact.yml'
+      - 'import-assets/rc22-exact-2k-part-*.b64'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hash exact RC2.2 chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/report
+          {
+            for f in import-assets/rc22-exact-2k-part-*.b64; do
+              wc -c "$f"
+              sha256sum "$f"
+            done
+            cat import-assets/rc22-exact-2k-part-*.b64 > /tmp/report/combined.b64
+            wc -c /tmp/report/combined.b64
+            sha256sum /tmp/report/combined.b64
+          } | tee /tmp/report/hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc22-exact-chunk-diagnostic
+          path: /tmp/report

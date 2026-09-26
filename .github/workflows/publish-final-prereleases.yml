@@ -1,0 +1,66 @@
+name: Publish final verified prereleases
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-final-prereleases.yml'
+      - 'tools/publish-parts/**'
+      - 'import-assets/repair-*.b64'
+      - 'import-assets/rc22-exact-2k-part-*.b64'
+      - 'import-assets/v03-exact-2k-part-*.b64'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: publish-final-verified-prereleases
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout publication inputs
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Preserve publication scripts before branch reconstruction
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/dcm-publish
+          cp tools/publish-parts/*.sh /tmp/dcm-publish/
+          chmod 0755 /tmp/dcm-publish/*.sh
+
+      - name: Reconstruct and verify exact sources
+        shell: bash
+        run: /tmp/dcm-publish/00-reconstruct.sh
+
+      - name: Test and package v0.2.0-RC2.2
+        shell: bash
+        run: /tmp/dcm-publish/10-build-rc22.sh
+
+      - name: Test and package v0.3.0-RC1-WIP-A
+        shell: bash
+        run: /tmp/dcm-publish/20-build-v03.sh
+
+      - name: Update main, source branches and GitHub Releases
+        shell: bash
+        run: /tmp/dcm-publish/30-publish.sh
+
+      - name: Preserve verified release files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-verified-prerelease-files
+          path: ${{ runner.temp }}/releases
+          if-no-files-found: warn
