@@ -1,6 +1,7 @@
 package ar.skaymer.dnscryptmanager
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -8,8 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-internal class DnsCryptViewModel : ViewModel() {
-    private val repository = DnsCryptRepository()
+internal class DnsCryptViewModel(application: Application) : AndroidViewModel(application) {
+    private val repository = DnsCryptRepository(RootShell(application.cacheDir))
     private val _state = MutableStateFlow(DnsCryptUiState())
     val state: StateFlow<DnsCryptUiState> = _state.asStateFlow()
 
@@ -189,6 +190,45 @@ internal class DnsCryptViewModel : ViewModel() {
         afterSuccess = { refreshSnapshot() },
     )
 
+    fun refreshFirewall() {
+        if (_state.value.firewallLoading || _state.value.busyAction != null) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(firewallLoading = true, firewallError = null)
+            try {
+                val data = repository.loadFirewallData()
+                _state.value = _state.value.copy(
+                    firewall = data.support,
+                    firewallBlockedUids = data.blockedUids,
+                    firewallLoading = false,
+                    firewallError = data.error,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    firewallLoading = false,
+                    firewallError = error.message ?: "No se pudo consultar el firewall.",
+                )
+            }
+        }
+    }
+
+    fun setAppBlocked(packageNames: List<String>, blocked: Boolean) = runAction(
+        action = if (blocked) "Bloqueando la conexión de la app…" else "Permitiendo la conexión de la app…",
+        success = if (blocked) "Se bloqueó la conexión de la app." else "Se permitió la conexión de la app.",
+        operation = {
+            if (blocked) repository.blockApp(packageNames.first()) else repository.allowApps(packageNames)
+        },
+        afterSuccess = { refreshFirewall() },
+    )
+
+    fun clearAllAppBlocks() = runAction(
+        action = "Quitando los bloqueos del firewall…",
+        success = "Se quitaron todos los bloqueos por app.",
+        operation = { repository.clearAllAppBlocks() },
+        afterSuccess = { refreshFirewall() },
+    )
+
     fun clearFeedback() {
         _state.value = _state.value.copy(error = null, notice = null)
     }
@@ -214,6 +254,7 @@ internal class DnsCryptViewModel : ViewModel() {
                 _state.value = _state.value.copy(busyAction = null, notice = success)
                 afterSuccess()
             } catch (error: Exception) {
+                if (error is CancellationException) throw error
                 _state.value = _state.value.copy(
                     busyAction = null,
                     error = error.message ?: "La operación no se pudo completar.",
@@ -243,22 +284,29 @@ internal class DnsCryptViewModel : ViewModel() {
         if (_state.value.activityLoading) return
 
         _state.value = _state.value.copy(activityLoading = true, activityError = null)
+        val errors = mutableListOf<String>()
         try {
-            val activity = repository.loadActivityData()
+            val stats = repository.loadActivityStats()
             val latestSnapshot = _state.value.snapshot ?: snapshot
-            _state.value = _state.value.copy(
-                snapshot = latestSnapshot.copy(events = activity.events, stats = activity.stats),
-                activityLoading = false,
-                activityError = null,
-            )
+            _state.value = _state.value.copy(snapshot = latestSnapshot.copy(stats = stats))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            _state.value = _state.value.copy(
-                activityLoading = false,
-                activityError = error.message ?: "No se pudieron leer los registros DNS.",
-            )
+            errors += error.message ?: "No se pudieron leer los contadores DNS."
         }
+        try {
+            val events = repository.loadActivityEvents()
+            val latestSnapshot = _state.value.snapshot ?: snapshot
+            _state.value = _state.value.copy(snapshot = latestSnapshot.copy(events = events))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            errors += error.message ?: "No se pudieron leer los dominios consultados."
+        }
+        _state.value = _state.value.copy(
+            activityLoading = false,
+            activityError = errors.distinct().joinToString("\n").ifBlank { null },
+        )
     }
 }
 

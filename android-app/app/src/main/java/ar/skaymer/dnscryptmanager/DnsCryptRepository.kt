@@ -3,7 +3,7 @@ package ar.skaymer.dnscryptmanager
 import org.json.JSONObject
 
 internal class DnsCryptRepository(
-    private val shell: RootShell = RootShell(),
+    private val shell: RootShell,
 ) {
     suspend fun loadSnapshot(): DashboardSnapshot {
         val statusResult = shell.run(RootShell.Command.Status)
@@ -18,6 +18,7 @@ internal class DnsCryptRepository(
             running = statusJson.optBoolean("running", false),
             listening = statusJson.optBoolean("listening", false),
             redirectActive = statusJson.optString("redirect") in setOf("activa", "active", "enabled"),
+            moduleEnabled = !statusJson.optBoolean("disabled", false),
             server = statusJson.optString("server", ""),
             version = statusJson.optString("version", ""),
             activityEnabled = activityJson?.optBoolean("enabled", false) ?: false,
@@ -30,22 +31,53 @@ internal class DnsCryptRepository(
         )
     }
 
-    suspend fun loadActivityData(): ActivityData {
-        val eventsResult = shell.run(RootShell.Command.ActivityList(100))
-        val statsResult = shell.run(RootShell.Command.ActivityStats)
-        if (!eventsResult.ok && !statsResult.ok) {
-            throw ModuleOperationException(
-                listOf(eventsResult.output, statsResult.output)
-                    .filter { it.isNotBlank() }
-                    .joinToString("\n")
-                    .ifBlank { "No se pudieron leer los registros DNS." },
-            )
-        }
-        return ActivityData(
-            events = if (eventsResult.ok) parseEvents(eventsResult.output) else emptyList(),
-            stats = if (statsResult.ok) parseStats(statsResult.output) else ActivityStats(),
+    suspend fun loadActivityStats(): ActivityStats {
+        val result = shell.run(RootShell.Command.ActivityStats)
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudieron leer los contadores de actividad." })
+        return parseStats(result.output)
+    }
+
+    suspend fun loadActivityEvents(): List<ActivityEvent> {
+        val result = shell.run(RootShell.Command.ActivityList(100))
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo leer la lista de actividad." })
+        return parseEvents(result.output)
+    }
+
+    suspend fun loadFirewallData(): FirewallData {
+        val supportResult = shell.run(RootShell.Command.AppPolicySupport)
+        val support = supportResult.output.takeIf { it.isNotBlank() }
+            ?.let { raw -> runCatching { parseFirewallSupport(raw) }.getOrNull() }
+        val policiesResult = shell.run(RootShell.Command.AppPolicyList)
+        val blockedUids = if (policiesResult.ok) {
+            runCatching { parseBlockedUids(policiesResult.output) }.getOrNull()
+        } else null
+        val errors = listOfNotNull(
+            supportResult.takeIf { support == null }?.output?.ifBlank { "No se pudo verificar el firewall." },
+            policiesResult.takeIf { blockedUids == null }?.output?.ifBlank { "No se pudieron leer las reglas guardadas." },
+        ).distinct()
+        return FirewallData(
+            support = support,
+            blockedUids = blockedUids.orEmpty(),
+            error = errors.takeIf { it.isNotEmpty() }?.joinToString("\n"),
         )
     }
+
+    suspend fun blockApp(packageName: String): RootShell.Result =
+        shell.run(RootShell.Command.AppPolicySet(packageName))
+
+    suspend fun allowApp(packageName: String): RootShell.Result =
+        shell.run(RootShell.Command.AppPolicyClear(packageName))
+
+    suspend fun allowApps(packageNames: List<String>): RootShell.Result {
+        var result = RootShell.Result(0, "")
+        for (packageName in packageNames.distinct()) {
+            result = shell.run(RootShell.Command.AppPolicyClear(packageName))
+            if (!result.ok) return result
+        }
+        return result
+    }
+
+    suspend fun clearAllAppBlocks(): RootShell.Result = shell.run(RootShell.Command.AppPolicyClearAll)
 
     suspend fun loadCatalogGroups(): List<CatalogGroup> {
         val result = shell.run(RootShell.Command.CatalogGroups)
@@ -180,7 +212,31 @@ internal class DnsCryptRepository(
             allowed = item.optInt("allowed"),
             allowlisted = item.optInt("allowlisted"),
             errors = item.optInt("errors"),
+            available = true,
         )
+    }
+
+    private fun parseFirewallSupport(raw: String): FirewallSupport {
+        val item = JSONObject(raw)
+        return FirewallSupport(
+            supported = item.optBoolean("supported", false),
+            active = item.optBoolean("active", false),
+            ipv4Owner = item.optBoolean("ipv4_owner", false),
+            ipv6Owner = item.optBoolean("ipv6_owner", false),
+        )
+    }
+
+    private fun parseBlockedUids(raw: String): Set<Int> {
+        val policies = JSONObject(raw).optJSONArray("policies") ?: return emptySet()
+        return buildSet {
+            for (index in 0 until policies.length()) {
+                val item = policies.optJSONObject(index) ?: continue
+                if (item.optString("policy") == "block-internet") {
+                    val uid = item.optInt("uid", -1)
+                    if (uid >= 10_000) add(uid)
+                }
+            }
+        }
     }
 }
 

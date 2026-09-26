@@ -134,6 +134,8 @@ else
   bash "$ROOT/tests/smoke-test-cli.sh" || fail "tests/smoke-test-cli.sh fallo. No hay release con tests rotos."
   echo "  --- tests/smoke-test-security.sh ---"
   bash "$ROOT/tests/smoke-test-security.sh" || fail "tests/smoke-test-security.sh fallo. No hay release con tests rotos."
+  echo "  --- tests/smoke-test-app-policy.sh (firewall por UID) ---"
+  bash "$ROOT/tests/smoke-test-app-policy.sh" || fail "tests/smoke-test-app-policy.sh fallo. No hay release con firewall por app roto."
   echo "  --- tests/smoke-test-blocklist-engine.sh (parser, rollback, allowlist, red) ---"
   bash "$ROOT/tests/smoke-test-blocklist-engine.sh" || fail "tests/smoke-test-blocklist-engine.sh fallo. No hay release con el motor de blocklists roto."
   echo "  --- tests/smoke-test-webui.sh ---"

@@ -4,6 +4,7 @@ data class ModuleStatus(
     val running: Boolean,
     val listening: Boolean,
     val redirectActive: Boolean,
+    val moduleEnabled: Boolean,
     val server: String,
     val version: String,
     val activityEnabled: Boolean,
@@ -25,6 +26,7 @@ data class ActivityStats(
     val allowed: Int = 0,
     val allowlisted: Int = 0,
     val errors: Int = 0,
+    val available: Boolean = false,
 )
 
 data class CatalogGroup(
@@ -70,9 +72,25 @@ data class DashboardSnapshot(
     val stats: ActivityStats,
 )
 
-data class ActivityData(
-    val events: List<ActivityEvent>,
-    val stats: ActivityStats,
+data class FirewallSupport(
+    val supported: Boolean,
+    val active: Boolean,
+    val ipv4Owner: Boolean,
+    val ipv6Owner: Boolean,
+)
+
+data class FirewallData(
+    val support: FirewallSupport?,
+    val blockedUids: Set<Int>,
+    val error: String? = null,
+)
+
+data class FirewallApp(
+    val uid: Int,
+    val packageName: String,
+    val label: String,
+    val packageNames: List<String> = listOf(packageName),
+    val sharedLabels: List<String> = emptyList(),
 )
 
 data class DnsCryptUiState(
@@ -92,4 +110,8 @@ data class DnsCryptUiState(
     val downloadProgress: DownloadProgress = DownloadProgress(),
     val allowlist: List<String> = emptyList(),
     val allowlistLoading: Boolean = false,
+    val firewall: FirewallSupport? = null,
+    val firewallBlockedUids: Set<Int> = emptySet(),
+    val firewallLoading: Boolean = false,
+    val firewallError: String? = null,
 )

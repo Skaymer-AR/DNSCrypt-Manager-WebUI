@@ -1,17 +1,18 @@
 package ar.skaymer.dnscryptmanager
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
  * Puente root cerrado a operaciones concretas del CLI del módulo.
  * No acepta comandos libres ni construye shell con texto escrito por el usuario.
  */
-internal class RootShell {
+internal class RootShell(private val tempDirectory: File) {
     data class Result(
         val exitCode: Int,
         val output: String,
@@ -35,15 +36,38 @@ internal class RootShell {
         data class ActivityList(val limit: Int = 100) : Command {
             init { require(limit in 1..200) }
             override val args = listOf("activity", "list", "--limit", limit.toString(), "--json")
-            override val timeoutSeconds = 15L
+            override val timeoutSeconds = 45L
         }
         data object ActivityStats : Command {
             override val args = listOf("activity", "stats", "--json")
-            override val timeoutSeconds = 10L
+            override val timeoutSeconds = 45L
         }
         data object ActivityEnable : Command { override val args = listOf("activity", "enable") }
         data object ActivityDisable : Command { override val args = listOf("activity", "disable") }
         data object ActivityClear : Command { override val args = listOf("activity", "clear") }
+
+        data object AppPolicySupport : Command {
+            override val args = listOf("app-policy", "support", "--json")
+            override val timeoutSeconds = 20L
+        }
+        data object AppPolicyList : Command {
+            override val args = listOf("app-policy", "list", "--json")
+            override val timeoutSeconds = 20L
+        }
+        data class AppPolicySet(val packageName: String) : Command {
+            init { require(validPackageName(packageName)) }
+            override val args = listOf("app-policy", "set", packageName, "block-internet")
+            override val timeoutSeconds = 30L
+        }
+        data class AppPolicyClear(val packageName: String) : Command {
+            init { require(validPackageName(packageName)) }
+            override val args = listOf("app-policy", "clear", packageName)
+            override val timeoutSeconds = 30L
+        }
+        data object AppPolicyClearAll : Command {
+            override val args = listOf("app-policy", "clear-all")
+            override val timeoutSeconds = 30L
+        }
 
         data object CatalogGroups : Command { override val args = listOf("catalog", "groups", "--json") }
         data class CatalogList(val group: String) : Command {
@@ -97,29 +121,27 @@ internal class RootShell {
 
     suspend fun run(command: Command): Result = withContext(Dispatchers.IO) {
         val script = buildScript(command.args)
+        val outputFile = try {
+            File.createTempFile("dcm-root-", ".out", tempDirectory)
+        } catch (error: Exception) {
+            return@withContext Result(126, error.message ?: "No se pudo crear el archivo temporal de respuesta.")
+        }
         val process = try {
             ProcessBuilder("su", "-c", script)
                 .redirectErrorStream(true)
+                .redirectOutput(outputFile)
                 .start()
         } catch (error: Exception) {
+            outputFile.delete()
             return@withContext Result(127, error.message ?: "No se pudo iniciar su")
-        }
-
-        // Consumir stdout mientras corre el proceso evita bloquear el CLI si el JSON
-        // supera el buffer de la tubería. El timeout sigue limitando cada comando.
-        val outputReader = async(Dispatchers.IO) {
-            process.inputStream.bufferedReader().use { it.readText() }.trim()
         }
         runCatching { process.outputStream.close() }
         try {
             val finished = process.waitFor(command.timeoutSeconds, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
-                val partialOutput = withTimeoutOrNull(2_000) { runCatching { outputReader.await() }.getOrNull() }
-                if (partialOutput == null) {
-                    runCatching { process.inputStream.close() }
-                    outputReader.cancel()
-                }
+                runCatching { process.waitFor(2, TimeUnit.SECONDS) }
+                val partialOutput = readOutput(outputFile)
                 return@withContext Result(
                     -1,
                     listOf(partialOutput.orEmpty(), "El comando tardó demasiado. Revisá el permiso root y que el módulo esté activo.")
@@ -128,28 +150,29 @@ internal class RootShell {
                     timedOut = true,
                 )
             }
-
-            // En algunos gestores root el proceso puede terminar y dejar stdout
-            // abierto por un descendiente. Nunca dejar la pantalla inicial esperando
-            // indefinidamente a readText()/await().
-            val output = withTimeoutOrNull(2_000) { outputReader.await() }
-            if (output == null) {
-                process.destroyForcibly()
-                runCatching { process.inputStream.close() }
-                outputReader.cancel()
-                return@withContext Result(
-                    -1,
-                    "El proceso root no cerró su respuesta. Cerrá y volvé a abrir la app; si sigue, revisá KernelSU Next.",
-                    timedOut = true,
-                )
+            if (outputFile.length() > MAX_OUTPUT_BYTES) {
+                return@withContext Result(-1, "La respuesta del módulo superó el límite de lectura seguro.")
             }
-            Result(process.exitValue(), output)
+            Result(process.exitValue(), readOutput(outputFile))
         } catch (cancelled: CancellationException) {
             process.destroyForcibly()
-            runCatching { process.inputStream.close() }
-            outputReader.cancel()
             throw cancelled
+        } catch (interrupted: InterruptedException) {
+            process.destroyForcibly()
+            currentCoroutineContext().ensureActive()
+            Result(-1, "La ejecución root se interrumpió antes de responder.", timedOut = true)
+        } catch (error: Exception) {
+            process.destroyForcibly()
+            Result(-1, error.message ?: "No se pudo leer la respuesta del módulo.")
+        } finally {
+            outputFile.delete()
         }
+    }
+
+    private fun readOutput(file: File): String {
+        if (file.length() > MAX_OUTPUT_BYTES) return "La respuesta del módulo superó el límite de lectura seguro."
+        return runCatching { file.readText(Charsets.UTF_8).trim() }
+            .getOrElse { "No se pudo leer la respuesta del módulo: ${it.message.orEmpty()}" }
     }
 
     private fun buildScript(args: List<String>): String {
@@ -166,10 +189,14 @@ internal class RootShell {
     private fun shellQuote(value: String): String =
         "'${value.replace("'", "'\"'\"'")}'"
 
+    private fun validPackageName(value: String): Boolean = PACKAGE_NAME.matches(value)
+
     private companion object {
         val CATALOG_GROUPS = setOf("Security", "Privacy", "ParentalControl", "dcm", "RethinkUnassigned")
         val PROVIDERS = setOf("cloudflare", "quad9", "adguard", "mullvad")
         val NEXTDNS_ID = Regex("^[0-9a-fA-F]{4,12}$")
+        val PACKAGE_NAME = Regex("^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$")
+        const val MAX_OUTPUT_BYTES = 16L * 1024L * 1024L
         val CATALOG_ID = Regex("^[a-z0-9][a-z0-9_-]{0,127}$")
         val DOMAIN = Regex("^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 

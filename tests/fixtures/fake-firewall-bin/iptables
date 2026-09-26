@@ -27,6 +27,11 @@ mkdir -p "$STATE_DIR"
 
 echo "$SELF $*" >> "$LOG"
 
+# Capability probe used by the per-UID app firewall.
+case " $* " in
+  *" -m owner -h "*) exit 0 ;;
+esac
+
 # --- parseo de argumentos ----------------------------------------------------
 TABLE="filter"
 VERB=""
@@ -40,10 +45,12 @@ while [ "$i" -le "$n" ]; do
   case "$a" in
     -t)
       i=$((i+1)); TABLE="${args[$((i-1))]}" ;;
-    -N|-F|-A|-C|-D|-X)
+    -N|-F|-A|-C|-D|-X|-I)
       VERB="$a"
       i=$((i+1))
-      if [ "$i" -le "$n" ]; then CHAIN="${args[$((i-1))]}"; fi ;;
+      if [ "$i" -le "$n" ]; then CHAIN="${args[$((i-1))]}"; fi
+      ;;
+    -w) : ;;
     *)
       REST+=("$a") ;;
   esac
@@ -53,17 +60,26 @@ done
 [ -z "$VERB" ] && { echo "fake-$SELF: no reconozco los argumentos: $*" >&2; exit 2; }
 
 # Namespace de estado: SELF (iptables/ip6tables) + tabla + cadena.
+if [ "$VERB" = "-I" ] && [[ "${REST[0]:-}" =~ ^[0-9]+$ ]]; then
+  REST=("${REST[@]:1}")
+fi
 KEY_FILE="$STATE_DIR/$SELF.$TABLE.$CHAIN.rules"
 CHAIN_MARK="$STATE_DIR/$SELF.$TABLE.$CHAIN.exists"
 RULESPEC="${REST[*]:-}"
+if [ "$CHAIN" = "OUTPUT" ] || [ "$CHAIN" = "INPUT" ]; then
+  touch "$CHAIN_MARK"
+  [ -f "$KEY_FILE" ] || : > "$KEY_FILE"
+fi
 
 case "$VERB" in
   -N)
+    [ ! -f "$CHAIN_MARK" ] || exit 1
     touch "$CHAIN_MARK"
     : > "$KEY_FILE" 2>/dev/null || true
     exit 0
     ;;
   -F)
+    [ -f "$CHAIN_MARK" ] || exit 1
     : > "$KEY_FILE"
     exit 0
     ;;
@@ -72,7 +88,15 @@ case "$VERB" in
     exit 0
     ;;
   -A)
+    [ -f "$CHAIN_MARK" ] || exit 1
     echo "$RULESPEC" >> "$KEY_FILE"
+    exit 0
+    ;;
+  -I)
+    [ -f "$CHAIN_MARK" ] || exit 1
+    _tmp="$KEY_FILE.tmp.$$"
+    { echo "$RULESPEC"; cat "$KEY_FILE" 2>/dev/null; } > "$_tmp"
+    mv -f "$_tmp" "$KEY_FILE"
     exit 0
     ;;
   -C)

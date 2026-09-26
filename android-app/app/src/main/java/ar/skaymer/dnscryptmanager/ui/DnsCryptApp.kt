@@ -64,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -76,17 +77,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ar.skaymer.dnscryptmanager.ActivityEvent
 import ar.skaymer.dnscryptmanager.CatalogEntry
 import ar.skaymer.dnscryptmanager.DnsCryptUiState
 import ar.skaymer.dnscryptmanager.DnsCryptViewModel
+import ar.skaymer.dnscryptmanager.FirewallApp
+import ar.skaymer.dnscryptmanager.FirewallAppInventory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlinx.coroutines.delay
 
 private enum class Tab(val label: String) {
     HOME("Inicio"),
     ACTIVITY("Actividad"),
+    FIREWALL("Firewall"),
     LISTS("Listas"),
     SETTINGS("Ajustes"),
 }
@@ -111,6 +119,7 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
                 if (state.catalogGroups.isEmpty()) viewModel.loadCatalog() else viewModel.refreshCatalog()
                 viewModel.refreshDownloadProgress()
             }
+            Tab.FIREWALL -> viewModel.refreshFirewall()
             else -> Unit
         }
     }
@@ -148,6 +157,12 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
                     onRefresh = viewModel::refresh,
                     onClear = viewModel::clearActivity,
                     onEnable = { viewModel.setActivityEnabled(true) },
+                )
+                Tab.FIREWALL -> FirewallScreen(
+                    state = state,
+                    onRefresh = viewModel::refreshFirewall,
+                    onSetBlocked = viewModel::setAppBlocked,
+                    onClearAll = viewModel::clearAllAppBlocks,
                 )
                 Tab.LISTS -> ListsScreen(
                     state = state,
@@ -201,6 +216,7 @@ private fun DcmScaffold(
 private fun tabIcon(tab: Tab) = when (tab) {
     Tab.HOME -> Icons.Outlined.Home
     Tab.ACTIVITY -> Icons.Outlined.History
+    Tab.FIREWALL -> Icons.Outlined.Security
     Tab.LISTS -> Icons.Outlined.List
     Tab.SETTINGS -> Icons.Outlined.Settings
 }
@@ -326,12 +342,12 @@ private fun ActivityStatsGrid(state: DnsCryptUiState) {
     val stats = state.snapshot?.stats ?: return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCard("Consultas", stats.total, "en el registro local", Icons.Outlined.Dns, Modifier.weight(1f))
-            MetricCard("Bloqueadas", stats.blocked, "por una regla DNS", Icons.Outlined.Security, Modifier.weight(1f), MaterialTheme.colorScheme.error)
+            MetricCard("Consultas", stats.total.takeIf { stats.available }, "en el registro local", Icons.Outlined.Dns, Modifier.weight(1f))
+            MetricCard("Bloqueadas", stats.blocked.takeIf { stats.available }, "por una regla DNS", Icons.Outlined.Security, Modifier.weight(1f), MaterialTheme.colorScheme.error)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCard("Permitidas", stats.allowed, "respuestas normales", Icons.Outlined.CheckCircle, Modifier.weight(1f))
-            MetricCard("Excepciones", stats.allowlisted, "permitidas por vos", Icons.Outlined.Info, Modifier.weight(1f), MaterialTheme.colorScheme.secondary)
+            MetricCard("Permitidas", stats.allowed.takeIf { stats.available }, "respuestas normales", Icons.Outlined.CheckCircle, Modifier.weight(1f))
+            MetricCard("Excepciones", stats.allowlisted.takeIf { stats.available }, "permitidas por vos", Icons.Outlined.Info, Modifier.weight(1f), MaterialTheme.colorScheme.secondary)
         }
     }
 }
@@ -339,7 +355,7 @@ private fun ActivityStatsGrid(state: DnsCryptUiState) {
 @Composable
 private fun MetricCard(
     label: String,
-    value: Int,
+    value: Int?,
     caption: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier,
@@ -351,7 +367,7 @@ private fun MetricCard(
                 Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
                 Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(value.toString(), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text(value?.toString() ?: "—", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(caption, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -449,9 +465,9 @@ private fun ActivityScreen(
             Spacer(Modifier.height(10.dp))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            MiniMetric("Total", snapshot.stats.total, Modifier.weight(1f))
-            MiniMetric("Bloqueadas", snapshot.stats.blocked, Modifier.weight(1f), MaterialTheme.colorScheme.error)
-            MiniMetric("Permitidas", snapshot.stats.allowed + snapshot.stats.allowlisted, Modifier.weight(1f))
+            MiniMetric("Total", snapshot.stats.total.takeIf { snapshot.stats.available }, Modifier.weight(1f))
+            MiniMetric("Bloqueadas", snapshot.stats.blocked.takeIf { snapshot.stats.available }, Modifier.weight(1f), MaterialTheme.colorScheme.error)
+            MiniMetric("Permitidas", (snapshot.stats.allowed + snapshot.stats.allowlisted).takeIf { snapshot.stats.available }, Modifier.weight(1f))
         }
         Spacer(Modifier.height(11.dp))
         OutlinedTextField(
@@ -519,10 +535,10 @@ private fun ActivityScreen(
 }
 
 @Composable
-private fun MiniMetric(label: String, value: Int, modifier: Modifier, tint: Color = MaterialTheme.colorScheme.primary) {
+private fun MiniMetric(label: String, value: Int?, modifier: Modifier, tint: Color = MaterialTheme.colorScheme.primary) {
     Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 10.dp)) {
-            Text(value.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = tint)
+            Text(value?.toString() ?: "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = tint)
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -552,6 +568,210 @@ private fun ActivityRow(event: ActivityEvent) {
                 Text(activityLabel(event.status), color = tint, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                 Text(formatTimestamp(event.time), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+    }
+}
+
+@Composable
+private fun FirewallScreen(
+    state: DnsCryptUiState,
+    onRefresh: () -> Unit,
+    onSetBlocked: (List<String>, Boolean) -> Unit,
+    onClearAll: () -> Unit,
+) {
+    val context = LocalContext.current
+    val appResult by produceState<Result<List<FirewallApp>>?>(null, context) {
+        value = try {
+            Result.success(withContext(Dispatchers.IO) { FirewallAppInventory.load(context) })
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+    }
+    val apps = appResult?.getOrNull().orEmpty()
+    val inventoryError = appResult?.exceptionOrNull()
+    val support = state.firewall
+    val moduleEnabled = state.snapshot?.status?.moduleEnabled == true
+    var search by rememberSaveable { mutableStateOf("") }
+    var pendingApp by remember { mutableStateOf<FirewallApp?>(null) }
+    var confirmClearAll by remember { mutableStateOf(false) }
+    val filteredApps = apps.filter { app ->
+        val terms = listOf(app.label, app.packageName) + app.sharedLabels
+        search.isBlank() || terms.any { it.contains(search.trim(), ignoreCase = true) }
+    }
+    val canClear = state.busyAction == null && !state.firewallLoading
+    val canBlock = support?.supported == true && moduleEnabled && canClear
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        ScreenHeader("Firewall", "Bloqueo de internet por aplicación", onRefresh, state.firewallLoading || state.busyAction != null)
+        Spacer(Modifier.height(10.dp))
+
+        when {
+            support == null && state.firewallLoading -> QuietCard(
+                Icons.Outlined.Security,
+                "Revisando compatibilidad",
+                "El módulo está comprobando reglas IPv4 e IPv6 antes de habilitar los controles.",
+            )
+            support == null -> QuietCard(
+                Icons.Outlined.Info,
+                "No se pudo verificar",
+                state.firewallError ?: "Tocá actualizar para revisar el soporte del teléfono.",
+            )
+            !support.supported -> QuietCard(
+                Icons.Outlined.Info,
+                "Firewall no disponible en este teléfono",
+                "IPv4: ${if (support.ipv4Owner) "compatible" else "no confirmado"}. IPv6: ${if (support.ipv6Owner) "compatible" else "no confirmado"}. Se necesitan ambos; no se aplican reglas.",
+            )
+            !moduleEnabled -> QuietCard(
+                Icons.Outlined.Info,
+                "El módulo está desactivado",
+                "Las reglas guardadas no se aplican mientras DNSCrypt Manager está desactivado. Activá el módulo para volver a bloquear apps.",
+            )
+            state.firewallBlockedUids.isNotEmpty() && !support.active -> QuietCard(
+                Icons.Outlined.Info,
+                "Reglas guardadas, firewall inactivo",
+                "Las preferencias están guardadas, pero el módulo no confirmó los ganchos IPv4 e IPv6. No cuentes esos bloqueos como activos.",
+            )
+            state.firewallBlockedUids.isNotEmpty() -> QuietCard(
+                Icons.Outlined.Security,
+                "Firewall activo",
+                "${state.firewallBlockedUids.size} app(s) o grupos de apps sin acceso a internet por Wi‑Fi y datos móviles.",
+            )
+            else -> QuietCard(
+                Icons.Outlined.CheckCircle,
+                "Todo permitido",
+                "El firewall está listo. Activá el control de una app para quitarle el acceso a internet.",
+            )
+        }
+
+        if (!state.firewallError.isNullOrBlank() && support != null) {
+            Text(
+                "No se pudo actualizar todo: ${state.firewallError}",
+                Modifier.padding(top = 7.dp, start = 3.dp, end = 3.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Bloquea toda la conexión de red de la app; no filtra dominios. La lista se procesa en este teléfono.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(9.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Aplicaciones", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            if (state.firewallBlockedUids.isNotEmpty()) {
+                TextButton(
+                    onClick = { confirmClearAll = true },
+                    enabled = canClear,
+                ) { Text("Permitir todas") }
+            }
+        }
+        OutlinedTextField(
+            value = search,
+            onValueChange = { search = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+            placeholder = { Text("Buscar una aplicación") },
+            shape = RoundedCornerShape(17.dp),
+        )
+        if (appInventory == null) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else if (inventoryError != null) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                EmptyState("No se pudieron cargar las apps", inventoryError.message ?: "Reiniciá la app e intentá de nuevo.")
+            }
+        } else if (filteredApps.isEmpty()) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                EmptyState("No encontramos aplicaciones", "Probá con otro nombre.")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f).padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(filteredApps, key = { it.uid }) { app ->
+                    val blocked = app.uid in state.firewallBlockedUids
+                    FirewallAppRow(
+                        app = app,
+                        blocked = blocked,
+                        enabled = if (blocked) canClear else canBlock,
+                        onToggle = { requested ->
+                            if (requested) pendingApp = app else onSetBlocked(app.packageNames, false)
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    pendingApp?.let { app ->
+        val sharedNames = app.sharedLabels.distinct()
+        ConfirmDialog(
+            title = "¿Bloquear ${app.label} de internet?",
+            body = buildString {
+                append("Va a perder el acceso a internet por Wi‑Fi y datos móviles. Puede dejar de sincronizar o conectarse.")
+                if (sharedNames.isNotEmpty()) {
+                    append(" También se bloquearán las apps que comparten su identificador: ")
+                    append(sharedNames.joinToString(", "))
+                    append(".")
+                }
+                append(" Podés revertirlo desde esta pantalla.")
+            },
+            confirm = "Bloquear app",
+            onDismiss = { pendingApp = null },
+            onConfirm = { pendingApp = null; onSetBlocked(app.packageNames, true) },
+        )
+    }
+    if (confirmClearAll) {
+        ConfirmDialog(
+            title = "¿Permitir todas las apps?",
+            body = "Se van a quitar todas las reglas de este firewall y las apps recuperarán internet.",
+            confirm = "Permitir todas",
+            onDismiss = { confirmClearAll = false },
+            onConfirm = { confirmClearAll = false; onClearAll() },
+        )
+    }
+}
+
+@Composable
+private fun FirewallAppRow(
+    app: FirewallApp,
+    blocked: Boolean,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(39.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Outlined.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (app.sharedLabels.isEmpty()) app.packageName
+                    else "Comparte red con: ${app.sharedLabels.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = blocked, onCheckedChange = onToggle, enabled = enabled)
         }
     }
 }
@@ -784,7 +1004,7 @@ private fun CatalogEntryCard(entry: CatalogEntry, busy: Boolean, onToggle: (Bool
                     if (entry.subgroup.isNotBlank()) Text(entry.subgroup, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.width(8.dp))
-                Switch(
+                    Switch(
                     checked = entry.enabled,
                     onCheckedChange = onToggle,
                     enabled = !busy && (entry.enabled || !blocked),

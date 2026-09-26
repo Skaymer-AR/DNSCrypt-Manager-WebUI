@@ -6,6 +6,7 @@ Aplicación nativa en español para manejar el módulo DNSCrypt desde el teléfo
 
 - Ver si `dnscrypt-proxy` escucha y si la redirección DNS está activa.
 - Consultar las estadísticas y los eventos DNS locales cuando la versión del módulo ofrece esa función.
+- Revisar las apps instaladas y bloquear o permitir su tráfico de internet con el firewall por UID, si el teléfono confirma soporte IPv4 e IPv6.
 - Activar o pausar el registro local; empieza apagado.
 - Explorar el catálogo real por categorías, buscar y filtrar fuentes activas o recomendadas.
 - Activar o desactivar una fuente con confirmación antes de cambiar el filtrado.
@@ -20,10 +21,11 @@ Al iniciar, la app consulta primero el estado del módulo y carga la actividad l
 ## Límites actuales
 
 - La actividad es de consultas DNS. No muestra conexiones TCP/UDP completas ni identifica de forma confiable qué aplicación originó cada consulta.
-- La app no usa `VpnService`, no inspecciona HTTPS y no implementa un firewall por aplicación.
+- El firewall bloquea toda la red de una app seleccionada; no filtra dominios ni identifica qué app originó una consulta DNS. Solo se habilita con soporte confirmado para IPv4 e IPv6.
+- Para mostrar el selector local, Android permite consultar los paquetes instalados. La lista y sus nombres se procesan en el teléfono y no se envían a un servidor.
 - Los perfiles de seguridad, el rollback de listas y la validación avanzada siguen disponibles en la WebUI del módulo; todavía no tienen controles nativos propios.
 - Cambiar resolver reinicia `dnscrypt-proxy` y puede pausar la conectividad unos segundos.
-- Compilar el APK no prueba que funcione en el Motorola. La primera instalación física debe comprobar permiso root, lectura del módulo, actividad, catálogo, allowlist, cambio de resolver y conectividad por Wi‑Fi, datos y hotspot.
+- Compilar el APK no prueba que funcione en el Motorola. La primera instalación física debe comprobar permiso root, lectura del módulo, actividad, catálogo, allowlist, firewall por Wi‑Fi y datos, cambio de resolver y conectividad por hotspot.
 
 ## Build y evidencia
 

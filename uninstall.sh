@@ -40,6 +40,7 @@ log "iniciando desinstalacion"
 
 # 1. Retirar reglas de redireccion (idempotente; no falla si no habia)
 if [ -x "$CLI" ]; then
+  run_cli app-policy clear-all 2>/dev/null
   run_cli redirect remove 2>/dev/null
   run_cli restore-network 2>/dev/null
   run_cli stop 2>/dev/null
@@ -47,6 +48,11 @@ else
   # Fallback directo si la CLI no esta disponible por algun motivo.
   for T in iptables ip6tables; do
     command -v "$T" >/dev/null 2>&1 || continue
+    while "$T" -t filter -C OUTPUT -j DCM_APP_OUT 2>/dev/null; do
+      "$T" -t filter -D OUTPUT -j DCM_APP_OUT 2>/dev/null || break
+    done
+    "$T" -t filter -F DCM_APP_OUT 2>/dev/null
+    "$T" -t filter -X DCM_APP_OUT 2>/dev/null
     "$T" -t nat -D OUTPUT -j DNSCRYPT_OUTPUT 2>/dev/null
     "$T" -t nat -D PREROUTING -j DNSCRYPT_REDIRECT 2>/dev/null
     "$T" -t nat -F DNSCRYPT_OUTPUT 2>/dev/null
