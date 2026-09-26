@@ -1,6 +1,6 @@
 id=dnscrypt_manager
 name=DNSCrypt Manager
-version=v1.1.1-rc1
-versionCode=11011
+version=v1.1.1-rc3
+versionCode=11013
 author=Skaymer AR
-description=dnscrypt-proxy como servicio de sistema (DNSCrypt/DoH/NextDNS) con catalogo de blocklists por metadatos, motor de fuentes con descarga/validacion/compilacion por lotes, importacion BindHosts, controles de servicio y WebUI. Redireccion DNS opcional, modo seguro anti-bootloop y recuperacion por ADB. KernelSU/KernelSU Next/APatch/Magisk.
+description=dnscrypt-proxy como servicio de sistema (DNSCrypt/DoH/NextDNS) con catalogo de blocklists por metadatos, actividad DNS local opt-in, motor de fuentes con descarga/validacion/compilacion por lotes, importacion BindHosts, controles de servicio y WebUI. Redireccion DNS opcional, modo seguro anti-bootloop y recuperacion por ADB. KernelSU/KernelSU Next/APatch/Magisk.

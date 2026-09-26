@@ -56,6 +56,12 @@ run_cli() {
       fi
     fi
   fi
+
+  # Restaurar únicamente las reglas propias del firewall por UID, si quedaron
+  # configuradas. La función verifica capacidades IPv4 e IPv6 antes de aplicarlas.
+  if ! run_cli app-policy restore >> "$LOG" 2>&1; then
+    log "no se pudieron restaurar las reglas del firewall por app; revisar compatibilidad"
+  fi
 ) &
 
 exit 0

@@ -32,6 +32,7 @@ SHELL_FILES=(
   scripts/backup.sh scripts/common.sh scripts/validate-binary.sh scripts/redirect.sh
   scripts/remove-redirect.sh scripts/restart.sh scripts/restore.sh scripts/start.sh
   scripts/stop.sh scripts/test-dns.sh scripts/security.sh scripts/catalog.sh
+  scripts/apppolicy.sh
   system/bin/dnscrypt-manager
   META-INF/com/google/android/update-binary
 )
@@ -148,7 +149,7 @@ echo "=== 7) Ningun fixture debe estar entre los archivos destinados al ZIP ==="
 python3 << 'PYEOF' || FAIL=1
 import os, sys
 
-EXCLUDE_DIRS = {"tests", "tools", ".git"}
+EXCLUDE_DIRS = {"tests", "tools", "android-app", ".git"}
 FIXTURE_MARKER = "ARCHIVO DE PRUEBA"
 
 installable = []

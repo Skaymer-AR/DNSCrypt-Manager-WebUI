@@ -1,19 +1,6 @@
-name: Publish DNSCrypt Manager v1.1.0 stable
+name: Publish DNSCrypt Manager v1.1.0 stable (manual legacy)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/publish-v1.1.yml'
-      - 'module.prop'
-      - 'README.md'
-      - 'release/v1.1.0/**'
-      - 'scripts/**'
-      - 'system/**'
-      - 'webroot/**'
-      - 'config/**'
-      - 'tests/**'
-      - 'tools/**'
   workflow_dispatch:
 
 permissions:
@@ -96,7 +83,7 @@ jobs:
           grep -qx "versionCode=$VERSION_CODE" "$RUNNER_TEMP/module.prop.release"
           grep -qx 'author=Skaymer AR' "$RUNNER_TEMP/module.prop.release"
           unzip -Z1 "$ZIP" | grep -qx 'module.prop'
-          if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|dist|fixtures|bootstrap|release)/'; then
+          if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|dist|android-app|fixtures|bootstrap|release)/'; then
             echo 'Development files leaked into the installable ZIP' >&2
             exit 1
           fi

@@ -31,20 +31,20 @@ Niveles:
 | transport: apply atómico + rollback | **REAL/device-pending** | el `-check`/instancia aislada/restart/verify NO corrió en ARM64; el TOML `[anonymized_dns]` generado no fue validado contra el `-check` real |
 | Anonymized DNSCrypt (efecto de red) | **REAL/device-pending** | construye routes; el efecto anónimo real es device-pending |
 | **ODoH (consulta real)** | **NOT_VERIFIABLE** | code path presente (strings); consulta Android no verificable en x86; nunca activo sin prueba |
-| **app-policy (reglas por UID)** | **RECORDED-ONLY** | registra la política + valida UID; la construcción de la cadena iptables/nft NO está implementada; no toca firewall |
+| **app-policy (reglas por UID)** | **REAL/device-pending** | usa cadenas propias iptables con owner-match IPv4+IPv6 y queda apagado por defecto; 22 pruebas x86 usan un backend simulado, la efectividad en Motorola/kernel real sigue pendiente |
 | captive (auto-restore) | **PARCIAL** | pausa/backup/restore reales; NO hay daemon: el auto-restore ocurre al consultar `status` o en el próximo boot |
 | bypass (detección) | **REAL/x86 parcial** | señales best-effort; puertos 53/853/IPv6 reportan `no_verificable` salvo señal explícita (device-pending) |
 | monitor (heurísticas) | **REAL/x86** | clasificación corre de verdad; alimentación desde historial real es device-pending |
 
 ## Lo que NO está en la WebUI (solo CLI en RC1)
-transporte, anonymized, ODoH, captive, bypass, monitor, service-controls y
-app-policy son **CLI-only**. La SPA tiene status/dns/lists/activity/settings +
+transporte, anonymized, ODoH, captive, bypass, monitor y service-controls son
+**CLI-only**. La SPA tiene status/dns/lists/activity/settings +
 source doctor + environment, pero no expone la configuración de estas features.
 
 ## Conclusión honesta
 El andamiaje, los defaults seguros, las rutas no-destructivas y la disciplina de
 seguridad son sólidos y están probados. El enforcement de red real
-(transport/ODoH/app-policy) y varias UI están **sin ejecución real en dispositivo**.
+(transport/ODoH/app-policy) y varias UI están **sin ejecución real en dispositivo**. El firewall por UID ya está implementado y simulado en CI, pero el kernel Android del Motorola todavía debe confirmar soporte y comportamiento.
 Esto es más un **feature-preview verificado en plumbing** que un RC "maduro":
 apto para probar en el dispositivo empezando por instalar sin bootloop, migrar,
 `environment status`, y `anonymized test` contra el binario real (primer choque con

@@ -1,4 +1,4 @@
-name: Validate DNSCrypt Manager v0.2.0 RC
+name: Validate DNSCrypt Manager v1.1.1 RC3 candidate
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ jobs:
     env:
       DNSCRYPT_VERSION: '2.1.17'
       DNSCRYPT_ASSET_SHA256: '85601b3398c7013ca0d102c075d0f46ccb9c5b6b84001be6f15992019560f572'
-      RC_ZIP: '/tmp/DNSCrypt-Manager-v0.2.0-RC1.zip'
+      RC_ZIP: '/tmp/DNSCrypt-Manager-v1.1.1-rc3.zip'
 
     steps:
       - name: Checkout pull request
@@ -111,8 +111,8 @@ jobs:
           unzip -tq "$RC_ZIP"
           unzip -Z1 "$RC_ZIP" | sed 's#^\./##' > /tmp/rc-entries.txt
           grep -qx 'module.prop' /tmp/rc-entries.txt
-          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'version=v0.2.0'
-          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'versionCode=200'
+          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'version=v1.1.1-rc3'
+          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'versionCode=11013'
           unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'author=Skaymer AR'
           if grep -Eq '^(tests|tools|dist|fixtures|bootstrap)/|(^|/)COLOCAR_BINARIO_AQUI\.md$|(^|/)__pycache__(/|$)|(^|/)\.git(/|$)' /tmp/rc-entries.txt; then
             echo 'Development artifacts or placeholders leaked into the RC ZIP:' >&2
@@ -126,10 +126,10 @@ jobs:
       - name: Upload verified RC artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DNSCrypt-Manager-v0.2.0-RC1
+          name: DNSCrypt-Manager-v1.1.1-rc3-validated
           path: |
-            /tmp/DNSCrypt-Manager-v0.2.0-RC1.zip
-            /tmp/DNSCrypt-Manager-v0.2.0-RC1.zip.sha256
+            /tmp/DNSCrypt-Manager-v1.1.1-rc3.zip
+            /tmp/DNSCrypt-Manager-v1.1.1-rc3.zip.sha256
           if-no-files-found: error
           retention-days: 30
 

@@ -18,6 +18,9 @@
 #     no_verificable / conflicto / fallo; nunca afirma lo que no puede probar).
 #   - Eventos de bloqueo ("por que fue bloqueado") + historial local
 #     limitado y rotado. Nada sale del dispositivo.
+#   - Actividad DNS opcional (consultas locales + estado bloqueado/permitido),
+#     tambien limitada y rotada. OFF por defecto para preservar privacidad,
+#     rendimiento y compatibilidad con instalaciones existentes.
 #   - Migracion versionada v0.1.0 (schema 1) -> v0.2.0 (schema 2).
 #
 # SEGURIDAD: sin eval, sin pgrep/pkill/killall, sin chmod 777, sin tocar
@@ -39,6 +42,9 @@ ALLOWLIST_FILE="$SEC_DIR/allowlist.txt"
 EXCEPTIONS_FILE="$SEC_DIR/exceptions.tsv"
 EVENTS_DIR="$SEC_DIR/events"
 EVENTS_LOG="$EVENTS_DIR/blocked.log"
+QUERY_DIR="$SEC_DIR/query-activity"
+QUERY_LOG="$QUERY_DIR/queries.tsv"
+ALLOWED_LOG="$QUERY_DIR/allowed.tsv"
 SEC_EXPORT_DIR="$SEC_DIR/export"
 SCHEMA_FILE="$DATA_DIR/schema_version"
 MIGRATION_FAILED_FLAG="$DATA_DIR/migration-failed"
@@ -65,8 +71,9 @@ sec_lib_loaded() { return 0; }
 
 sec_init_dirs() {
   mkdir -p "$BL_SRC_DIR" "$BL_CACHE_DIR" "$BL_BAK_DIR" "$BL_ACTIVE_DIR" \
-           "$EVENTS_DIR" "$SEC_EXPORT_DIR" 2>/dev/null
+           "$EVENTS_DIR" "$QUERY_DIR" "$SEC_EXPORT_DIR" 2>/dev/null
   chmod 0700 "$SEC_DIR" 2>/dev/null
+  chmod 0700 "$QUERY_DIR" 2>/dev/null
   return 0
 }
 sec_init_dirs
@@ -183,6 +190,22 @@ sec_hist_max() {
   _v=$(get_flag hist_max)
   case "$_v" in ''|*[!0-9]*) echo 1000; return ;; esac
   if [ "$_v" -ge 50 ] 2>/dev/null && [ "$_v" -le 10000 ] 2>/dev/null; then echo "$_v"; else echo 1000; fi
+}
+
+# Actividad DNS para la aplicacion nativa. No se activa sola: incluso si el
+# historial de bloqueos esta activo, el query_log completo permanece apagado.
+sec_query_mode() {
+  _v=$(get_flag query_mode)
+  case "$_v" in all|off) echo "$_v" ;; *) echo off ;; esac
+}
+sec_query_days() {
+  _v=$(get_flag query_days)
+  case "$_v" in 1|3|7) echo "$_v" ;; *) echo 1 ;; esac
+}
+sec_query_max() {
+  _v=$(get_flag query_max)
+  case "$_v" in ''|*[!0-9]*) echo 2000; return ;; esac
+  if [ "$_v" -ge 50 ] 2>/dev/null && [ "$_v" -le 10000 ] 2>/dev/null; then echo "$_v"; else echo 2000; fi
 }
 
 # ----------------------------------------------------------------------------
@@ -395,32 +418,54 @@ sec_build_allowed() {
 }
 
 # ----------------------------------------------------------------------------
-# Sincronizacion de bloques [blocked_names]/[allowed_names] en el TOML.
-# Setea SEC_TOML_CHANGED=0/1. Nunca deja un bloque apuntando a lista vacia.
+# Aplica los bloques gestionados de seguridad en un TOML candidato.
+# Nunca deja un bloque apuntando a una lista vacia. La actividad DNS completa
+# se mantiene separada de los eventos de bloqueo y solo aparece cuando
+# query_mode=all.
 # ----------------------------------------------------------------------------
-sec_sync_toml_blocks() {
-  SEC_TOML_CHANGED=0
-  _pre=$(sec_sha256 "$TOML")
-  if [ -s "$BL_BLOCKED" ]; then
+sec_apply_toml_security_blocks() {
+  _file="$1"; _blocked="$2"; _allowed="$3"
+  if [ -s "$_blocked" ]; then
     {
       echo "[blocked_names]"
-      echo "  blocked_names_file = '$BL_BLOCKED'"
-      if [ "$(sec_hist_mode)" != "off" ]; then
+      echo "  blocked_names_file = '$_blocked'"
+      if [ "$(sec_hist_mode)" != "off" ] || [ "$(sec_query_mode)" != "off" ]; then
         echo "  log_file = '$EVENTS_LOG'"
         echo "  log_format = 'tsv'"
       fi
-    } | sec_block_in_file "$TOML" security_blocked
+    } | sec_block_in_file "$_file" security_blocked
   else
-    sec_unblock_in_file "$TOML" security_blocked
+    sec_unblock_in_file "$_file" security_blocked
   fi
-  if [ -s "$BL_ALLOWED" ]; then
+  if [ -s "$_allowed" ]; then
     {
       echo "[allowed_names]"
-      echo "  allowed_names_file = '$BL_ALLOWED'"
-    } | sec_block_in_file "$TOML" security_allowed
+      echo "  allowed_names_file = '$_allowed'"
+      if [ "$(sec_query_mode)" != "off" ]; then
+        echo "  log_file = '$ALLOWED_LOG'"
+        echo "  log_format = 'tsv'"
+      fi
+    } | sec_block_in_file "$_file" security_allowed
   else
-    sec_unblock_in_file "$TOML" security_allowed
+    sec_unblock_in_file "$_file" security_allowed
   fi
+  if [ "$(sec_query_mode)" != "off" ]; then
+    {
+      echo "[query_log]"
+      echo "  file = '$QUERY_LOG'"
+      echo "  format = 'tsv'"
+    } | sec_block_in_file "$_file" query_activity
+  else
+    sec_unblock_in_file "$_file" query_activity
+  fi
+}
+
+# Sincronizacion de bloques [blocked_names]/[allowed_names] en el TOML.
+# Setea SEC_TOML_CHANGED=0/1. Nunca deja un bloque apuntando a lista vacia.
+sec_sync_toml_blocks() {
+  SEC_TOML_CHANGED=0
+  _pre=$(sec_sha256 "$TOML")
+  sec_apply_toml_security_blocks "$TOML" "$BL_BLOCKED" "$BL_ALLOWED"
   _post=$(sec_sha256 "$TOML")
   [ "$_pre" != "$_post" ] && SEC_TOML_CHANGED=1
   return 0
@@ -435,16 +480,7 @@ sec_config_check_candidate() {
   _bin=$(resolve_bin) || return 2
   _ct="$RUN_DIR/sec.candidate.toml.$$"
   cp -f "$TOML" "$_ct" 2>/dev/null || return 1
-  if [ -s "$_blocked" ]; then
-    printf '%s\n' "[blocked_names]" "  blocked_names_file = '$_blocked'" | sec_block_in_file "$_ct" security_blocked
-  else
-    sec_unblock_in_file "$_ct" security_blocked
-  fi
-  if [ -s "$_allowed" ]; then
-    printf '%s\n' "[allowed_names]" "  allowed_names_file = '$_allowed'" | sec_block_in_file "$_ct" security_allowed
-  else
-    sec_unblock_in_file "$_ct" security_allowed
-  fi
+  sec_apply_toml_security_blocks "$_ct" "$_blocked" "$_allowed"
   "$_bin" -config "$_ct" -check >/dev/null 2>&1
   _rc=$?
   rm -f "$_ct" 2>/dev/null
@@ -479,16 +515,9 @@ sec_regen_and_reload() {
   [ "$_sw" = "10" ] && _changed=1
   _tf="$TOML.new.$$"
   cp -f "$TOML" "$_tf" 2>/dev/null || { rm -f "$_tb" "$_ta" "$_tf"; return 1; }
-  if [ -s "$_tb" ]; then
-    {
-      echo "[blocked_names]"
-      echo "  blocked_names_file = '$BL_BLOCKED'"
-      if [ "$(sec_hist_mode)" != "off" ]; then echo "  log_file = '$EVENTS_LOG'"; echo "  log_format = 'tsv'"; fi
-    } | sec_block_in_file "$_tf" security_blocked
-  else sec_unblock_in_file "$_tf" security_blocked; fi
-  if [ -s "$_ta" ]; then
-    printf '%s\n' "[allowed_names]" "  allowed_names_file = '$BL_ALLOWED'" | sec_block_in_file "$_tf" security_allowed
-  else sec_unblock_in_file "$_tf" security_allowed; fi
+  # El TOML que se va a commitear debe apuntar a los nombres activos finales;
+  # los paths .new.$$ se usan solamente dentro de sec_config_check_candidate.
+  sec_apply_toml_security_blocks "$_tf" "$BL_BLOCKED" "$BL_ALLOWED"
   _pre_toml=$(sec_sha256 "$TOML"); _post_toml=$(sec_sha256 "$_tf")
   [ "$_pre_toml" != "$_post_toml" ] && _changed=1
   SEC_TOML_CHANGED=0; [ "$_pre_toml" != "$_post_toml" ] && SEC_TOML_CHANGED=1
@@ -1523,6 +1552,238 @@ sec_events_prune() {
   return 0
 }
 
+# Retencion de la actividad completa. El truncado conserva el inode para no
+# romper el descriptor que dnscrypt-proxy tenga abierto mientras escribe.
+sec_prune_activity_file() {
+  _f="$1"; _max="$2"; _days="$3"
+  [ -f "$_f" ] || return 0
+  _cut_epoch=$(( $(sec_now) - _days * 86400 ))
+  _cut_str=$(date -u -d "@$_cut_epoch" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
+  _tmp="$_f.tmp.$$"
+  if [ -n "$_cut_str" ]; then
+    awk -F '\t' -v cut="[$_cut_str" 'NF>=3 && $1 >= cut' "$_f" 2>/dev/null | tail -n "$_max" > "$_tmp"
+  else
+    tail -n "$_max" "$_f" > "$_tmp"
+  fi
+  if cmp -s "$_tmp" "$_f" 2>/dev/null; then
+    rm -f "$_tmp"; return 0
+  fi
+  cat "$_tmp" > "$_f" 2>/dev/null
+  rm -f "$_tmp"
+  chmod 0600 "$_f" 2>/dev/null
+  return 0
+}
+
+sec_query_prune() {
+  sec_prune_activity_file "$QUERY_LOG" "$(sec_query_max)" "$(sec_query_days)"
+  sec_prune_activity_file "$ALLOWED_LOG" "$(sec_query_max)" "$(sec_query_days)"
+  return 0
+}
+
+# Normaliza los tres orígenes locales a:
+#   tiempo, dominio, estado, regla, tipo, retorno, duracion, servidor, relay
+# La clave tiempo+dominio permite marcar una consulta como bloqueada sin
+# releer listas de hasta cinco millones de dominios.
+sec_activity_normalize() {
+  _out="$1"
+  _ev="$EVENTS_LOG"; [ -f "$_ev" ] || _ev=/dev/null
+  _al="$ALLOWED_LOG"; [ -f "$_al" ] || _al=/dev/null
+  _qu="$QUERY_LOG"; [ -f "$_qu" ] || _qu=/dev/null
+  awk -F '\t' -v OFS='\t' '
+    FILENAME == ARGV[1] {
+      if (NF >= 3 && $1 != "" && $3 != "") {
+        k = $1 SUBSEP $3
+        blocked[k] = $4
+        btime[k] = $1
+        bdom[k] = $3
+      }
+      next
+    }
+    FILENAME == ARGV[2] {
+      if (NF >= 3 && $1 != "" && $3 != "") {
+        k = $1 SUBSEP $3
+        allowed[k] = $4
+        atime[k] = $1
+        adom[k] = $3
+      }
+      next
+    }
+    FILENAME == ARGV[3] {
+      if (NF >= 3 && $1 != "" && $3 != "") {
+        k = $1 SUBSEP $3
+        queried[k] = 1
+        if (k in blocked) {
+          state = "blocked"; detail = blocked[k]
+        } else if (k in allowed) {
+          state = "allowlisted"; detail = allowed[k]
+        } else if (NF >= 5 && $5 != "" && $5 != "NOERROR") {
+          state = "error"; detail = ""
+        } else {
+          state = "allowed"; detail = ""
+        }
+        print $1, $3, state, detail, (NF >= 4 ? $4 : ""), \
+              (NF >= 5 ? $5 : ""), (NF >= 6 ? $6 : ""), \
+              (NF >= 7 ? $7 : ""), (NF >= 8 ? $8 : "")
+      }
+      next
+    }
+    END {
+      for (k in blocked) {
+        if (!(k in queried)) print btime[k], bdom[k], "blocked", blocked[k], "", "", "", "", ""
+      }
+      for (k in allowed) {
+        if (!(k in queried) && !(k in blocked)) print atime[k], adom[k], "allowlisted", allowed[k], "", "", "", "", ""
+      }
+    }
+  ' "$_ev" "$_al" "$_qu" > "$_out"
+  return 0
+}
+
+# API de actividad para la app nativa y, luego, para la WebUI compartida.
+# Todo sale del dispositivo: no hay servidor, cuenta ni telemetria remota.
+cmd_activity() {
+  _sub="${1:-status}"; shift 2>/dev/null
+  sec_init_dirs
+  case "$_sub" in
+    status)
+      _json=0; [ "${1:-}" = "--json" ] && _json=1
+      _mode=$(sec_query_mode); _enabled=false; [ "$_mode" != "off" ] && _enabled=true
+      _q=0; _a=0; _b=0
+      [ -f "$QUERY_LOG" ] && _q=$(wc -l < "$QUERY_LOG" 2>/dev/null | tr -d ' ')
+      [ -f "$ALLOWED_LOG" ] && _a=$(wc -l < "$ALLOWED_LOG" 2>/dev/null | tr -d ' ')
+      [ -f "$EVENTS_LOG" ] && _b=$(wc -l < "$EVENTS_LOG" 2>/dev/null | tr -d ' ')
+      if [ "$_json" = 1 ]; then
+        printf '{"enabled":%s,%s,"days":%s,"max_entries":%s,"queries_logged":%s,"allowlist_events":%s,"blocked_events":%s}\n' \
+          "$_enabled" "$(json_kv mode "$_mode")" "$(sec_query_days)" "$(sec_query_max)" \
+          "${_q:-0}" "${_a:-0}" "${_b:-0}"
+      else
+        if [ "$_enabled" = true ]; then echo "Actividad DNS : ACTIVA"; else echo "Actividad DNS : INACTIVA"; fi
+        echo "  consultas registradas : ${_q:-0}"
+        echo "  eventos allowlist     : ${_a:-0}"
+        echo "  eventos bloqueados    : ${_b:-0}"
+        echo "  retencion             : $(sec_query_days) dia(s) / max $(sec_query_max) entradas"
+      fi
+      ;;
+    enable)
+      _old=$(sec_query_mode); [ "$_old" = all ] && { echo "La actividad DNS ya esta activa."; return 0; }
+      set_flag query_mode all
+      : > "$QUERY_LOG" 2>/dev/null
+      : > "$ALLOWED_LOG" 2>/dev/null
+      chmod 0600 "$QUERY_LOG" "$ALLOWED_LOG" 2>/dev/null
+      if ! sec_regen_and_reload; then
+        set_flag query_mode off
+        sec_regen_and_reload >/dev/null 2>&1
+        echo "ERROR: no se pudo activar la actividad DNS; se conserva apagada." >&2
+        return 1
+      fi
+      echo "OK: actividad DNS activada (consultas locales, retencion limitada)."
+      ;;
+    disable)
+      _old=$(sec_query_mode); [ "$_old" = off ] && { echo "La actividad DNS ya esta inactiva."; return 0; }
+      set_flag query_mode off
+      if ! sec_regen_and_reload; then
+        set_flag query_mode all
+        sec_regen_and_reload >/dev/null 2>&1
+        echo "ERROR: no se pudo desactivar la actividad DNS; se conserva activa." >&2
+        return 1
+      fi
+      echo "OK: actividad DNS desactivada. Los archivos locales se conservaron para rollback; no se agregan nuevas consultas."
+      ;;
+    clear)
+      : > "$QUERY_LOG" 2>/dev/null
+      : > "$ALLOWED_LOG" 2>/dev/null
+      : > "$EVENTS_LOG" 2>/dev/null
+      chmod 0600 "$QUERY_LOG" "$ALLOWED_LOG" "$EVENTS_LOG" 2>/dev/null
+      log_msg "activity clear"
+      echo "OK: actividad DNS local borrada."
+      ;;
+    list)
+      sec_query_prune; sec_events_prune
+      _lim=100; _filter=""; _kind=""; _json=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --limit)
+            case "${2:-}" in ''|*[!0-9]*) _lim=100 ;; *) [ "$2" -le 200 ] 2>/dev/null && _lim="$2" || _lim=200 ;; esac
+            shift 2 ;;
+          --filter)
+            _filter=$(printf '%s' "${2:-}" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9.-')
+            shift 2 ;;
+          --kind)
+            case "${2:-}" in blocked|allowed|allowlisted|error) _kind="$2" ;; *) _kind="" ;; esac
+            shift 2 ;;
+          --json) _json=1; shift ;;
+          *) shift ;;
+        esac
+      done
+      _norm="$RUN_DIR/activity.norm.$$"; _sel="$RUN_DIR/activity.sel.$$"
+      sec_activity_normalize "$_norm"
+      awk -F '\t' -v f="$_filter" -v k="$_kind" \
+        'BEGIN { f=tolower(f) } { d=tolower($2); if (f != "" && index(d,f) == 0) next; if (k != "" && $3 != k) next; print }' \
+        "$_norm" | sort -r | head -n "$_lim" > "$_sel"
+      if [ "$_json" = 1 ]; then
+        _enabled=false; [ "$(sec_query_mode)" != off ] && _enabled=true
+        printf '{"enabled":%s,"events":[' "$_enabled"
+        _first=1
+        while IFS='	' read -r _t _dom _state _detail _qtype _rcode _duration _server _relay; do
+          [ -n "$_dom" ] || continue
+          _cat=""; [ "$_state" = blocked ] && _cat=$(sec_event_category "$_dom" "$_detail")
+          [ "$_first" = 1 ] || printf ','
+          _first=0
+          printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
+            "$(json_kv time "$_t")" "$(json_kv domain "$_dom")" "$(json_kv status "$_state")" \
+            "$(json_kv rule "$_detail")" "$(json_kv category "$_cat")" "$(json_kv query_type "$_qtype")" \
+            "$(json_kv return_code "$_rcode")" "$(json_kv duration "$_duration")" \
+            "$(json_kv server "$_server")" "$(json_kv relay "$_relay")"
+        done < "$_sel"
+        printf ']}\n'
+      else
+        if [ ! -s "$_sel" ]; then echo "(sin actividad DNS local registrada)"; else
+          echo "Actividad DNS (mas recientes primero, max $_lim):"
+          while IFS='	' read -r _t _dom _state _detail _qtype _rcode _duration _server _relay; do
+            [ -n "$_dom" ] || continue
+            printf '  %s  %-42s estado=%-11s' "$_t" "$_dom" "$_state"
+            [ -n "$_detail" ] && printf ' regla=%s' "$_detail"
+            [ -n "$_rcode" ] && printf ' retorno=%s' "$_rcode"
+            echo
+          done < "$_sel"
+        fi
+      fi
+      rm -f "$_norm" "$_sel" 2>/dev/null
+      ;;
+    stats)
+      sec_query_prune; sec_events_prune
+      _json=0; [ "${1:-}" = "--json" ] && _json=1
+      _norm="$RUN_DIR/activity.stats.$$"
+      sec_activity_normalize "$_norm"
+      _total=$(awk 'END { print NR + 0 }' "$_norm" 2>/dev/null)
+      _blocked=$(awk -F '\t' '$3 == "blocked" {n++} END {print n+0}' "$_norm" 2>/dev/null)
+      _allowed=$(awk -F '\t' '$3 == "allowed" {n++} END {print n+0}' "$_norm" 2>/dev/null)
+      _allowlisted=$(awk -F '\t' '$3 == "allowlisted" {n++} END {print n+0}' "$_norm" 2>/dev/null)
+      _errors=$(awk -F '\t' '$3 == "error" {n++} END {print n+0}' "$_norm" 2>/dev/null)
+      rm -f "$_norm" 2>/dev/null
+      if [ "$_json" = 1 ]; then
+        printf '{"total":%s,"blocked":%s,"allowed":%s,"allowlisted":%s,"errors":%s}\n' \
+          "${_total:-0}" "${_blocked:-0}" "${_allowed:-0}" "${_allowlisted:-0}" "${_errors:-0}"
+      else
+        echo "Actividad DNS local"
+        echo "  total       : ${_total:-0}"
+        echo "  bloqueadas  : ${_blocked:-0}"
+        echo "  permitidas  : ${_allowed:-0}"
+        echo "  allowlist   : ${_allowlisted:-0}"
+        echo "  errores     : ${_errors:-0}"
+      fi
+      ;;
+    prune)
+      sec_query_prune; sec_events_prune
+      echo "OK: retencion aplicada ($(sec_query_days) dia(s) / max $(sec_query_max) consultas)."
+      ;;
+    *)
+      echo "Uso: dnscrypt-manager activity {status [--json]|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|clear|prune}" >&2
+      return 1
+      ;;
+  esac
+}
+
 cmd_events() {
   _sub="${1:-list}"
   case "$_sub" in list|clear|export|stats|pause|resume|prune) shift 2>/dev/null ;; esac
@@ -1696,6 +1957,11 @@ sec_migrate() {
   [ -n "$(get_flag hist_mode)" ]  || set_flag hist_mode blocked || _err=1
   [ -n "$(get_flag hist_days)" ]  || set_flag hist_days 3 || _err=1
   [ -n "$(get_flag hist_max)" ]   || set_flag hist_max 1000 || _err=1
+  # Actividad DNS completa: aditiva y OFF por defecto para no cambiar la
+  # privacidad ni el rendimiento de instalaciones ya existentes.
+  [ -n "$(get_flag query_mode)" ] || set_flag query_mode off || _err=1
+  [ -n "$(get_flag query_days)" ] || set_flag query_days 1 || _err=1
+  [ -n "$(get_flag query_max)" ]  || set_flag query_max 2000 || _err=1
   sec_regen_and_reload --no-restart || _err=1
   if [ "$_err" -ne 0 ]; then
     touch "$MIGRATION_FAILED_FLAG" 2>/dev/null
@@ -1757,6 +2023,8 @@ sec_status_extra_json() {
   _prof=$(get_flag security_profile); [ -z "$_prof" ] && _prof=ninguno
   _bd=0; [ -f "$BL_BLOCKED" ] && _bd=$(wc -l < "$BL_BLOCKED" 2>/dev/null | tr -d ' ')
   _ev=0; [ -f "$EVENTS_LOG" ] && _ev=$(wc -l < "$EVENTS_LOG" 2>/dev/null | tr -d ' ')
-  printf '"failclosed":%s,"failclosed_engaged":%s,%s,"blocked_domains":%s,"events_count":%s,' \
-    "$_fcj" "$_fcej" "$(json_kv security_profile "$_prof")" "${_bd:-0}" "${_ev:-0}"
+  _qj=false; [ "$(sec_query_mode)" != off ] && _qj=true
+  _q=0; [ -f "$QUERY_LOG" ] && _q=$(wc -l < "$QUERY_LOG" 2>/dev/null | tr -d ' ')
+  printf '"failclosed":%s,"failclosed_engaged":%s,%s,"blocked_domains":%s,"events_count":%s,"activity_enabled":%s,"activity_queries_count":%s,' \
+    "$_fcj" "$_fcej" "$(json_kv security_profile "$_prof")" "${_bd:-0}" "${_ev:-0}" "$_qj" "${_q:-0}"
 }

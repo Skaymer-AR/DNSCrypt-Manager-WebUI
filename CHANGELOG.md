@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.1.1-rc3 — firewall por aplicación y correcciones de actividad (candidata)
+
+- Corrige la lectura de actividad para que un error de registro no convierta
+  estadísticas disponibles en ceros falsos.
+- Agrega un firewall opcional por aplicación, con controles separados para
+  IPv4 e IPv6 y reglas limitadas a las UID elegidas.
+- Repara una condición de carrera al capturar la salida de comandos root que
+  interrumpía la pantalla Actividad.
+- Esta candidata requiere validación final en un teléfono Motorola antes de
+  considerarse estable.
+
+## v1.1.1-rc2 — contrato de actividad DNS y base para app nativa (candidata)
+
+- Agrega `dnscrypt-manager activity` para exponer consultas DNS, bloqueos,
+  respuestas permitidas y bypass de allowlist en JSON local.
+- La captura completa queda apagada por defecto; al activarla usa `query_log`
+  de dnscrypt-proxy, retención acotada, archivos 0600 y borrado explícito.
+- Mantiene DNSCrypt Proxy como único motor, la descarga global sin activación
+  automática, el catálogo, allowlist, rollback y los límites existentes.
+- Agrega un esqueleto Android nativo separado de la WebUI. El build APK y la
+  instalación en el Motorola Edge 40 Pro siguen pendientes.
+- Esta candidata no es una release oficial ni debe marcarse estable sin prueba
+  física en el teléfono.
+
 ## v1.1.1-rc1 — parche de idioma (candidata)
 
 - Integra el inglés en las pantallas agregadas al catálogo: grupos, filtros,

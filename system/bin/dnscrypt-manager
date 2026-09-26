@@ -951,12 +951,20 @@ cmd_panic() {
   # Cancelar cualquier compilacion en curso (mata SOLO nuestro hijo, libera el
   # lock). NO borra catalogos, fuentes ni configuracion.
   command -v cat_compile_cancel >/dev/null 2>&1 && cat_compile_cancel >/dev/null 2>&1
+  _app_policy_reset_ok=0
+  if command -v app_policy_reset >/dev/null 2>&1 && app_policy_reset >/dev/null 2>&1; then
+    _app_policy_reset_ok=1
+  fi
   cmd_redirect remove 2>/dev/null
   cmd_stop 2>/dev/null
   set_flag failclosed 0 2>/dev/null
   command -v fc_release >/dev/null 2>&1 && fc_release
   touch "$DISABLE_FLAG" 2>/dev/null
-  echo "OK: modulo DESHABILITADO. Tu DNS volvio al del sistema."
+  if [ "$_app_policy_reset_ok" = 1 ]; then
+    echo "OK: modulo DESHABILITADO. Las reglas propias se retiraron y tu DNS volvio al del sistema."
+  else
+    echo "AVISO: DNS restaurado, pero no se pudo confirmar que las reglas propias del firewall por app se retiraran."
+  fi
   echo "Para reactivarlo: dnscrypt-manager enable"
   log_msg "PANIC ejecutado"
 }
@@ -969,6 +977,9 @@ cmd_restore_network() {
 }
 
 cmd_disable() {
+  if command -v app_policy_remove_rules >/dev/null 2>&1 && ! app_policy_remove_rules >/dev/null 2>&1; then
+    echo "AVISO: no se pudo confirmar la retirada de las reglas propias del firewall por app."
+  fi
   cmd_redirect remove >/dev/null 2>&1
   cmd_stop >/dev/null 2>&1
   touch "$DISABLE_FLAG" 2>/dev/null
@@ -979,6 +990,9 @@ cmd_disable() {
 cmd_enable() {
   rm -f "$DISABLE_FLAG" 2>/dev/null
   echo "Modulo habilitado. Arrancara en el proximo boot (o: dnscrypt-manager start)."
+  if command -v app_policy_restore >/dev/null 2>&1; then
+    app_policy_restore || echo "AVISO: no se pudieron restaurar las reglas del firewall por app."
+  fi
   log_msg "enable"
 }
 
@@ -1110,15 +1124,23 @@ cmd_set_flag() {
     hist_max)
       case "$2" in ''|*[!0-9]*) echo "ERROR: hist_max debe ser numerico (50..10000)" >&2; return 1 ;; esac
       { [ "$2" -ge 50 ] && [ "$2" -le 10000 ]; } 2>/dev/null || { echo "ERROR: hist_max fuera de rango (50..10000)" >&2; return 1; } ;;
+    query_mode)
+      case "$2" in all|off) : ;; *) echo "ERROR: query_mode acepta all|off" >&2; return 1 ;; esac ;;
+    query_days)
+      case "$2" in 1|3|7) : ;; *) echo "ERROR: query_days acepta 1|3|7" >&2; return 1 ;; esac ;;
+    query_max)
+      case "$2" in ''|*[!0-9]*) echo "ERROR: query_max debe ser numerico (50..10000)" >&2; return 1 ;; esac
+      { [ "$2" -ge 50 ] && [ "$2" -le 10000 ]; } 2>/dev/null || { echo "ERROR: query_max fuera de rango (50..10000)" >&2; return 1; } ;;
     *) echo "ERROR: flag no reconocido: $1" >&2
        echo "Flags: boot_redirect {0|1} | ipv6_mode {redirect|block} | prerouting {0|1}" >&2
        echo "       hist_mode {off|blocked|blocked_errors|diag} | hist_days {1|3|7} | hist_max {50..10000}" >&2
+       echo "       query_mode {off|all} | query_days {1|3|7} | query_max {50..10000}" >&2
        return 1 ;;
   esac
   set_flag "$1" "$2"
   echo "OK: $1 = $(get_flag "$1")"
   # Los flags de historial cambian el TOML (log on/off): regenerar si aplica.
-  case "$1" in hist_mode) command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload >/dev/null 2>&1 ;; esac
+  case "$1" in hist_mode|query_mode) command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload >/dev/null 2>&1 ;; esac
 }
 
 ##############################################################################
@@ -1174,6 +1196,8 @@ DNSCrypt Manager - comandos
     failclosed {status|enable [--confirmed]|disable}
     leak-test [--json]
     events [list [--limit N] [--filter S] [--json]|clear|export|stats|pause|resume]
+    activity {status [--json]|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|clear|prune}
+    app-policy {support [--json]|list [--json]|set PACKAGE block-internet|clear PACKAGE|clear-all|restore}
     migrate
 
   Catalogo de listas (v0.2.0-RC2):
@@ -1189,7 +1213,7 @@ DNSCrypt Manager - comandos
     import-bindhosts <directorio> [--dry-run|--confirmed]
     service {list [--json]|info <id>|set <id> <normal|15m|1h|boot|perm>|conflicts}
 
-    set-flag {boot_redirect|ipv6_mode|prerouting|hist_mode|hist_days|hist_max} <valor>
+    set-flag {boot_redirect|ipv6_mode|prerouting|hist_mode|hist_days|hist_max|query_mode|query_days|query_max} <valor>
     get-flag <clave>
     version | help
 EOF
@@ -1331,11 +1355,13 @@ cmd_app_policy() {
   command -v app_policy_support >/dev/null 2>&1 || { echo "ERROR: apppolicy.sh no cargado" >&2; return 1; }
   _s="${1:-support}"; shift 2>/dev/null
   case "$_s" in
-    support) app_policy_support ;;
-    list)    app_policy_list ;;
+    support) app_policy_support "${1:-}" ;;
+    list)    app_policy_list "${1:-}" ;;
     set)     [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "Uso: app-policy set PACKAGE POLICY" >&2; return 1; }; app_policy_set "$1" "$2" ;;
     clear)   [ -n "${1:-}" ] || { echo "Uso: app-policy clear PACKAGE" >&2; return 1; }; app_policy_clear "$1" ;;
-    *) echo "Uso: app-policy support|list|set PACKAGE POLICY|clear PACKAGE" >&2; return 1 ;;
+    clear-all) app_policy_clear_all ;;
+    restore) app_policy_restore ;;
+    *) echo "Uso: app-policy support [--json]|list [--json]|set PACKAGE block-internet|clear PACKAGE|clear-all|restore" >&2; return 1 ;;
   esac
 }
 
@@ -1457,6 +1483,7 @@ cmd_odoh() {
     failclosed)       require_seclib; cmd_failclosed "$@" ;;
     leak-test)        require_seclib; cmd_leak_test "$@" ;;
     events)           require_seclib; cmd_events "$@" ;;
+    activity)         require_seclib; cmd_activity "$@" ;;
     security-regen)   require_seclib; sec_regen_and_reload "$@" ;;
     migrate)          require_seclib; sec_migrate "$@" ;;
     catalog)          require_catlib; cmd_catalog "$@" ;;
