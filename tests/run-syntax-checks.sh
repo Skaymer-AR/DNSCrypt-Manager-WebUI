@@ -33,6 +33,7 @@ SHELL_FILES=(
   scripts/remove-redirect.sh scripts/restart.sh scripts/restore.sh scripts/start.sh
   scripts/stop.sh scripts/test-dns.sh scripts/security.sh scripts/catalog.sh
   scripts/apppolicy.sh
+  scripts/connections.sh
   system/bin/dnscrypt-manager
   META-INF/com/google/android/update-binary
 )

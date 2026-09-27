@@ -3,13 +3,28 @@
 # Solo usa cadenas propias y requiere owner de iptables en IPv4 e IPv6.
 AP_DIR="${DATA_DIR}/apppolicy"
 AP_STATE="$AP_DIR/policies.tsv"
+AP_TEMP_STATE="$AP_DIR/temporary.tsv"
+AP_PROFILES_STATE="$AP_DIR/profiles.tsv"
 AP_CHAIN="DCM_APP_OUT"
 
 ap_init() {
   mkdir -p "$AP_DIR" 2>/dev/null
   chmod 0700 "$AP_DIR" 2>/dev/null
   [ -f "$AP_STATE" ] || : > "$AP_STATE"
+  [ -f "$AP_TEMP_STATE" ] || : > "$AP_TEMP_STATE"
+  [ -f "$AP_PROFILES_STATE" ] || : > "$AP_PROFILES_STATE"
   chmod 0600 "$AP_STATE" 2>/dev/null
+  chmod 0600 "$AP_TEMP_STATE" 2>/dev/null
+  chmod 0600 "$AP_PROFILES_STATE" 2>/dev/null
+}
+
+_ap_temp_remove() {
+  _apt_pkg="$1"
+  [ -f "$AP_TEMP_STATE" ] || return 0
+  _apt_new="$AP_DIR/temporary.new.$$"
+  awk -F '\t' -v p="$_apt_pkg" '$1 != p {print}' "$AP_TEMP_STATE" > "$_apt_new" || { rm -f "$_apt_new"; return 1; }
+  chmod 0600 "$_apt_new" 2>/dev/null
+  mv -f "$_apt_new" "$AP_TEMP_STATE"
 }
 
 _ap_valid_package() {
@@ -217,6 +232,7 @@ _ap_normalize_state() {
 
 app_policy_restore() {
   ap_init
+  app_policy_sweep >/dev/null 2>&1 || true
   if [ -f "$DISABLE_FLAG" ]; then
     app_policy_remove_rules
     return $?
@@ -259,7 +275,9 @@ app_policy_list() {
       _ap_valid_uid "$_ap_uid" || continue
       [ "$_ap_first" = 1 ] || printf ','
       _ap_first=0
-      printf '{"package":"%s","policy":"%s","uid":%s}' "$_ap_pkg" "$_ap_policy" "$_ap_uid"
+      _ap_expires=$(awk -F '\t' -v p="$_ap_pkg" '$1==p && $2 ~ /^[0-9]+$/ {print $2; exit}' "$AP_TEMP_STATE" 2>/dev/null)
+      case "$_ap_expires" in ''|*[!0-9]*) _ap_expires=0 ;; esac
+      printf '{"package":"%s","policy":"%s","uid":%s,"expires_at":%s}' "$_ap_pkg" "$_ap_policy" "$_ap_uid" "$_ap_expires"
     done < "$AP_STATE"
     printf ']}\n'
   else
@@ -294,6 +312,7 @@ app_policy_set() {
     echo "result=state_write_failed"
     return 1
   fi
+  _ap_temp_remove "$_aps_pkg" >/dev/null 2>&1 || true
   command -v log_msg >/dev/null 2>&1 && log_msg "app-policy block-internet $_aps_pkg uid=$_aps_uid (applied)" 2>/dev/null
   echo "result=applied package=$_aps_pkg uid=$_aps_uid"
 }
@@ -314,6 +333,7 @@ app_policy_clear() {
       return 1
     }
     mv -f "$_apc_new" "$AP_STATE" 2>/dev/null || { rm -f "$_apc_new" 2>/dev/null; return 1; }
+    _ap_temp_remove "$_apc_pkg" >/dev/null 2>&1 || true
     echo "cleared=$_apc_pkg"
     echo "note=Sin soporte IPv4 e IPv6, las reglas activas propias se retiraron."
     return 0
@@ -326,6 +346,7 @@ app_policy_clear() {
     return 1
   fi
   mv -f "$_apc_new" "$AP_STATE" 2>/dev/null || { _ap_apply_state "$AP_STATE" >/dev/null 2>&1; return 1; }
+  _ap_temp_remove "$_apc_pkg" >/dev/null 2>&1 || true
   echo "cleared=$_apc_pkg"
 }
 
@@ -342,7 +363,133 @@ app_policy_clear_all() {
     return 1
   fi
   mv -f "$_apca_new" "$AP_STATE" 2>/dev/null || return 1
+  : > "$AP_TEMP_STATE"
+  chmod 0600 "$AP_TEMP_STATE" 2>/dev/null
   echo "result=cleared_all"
+}
+
+_ap_now() {
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && [ "${DCM_AP_TEST_NOW:-}" -gt 0 ] 2>/dev/null; then
+    echo "$DCM_AP_TEST_NOW"
+  else
+    date '+%s' 2>/dev/null
+  fi
+}
+
+app_policy_temp_block() {
+  _apt_pkg="$1"; _apt_duration="$2"
+  _ap_valid_package "$_apt_pkg" || { echo "ERROR: package invalido" >&2; return 1; }
+  case "$_apt_duration" in
+    15m) _apt_seconds=900 ;;
+    1h) _apt_seconds=3600 ;;
+    8h) _apt_seconds=28800 ;;
+    *) echo "ERROR: duracion invalida (usa 15m, 1h o 8h)" >&2; return 1 ;;
+  esac
+  _apt_now=$(_ap_now)
+  case "$_apt_now" in ''|*[!0-9]*) echo "ERROR: no se pudo leer la hora del sistema" >&2; return 1 ;; esac
+  _apt_expiry=$((_apt_now + _apt_seconds))
+  app_policy_set "$_apt_pkg" block-internet || return 1
+  _apt_new="$AP_DIR/temporary.new.$$"
+  { awk -F '\t' -v p="$_apt_pkg" '$1 != p {print}' "$AP_TEMP_STATE" 2>/dev/null
+    printf '%s\t%s\n' "$_apt_pkg" "$_apt_expiry"
+  } > "$_apt_new" || { rm -f "$_apt_new"; app_policy_clear "$_apt_pkg" >/dev/null 2>&1; return 1; }
+  chmod 0600 "$_apt_new" 2>/dev/null
+  if ! mv -f "$_apt_new" "$AP_TEMP_STATE"; then
+    rm -f "$_apt_new"
+    app_policy_clear "$_apt_pkg" >/dev/null 2>&1
+    echo "ERROR: no se pudo guardar el vencimiento" >&2
+    return 1
+  fi
+  if [ "${DNSCRYPT_TEST_MODE:-0}" != 1 ]; then
+    ( sleep "$_apt_seconds"; sh "$DCM_SELF" app-policy sweep >/dev/null 2>&1 ) >/dev/null 2>&1 &
+  fi
+  echo "result=applied_temporarily package=$_apt_pkg expires_at=$_apt_expiry"
+}
+
+app_policy_sweep() {
+  [ "${_AP_SWEEP_GUARD:-0}" != 1 ] || return 0
+  _AP_SWEEP_GUARD=1
+  ap_init
+  _aps_now=$(_ap_now)
+  case "$_aps_now" in ''|*[!0-9]*) unset _AP_SWEEP_GUARD; return 1 ;; esac
+  [ -s "$AP_TEMP_STATE" ] || { unset _AP_SWEEP_GUARD; return 0; }
+  _aps_expired="$AP_DIR/expired.$$"
+  while IFS="$(printf '\t')" read -r _aps_pkg _aps_expiry; do
+    _ap_valid_package "$_aps_pkg" || continue
+    case "$_aps_expiry" in ''|*[!0-9]*) _aps_expiry=0 ;; esac
+    if [ "$_aps_expiry" -le "$_aps_now" ] 2>/dev/null; then
+      printf '%s\n' "$_aps_pkg" >> "$_aps_expired"
+    fi
+  done < "$AP_TEMP_STATE"
+  if [ -s "$_aps_expired" ]; then
+    while IFS= read -r _aps_pkg; do
+      app_policy_clear "$_aps_pkg" >/dev/null 2>&1 || { rm -f "$_aps_expired"; unset _AP_SWEEP_GUARD; return 1; }
+    done < "$_aps_expired"
+    echo "result=expired_rules_cleared"
+  fi
+  rm -f "$_aps_expired" 2>/dev/null
+  unset _AP_SWEEP_GUARD
+}
+
+_ap_valid_profile_name() {
+  [ "${#1}" -ge 1 ] && [ "${#1}" -le 32 ] || return 1
+  case "$1" in *"  "*) return 1 ;; esac
+  [ "$(LC_ALL=C printf '%s' "$1" | tr -cd 'A-Za-z0-9 _-')" = "$1" ] || return 1
+  case "$1" in " "*|*" ") return 1 ;; esac
+  return 0
+}
+
+_ap_valid_package_csv() {
+  _apvc_rest="$1"
+  [ -n "$_apvc_rest" ] || return 0
+  while [ -n "$_apvc_rest" ]; do
+    case "$_apvc_rest" in *,*) _apvc_pkg=${_apvc_rest%%,*}; _apvc_rest=${_apvc_rest#*,} ;; *) _apvc_pkg=$_apvc_rest; _apvc_rest="" ;; esac
+    _ap_valid_package "$_apvc_pkg" || return 1
+  done
+}
+
+app_policy_profiles() {
+  ap_init
+  _app_sub="$1"; shift 2>/dev/null
+  case "$_app_sub" in
+    list)
+      if [ "${1:-}" = "--json" ]; then
+        printf '{"profiles":['; _app_first=1
+        while IFS="$(printf '\t')" read -r _app_name _app_packages; do
+          _ap_valid_profile_name "$_app_name" || continue
+          [ "$_app_first" = 1 ] || printf ','; _app_first=0
+          printf '{"name":"%s","packages":[' "$_app_name"
+          _app_comma=; _app_rest="$_app_packages"
+          while [ -n "$_app_rest" ]; do
+            case "$_app_rest" in *,*) _app_pkg=${_app_rest%%,*}; _app_rest=${_app_rest#*,} ;; *) _app_pkg=$_app_rest; _app_rest="" ;; esac
+            _ap_valid_package "$_app_pkg" || continue
+            printf '%s"%s"' "$_app_comma" "$_app_pkg"; _app_comma=,
+          done
+          printf ']}'
+        done < "$AP_PROFILES_STATE"
+        printf ']}\n'
+      else
+        [ -s "$AP_PROFILES_STATE" ] && cat "$AP_PROFILES_STATE" || echo "(sin perfiles)"
+      fi ;;
+    save)
+      _app_name="${1:-}"; _app_packages="${2:-}"
+      _ap_valid_profile_name "$_app_name" || { echo "ERROR: nombre de perfil inválido" >&2; return 1; }
+      _ap_valid_package_csv "$_app_packages" || { echo "ERROR: lista de paquetes inválida" >&2; return 1; }
+      _app_new="$AP_DIR/profiles.new.$$"
+      awk -F '\t' -v n="$_app_name" '$1 != n {print}' "$AP_PROFILES_STATE" > "$_app_new" || { rm -f "$_app_new"; return 1; }
+      printf '%s\t%s\n' "$_app_name" "$_app_packages" >> "$_app_new"
+      [ "$(wc -l < "$_app_new" | tr -d ' ')" -le 20 ] || { rm -f "$_app_new"; echo "ERROR: máximo 20 perfiles" >&2; return 1; }
+      chmod 0600 "$_app_new" 2>/dev/null; mv -f "$_app_new" "$AP_PROFILES_STATE" || return 1
+      echo "result=saved name=$_app_name" ;;
+    remove)
+      _app_name="${1:-}"
+      _ap_valid_profile_name "$_app_name" || { echo "ERROR: nombre de perfil inválido" >&2; return 1; }
+      _app_new="$AP_DIR/profiles.new.$$"
+      awk -F '\t' -v n="$_app_name" '$1 != n {print}' "$AP_PROFILES_STATE" > "$_app_new" || { rm -f "$_app_new"; return 1; }
+      chmod 0600 "$_app_new" 2>/dev/null; mv -f "$_app_new" "$AP_PROFILES_STATE" || return 1
+      echo "result=removed name=$_app_name" ;;
+    *) echo "Uso: app-policy profile list [--json]|save NAME PACKAGE[,PACKAGE...]|remove NAME" >&2; return 1 ;;
+  esac
 }
 
 app_policy_reset() {
@@ -350,7 +497,9 @@ app_policy_reset() {
   app_policy_remove_rules
   _ap_remove_status=$?
   : > "$AP_STATE"
+  : > "$AP_TEMP_STATE"
   chmod 0600 "$AP_STATE" 2>/dev/null
+  chmod 0600 "$AP_TEMP_STATE" 2>/dev/null
   echo "result=reset"
   [ "$_ap_remove_status" = 0 ]
 }

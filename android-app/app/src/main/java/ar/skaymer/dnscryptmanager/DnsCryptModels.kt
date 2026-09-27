@@ -70,6 +70,8 @@ data class DashboardSnapshot(
     val activitySupported: Boolean,
     val events: List<ActivityEvent>,
     val stats: ActivityStats,
+    val activityRetentionDays: Int = 1,
+    val activityMaxEntries: Int = 2000,
 )
 
 data class FirewallSupport(
@@ -82,7 +84,19 @@ data class FirewallSupport(
 data class FirewallData(
     val support: FirewallSupport?,
     val blockedUids: Set<Int>,
+    val temporaryRules: Map<String, Long> = emptyMap(),
+    val profiles: List<FirewallProfile> = emptyList(),
     val error: String? = null,
+)
+
+data class FirewallProfile(val name: String, val packages: List<String>)
+
+data class ConnectionEvent(
+    val protocol: String,
+    val remoteAddress: String,
+    val remotePort: Int,
+    val uid: Int,
+    val state: String,
 )
 
 data class FirewallApp(
@@ -112,6 +126,12 @@ data class DnsCryptUiState(
     val allowlistLoading: Boolean = false,
     val firewall: FirewallSupport? = null,
     val firewallBlockedUids: Set<Int> = emptySet(),
+    val firewallTemporaryRules: Map<String, Long> = emptyMap(),
+    val firewallProfiles: List<FirewallProfile> = emptyList(),
     val firewallLoading: Boolean = false,
     val firewallError: String? = null,
+    val allowlistLoaded: Boolean = false,
+    val connections: List<ConnectionEvent> = emptyList(),
+    val connectionsLoading: Boolean = false,
+    val connectionsError: String? = null,
 )

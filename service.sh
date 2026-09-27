@@ -73,6 +73,8 @@ fi
   # 2c. Barrer excepciones temporales caducas (o de boots anteriores) antes de
   #     regenerar/arrancar. No depende de cron.
   run_cli temporary-allow sweep >> "$LOG" 2>&1
+  # Expira políticas temporales del firewall; también limpia reglas viejas al volver de un reinicio.
+  run_cli app-policy sweep >> "$LOG" 2>&1
 
   # 3. Arrancar el daemon (la CLI maneja binario faltante / config invalida)
   log "arrancando dnscrypt-proxy"
