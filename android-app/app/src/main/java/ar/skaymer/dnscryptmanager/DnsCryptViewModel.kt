@@ -288,7 +288,8 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
                 val selectedPackage = installed.packageNames.firstOrNull() ?: continue
                 val shouldBlock = installed.packageNames.any { it in desired }
                 val isBlocked = installed.uid in current.blockedUids
-                if (shouldBlock == isBlocked) continue
+                val isTemporary = installed.packageNames.any { it in current.temporaryRules }
+                if (shouldBlock == isBlocked && !(shouldBlock && isTemporary)) continue
                 val result = if (shouldBlock) {
                     repository.blockApp(selectedPackage)
                 } else {
