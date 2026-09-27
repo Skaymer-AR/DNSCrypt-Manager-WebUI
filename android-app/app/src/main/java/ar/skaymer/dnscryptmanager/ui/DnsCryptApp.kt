@@ -552,7 +552,7 @@ private fun ActivityScreen(
         }
         Spacer(Modifier.height(12.dp))
         if (connectionMode) {
-            ConnectionsBody(state, onRefreshConnections)
+            ConnectionsBody(state, onRefreshConnections, Modifier.weight(1f))
         } else if (!snapshot.activitySupported) {
             QuietCard(Icons.Outlined.Info, "Registro no disponible", "La versión instalada del módulo todavía no expone la actividad DNS local.")
             return@Column
@@ -660,7 +660,7 @@ private fun ActivityScreen(
 }
 
 @Composable
-private fun ConnectionsBody(state: DnsCryptUiState, onRefresh: () -> Unit) {
+private fun ConnectionsBody(state: DnsCryptUiState, onRefresh: () -> Unit, modifier: Modifier) {
     val context = LocalContext.current
     val appResult by produceState<Result<List<FirewallApp>>?>(null, context) {
         value = try {
@@ -672,7 +672,7 @@ private fun ConnectionsBody(state: DnsCryptUiState, onRefresh: () -> Unit) {
         }
     }
     val appsByUid = appResult?.getOrNull().orEmpty().associateBy { it.uid }
-    Column(Modifier.fillMaxWidth().weight(1f)) {
+    Column(modifier.fillMaxWidth()) {
         QuietCard(
             Icons.Outlined.Info,
             "Muestra en vivo, sin historial",
