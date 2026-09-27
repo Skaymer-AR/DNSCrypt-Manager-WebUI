@@ -291,12 +291,12 @@ cmd_start() {
   if have setsid; then
     (
       cd "$CONF_DIR" &&
-      setsid sh -c 'printf "%s\n" "$" > "$1"; shift; exec nohup "$@"' dcm-start "$PIDFILE" "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1
+      setsid sh -c 'printf "%s\n" "$$" > "$1"; shift; exec nohup "$@"' dcm-start "$PIDFILE" "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1
     ) &
   else
     (
       cd "$CONF_DIR" &&
-      sh -c 'printf "%s\n" "$" > "$1"; shift; exec nohup "$@"' dcm-start "$PIDFILE" "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1
+      sh -c 'printf "%s\n" "$$" > "$1"; shift; exec nohup "$@"' dcm-start "$PIDFILE" "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1
     ) &
   fi
 
