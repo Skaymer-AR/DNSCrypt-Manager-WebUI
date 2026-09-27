@@ -689,7 +689,7 @@ private fun ConnectionsBody(state: DnsCryptUiState, onRefresh: () -> Unit, modif
             }
         } else {
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                items(state.connections, key = { "${it.protocol}-${it.uid}-${it.remoteAddress}-${it.remotePort}-${it.state}" }) { connection ->
+                items(state.connections.mapIndexed { index, connection -> index to connection }, key = { it.first }) { (_, connection) ->
                     ConnectionRow(connection, appsByUid[connection.uid]?.label ?: "UID ${connection.uid}")
                 }
             }

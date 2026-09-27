@@ -70,11 +70,10 @@ fi
   log "verificando esquema y metadatos locales"
   run_cli migrate >> "$LOG" 2>&1 || log "migracion reporto error (se continua con cuidado)"
 
-  # 2c. Barrer excepciones temporales caducas (o de boots anteriores) antes de
-  #     regenerar/arrancar. No depende de cron.
+  # 2c. Limpiar estados caducados y volver a aplicar las reglas guardadas del firewall.
+  #     Android recrea sus tablas de red en cada arranque.
   run_cli temporary-allow sweep >> "$LOG" 2>&1
-  # Expira políticas temporales del firewall; también limpia reglas viejas al volver de un reinicio.
-  run_cli app-policy sweep >> "$LOG" 2>&1
+  run_cli app-policy restore >> "$LOG" 2>&1
 
   # 3. Arrancar el daemon (la CLI maneja binario faltante / config invalida)
   log "arrancando dnscrypt-proxy"

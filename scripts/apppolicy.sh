@@ -414,16 +414,16 @@ app_policy_sweep() {
   case "$_aps_now" in ''|*[!0-9]*) unset _AP_SWEEP_GUARD; return 1 ;; esac
   [ -s "$AP_TEMP_STATE" ] || { unset _AP_SWEEP_GUARD; return 0; }
   _aps_expired="$AP_DIR/expired.$$"
-  while IFS="$(printf '\t')" read -r _aps_pkg _aps_expiry; do
-    _ap_valid_package "$_aps_pkg" || continue
-    case "$_aps_expiry" in ''|*[!0-9]*) _aps_expiry=0 ;; esac
-    if [ "$_aps_expiry" -le "$_aps_now" ] 2>/dev/null; then
-      printf '%s\n' "$_aps_pkg" >> "$_aps_expired"
+  while IFS="$(printf '\t')" read -r _aps_sweep_pkg _aps_sweep_expiry; do
+    _ap_valid_package "$_aps_sweep_pkg" || continue
+    case "$_aps_sweep_expiry" in ''|*[!0-9]*) _aps_sweep_expiry=0 ;; esac
+    if [ "$_aps_sweep_expiry" -le "$_aps_now" ] 2>/dev/null; then
+      printf '%s\n' "$_aps_sweep_pkg" >> "$_aps_expired"
     fi
   done < "$AP_TEMP_STATE"
   if [ -s "$_aps_expired" ]; then
-    while IFS= read -r _aps_pkg; do
-      app_policy_clear "$_aps_pkg" >/dev/null 2>&1 || { rm -f "$_aps_expired"; unset _AP_SWEEP_GUARD; return 1; }
+    while IFS= read -r _aps_sweep_pkg; do
+      app_policy_clear "$_aps_sweep_pkg" >/dev/null 2>&1 || { rm -f "$_aps_expired"; unset _AP_SWEEP_GUARD; return 1; }
     done < "$_aps_expired"
     echo "result=expired_rules_cleared"
   fi

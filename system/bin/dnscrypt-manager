@@ -888,10 +888,16 @@ cmd_provider() {
 ##############################################################################
 _valid_app_cache_file() {
   _vac_path="$1"
-  _vac_root="/data/user/0/ar.skaymer.dnscryptmanager/cache"
-  [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ] && _vac_root="${DNSCRYPT_TEST_APP_CACHE:-}"
-  [ -n "$_vac_root" ] || return 1
-  case "$_vac_path" in "$_vac_root"/dcm-backup-[A-Za-z0-9-]*.tar.gz) ;; *) return 1 ;; esac
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ]; then
+    _vac_root="${DNSCRYPT_TEST_APP_CACHE:-}"
+    [ -n "$_vac_root" ] || return 1
+    case "$_vac_path" in "$_vac_root"/dcm-backup-[A-Za-z0-9-]*.tar.gz) ;; *) return 1 ;; esac
+  else
+    case "$_vac_path" in /data/user/*/ar.skaymer.dnscryptmanager/cache/dcm-backup-[A-Za-z0-9-]*.tar.gz) ;; *) return 1 ;; esac
+    _vac_user=${_vac_path#/data/user/}
+    _vac_user=${_vac_user%%/*}
+    case "$_vac_user" in ''|*[!0-9]*) return 1 ;; esac
+  fi
   case "$_vac_path" in *[!A-Za-z0-9_./-]*|*"/../"*|*/..|*/./*) return 1 ;; esac
   [ ! -L "$_vac_path" ]
 }
@@ -900,7 +906,7 @@ _backup_tar_file_list() {
   _btf_out="$1"
   : > "$_btf_out" || return 1
   for _btf_path in \
-    config run/state.env schema_version \
+    config/dnscrypt-proxy.toml run/state.env schema_version \
     security/allowlist.txt security/exceptions.tsv security/blocklists/sources.d \
     catalog/enabled.txt catalog/custom.tsv catalog/blacklist.txt \
     apppolicy/policies.tsv apppolicy/temporary.tsv apppolicy/profiles.tsv; do
@@ -928,6 +934,7 @@ _validate_backup_archive() {
     case "$_vba_path" in /*|*"/../"*|../*|*/..|*"/./"*|*[!A-Za-z0-9._/-]*) rm -f "$_vba_list"; return 1 ;; esac
     case "$_vba_path" in "./"*) _vba_rel=${_vba_path#./} ;; *) _vba_rel="$_vba_path" ;; esac
     case "$_vba_rel" in *'..'*) rm -f "$_vba_list"; return 1 ;; esac
+    _vba_rel=${_vba_rel%/}
     if [ "$_vba_app_only" = yes ]; then
       case "$_vba_rel" in
         config|config/dnscrypt-proxy.toml|run|run/state.env|schema_version|security|security/allowlist.txt|security/exceptions.tsv|security/blocklists|security/blocklists/sources.d|security/blocklists/sources.d/*.src|catalog|catalog/enabled.txt|catalog/custom.tsv|catalog/blacklist.txt|apppolicy|apppolicy/policies.tsv|apppolicy/temporary.tsv|apppolicy/profiles.tsv) : ;;
@@ -940,7 +947,43 @@ _validate_backup_archive() {
     rm -f "$_vba_list" "$_vba_verbose"
     return 1
   fi
+  while IFS= read -r _vba_path; do
+    case "$_vba_path" in "./"*) _vba_rel=${_vba_path#./} ;; *) _vba_rel="$_vba_path" ;; esac
+    _vba_rel=${_vba_rel%/}
+    _vba_expected_type=""
+    case "$_vba_rel" in
+      config|run|security|security/blocklists|security/blocklists/sources.d|catalog|apppolicy) _vba_expected_type=d ;;
+      config/dnscrypt-proxy.toml|run/state.env|schema_version|security/allowlist.txt|security/exceptions.tsv|security/blocklists/sources.d/*.src|catalog/enabled.txt|catalog/custom.tsv|catalog/blacklist.txt|apppolicy/policies.tsv|apppolicy/temporary.tsv|apppolicy/profiles.tsv) _vba_expected_type=- ;;
+    esac
+    [ -n "$_vba_expected_type" ] || continue
+    _vba_actual_type=$(awk -v p="$_vba_rel" '{ t=substr($1,1,1); n=$NF; sub(/\/$/,"",n); sub(/^\.\//,"",n); if(n==p){print t; exit} }' "$_vba_verbose")
+    if [ "$_vba_actual_type" != "$_vba_expected_type" ]; then
+      rm -f "$_vba_list" "$_vba_verbose"
+      return 1
+    fi
+  done < "$_vba_list"
   rm -f "$_vba_list" "$_vba_verbose"
+  return 0
+}
+
+_restore_app_backup_stage() {
+  _rbs_stage="$1"
+  [ -s "$_rbs_stage/config/dnscrypt-proxy.toml" ] || { echo "ERROR: falta la configuración DNS en la copia" >&2; return 1; }
+  cmd_config_validate "$_rbs_stage/config/dnscrypt-proxy.toml" >/dev/null 2>&1 || { echo "ERROR: la configuración DNS de la copia no valida" >&2; return 1; }
+  for _rbs_path in config/dnscrypt-proxy.toml run/state.env schema_version security/allowlist.txt security/exceptions.tsv security/blocklists/sources.d catalog/enabled.txt catalog/custom.tsv catalog/blacklist.txt apppolicy/policies.tsv apppolicy/temporary.tsv apppolicy/profiles.tsv; do
+    [ -e "$_rbs_stage/$_rbs_path" ] || continue
+    _rbs_dest="$DATA_DIR/$_rbs_path"
+    mkdir -p "$(dirname "$_rbs_dest")" || return 1
+    rm -rf "$_rbs_dest" || return 1
+    if [ -d "$_rbs_stage/$_rbs_path" ]; then
+      mkdir -p "$_rbs_dest" || return 1
+      cp -R "$_rbs_stage/$_rbs_path/." "$_rbs_dest/" || return 1
+    else
+      cp -f "$_rbs_stage/$_rbs_path" "$_rbs_dest" || return 1
+    fi
+  done
+  chmod 0600 "$DATA_DIR/run/state.env" "$DATA_DIR/security/allowlist.txt" "$DATA_DIR/security/exceptions.tsv" "$DATA_DIR/apppolicy/policies.tsv" "$DATA_DIR/apppolicy/temporary.tsv" 2>/dev/null || true
+  chmod 0700 "$DATA_DIR/security" "$DATA_DIR/apppolicy" 2>/dev/null || true
   return 0
 }
 
@@ -977,13 +1020,23 @@ cmd_restore() {
     *.tar.gz)
       have tar || { echo "ERROR: tar no disponible" >&2; return 1; }
       _validate_backup_archive "$_f" no || { echo "ERROR: el archivo contiene rutas inválidas o enlaces" >&2; return 1; }
-      toml_backup >/dev/null
-      _stage="$RUN_DIR/restore-general.$$"
+      _stage="$RUN_DIR/restore-general.$"
       rm -rf "$_stage"; mkdir -m 0700 -p "$_stage" || return 1
       tar -xzf "$_f" -C "$_stage" 2>/dev/null || { rm -rf "$_stage"; echo "ERROR: no se pudo extraer el archivo" >&2; return 1; }
-      cp -R "$_stage/." "$CONF_DIR/" || { rm -rf "$_stage"; echo "ERROR: no se pudo copiar la configuración" >&2; return 1; }
-      rm -rf "$_stage"
-      echo "OK: backup restaurado. Reinicia: dnscrypt-manager restart" ;;
+      if [ -s "$_stage/config/dnscrypt-proxy.toml" ]; then
+        cmd_backup >/dev/null || { rm -rf "$_stage"; echo "ERROR: no se pudo guardar el estado actual" >&2; return 1; }
+        _restore_app_backup_stage "$_stage" || { rm -rf "$_stage"; echo "ERROR: no se pudo restaurar la copia" >&2; return 1; }
+        rm -rf "$_stage"
+        command -v app_policy_restore >/dev/null 2>&1 && app_policy_restore >/dev/null 2>&1 || true
+        command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload --no-restart || { echo "ERROR: se restauraron los archivos, pero no se pudo regenerar el filtro DNS" >&2; return 1; }
+        cmd_restart
+        echo "OK: backup restaurado. El módulo se reinició."
+      else
+        toml_backup >/dev/null
+        cp -R "$_stage/." "$CONF_DIR/" || { rm -rf "$_stage"; echo "ERROR: no se pudo copiar la configuración" >&2; return 1; }
+        rm -rf "$_stage"
+        echo "OK: backup de configuración restaurado. Reinicia: dnscrypt-manager restart"
+      fi ;;
     *.toml|*.bak)
       toml_backup >/dev/null
       cp -f "$_f" "$TOML"; chmod 0600 "$TOML" 2>/dev/null
@@ -1006,20 +1059,7 @@ cmd_restore_app_backup() {
     echo "ERROR: no se pudo extraer la copia" >&2
     return 1
   fi
-  [ -s "$_stage/config/dnscrypt-proxy.toml" ] || { rm -rf "$_stage"; echo "ERROR: falta la configuración DNS en la copia" >&2; return 1; }
-  cmd_config_validate "$_stage/config/dnscrypt-proxy.toml" >/dev/null 2>&1 || { rm -rf "$_stage"; echo "ERROR: la configuración DNS de la copia no valida" >&2; return 1; }
-  for _path in config run/state.env schema_version security/allowlist.txt security/exceptions.tsv security/blocklists/sources.d catalog/enabled.txt catalog/custom.tsv catalog/blacklist.txt apppolicy/policies.tsv apppolicy/temporary.tsv apppolicy/profiles.tsv; do
-    [ -e "$_stage/$_path" ] || continue
-    mkdir -p "$(dirname "$DATA_DIR/$_path")" || { rm -rf "$_stage"; return 1; }
-    if [ -d "$_stage/$_path" ]; then
-      mkdir -p "$DATA_DIR/$_path"
-      cp -R "$_stage/$_path/." "$DATA_DIR/$_path/" || { rm -rf "$_stage"; echo "ERROR: no se pudo restaurar $_path" >&2; return 1; }
-    else
-      cp -f "$_stage/$_path" "$DATA_DIR/$_path" || { rm -rf "$_stage"; echo "ERROR: no se pudo restaurar $_path" >&2; return 1; }
-    fi
-  done
-  chmod 0600 "$DATA_DIR/run/state.env" "$DATA_DIR/security/allowlist.txt" "$DATA_DIR/security/exceptions.tsv" "$DATA_DIR/apppolicy/policies.tsv" "$DATA_DIR/apppolicy/temporary.tsv" 2>/dev/null
-  chmod 0700 "$DATA_DIR/security" "$DATA_DIR/apppolicy" 2>/dev/null
+  _restore_app_backup_stage "$_stage" || { rm -rf "$_stage"; echo "ERROR: no se pudo restaurar la copia" >&2; return 1; }
   rm -rf "$_stage"
   command -v app_policy_restore >/dev/null 2>&1 && app_policy_restore >/dev/null 2>&1 || true
   command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload --no-restart || {
