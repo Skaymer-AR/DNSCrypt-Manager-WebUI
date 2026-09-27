@@ -287,12 +287,20 @@ cmd_start() {
   # aunque haya arrancado bien y deba seguir vivo. 'setsid' (disponible
   # via toybox/busybox en Android; si no esta, se cae a nohup solo) lo
   # vuelve lider de un grupo propio, totalmente independiente.
+  rm -f "$PIDFILE" 2>/dev/null
   if have setsid; then
-    ( cd "$CONF_DIR" && exec setsid nohup "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1 ) &
+    (
+      cd "$CONF_DIR" &&
+      setsid sh -c 'printf "%s\\n" "$" > "$1"; shift; exec nohup "$@"' dcm-start "$PIDFILE" "$BIN" -config "$TOML" \
+        >> "$DAEMON_LOG" 2>&1
+    ) &
   else
-    ( cd "$CONF_DIR" && exec nohup "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1 ) &
+    (
+      cd "$CONF_DIR" &&
+      sh -c 'printf "%s\\n" "$" > "$1"; shift; exec nohup "$@"' dcm-start "$PIDFILE" "$BIN" -config "$TOML" \
+        >> "$DAEMON_LOG" 2>&1
+    ) &
   fi
-  echo $! > "$PIDFILE"
 
   # Esperar, con timeout acotado (hasta ~15s, en pasos de 1s por
   # portabilidad: 'sleep' fraccionario no esta garantizado en
