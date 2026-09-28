@@ -374,6 +374,7 @@ echo
 echo "=== [5] test-dns: 4 etapas reales ==="
 call_cli start >/dev/null 2>&1
 OUR_PID="$(read_test_pid)"
+echo "  prueba DNS: pidfile=$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null || true), tracked=$OUR_PID"
 OUT=$(call_cli test-dns 2>&1)
 echo "$OUT" | grep -q '^\[1/4\]' && echo "$OUT" | grep -q '^\[2/4\]' && \
 echo "$OUT" | grep -q '^\[3/4\]' && echo "$OUT" | grep -q '^\[4/4\]' && \
@@ -539,6 +540,7 @@ echo
 echo "=== [12] NextDNS: stamp verificado contra tools/stamps.py ==="
 call_cli start >/dev/null 2>&1
 OUR_PID="$(read_test_pid)"
+echo "  prueba NextDNS: pidfile=$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null || true), tracked=$OUR_PID"
 call_cli nextdns abcdef >/dev/null 2>&1
 STAMP=$(grep -o 'sdns://[A-Za-z0-9_-]*' "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml" | tail -n1)
 "$PYTHON_BIN" - "$STAMP" << 'EOF'
@@ -648,6 +650,7 @@ echo
 echo "=== [14e] dos llamadas CONCURRENTES a 'status --json' ==="
 call_cli start >/dev/null 2>&1
 OUR_PID="$(read_test_pid)"
+echo "  prueba concurrente: pidfile=$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null || true), tracked=$OUR_PID"
 ( call_cli status --json > "$SCRATCH/concurrent1.json" 2>"$SCRATCH/concurrent1.err" ) &
 CPID1=$!
 EXTRA_PIDS="$EXTRA_PIDS $CPID1"
@@ -670,7 +673,11 @@ fi
 ##############################################################################
 echo
 echo "=== [15] Confirmaciones de aislamiento ==="
-call_cli stop >/dev/null 2>&1
+_FINAL_PIDFILE=$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null)
+echo "  antes de stop: pidfile=${_FINAL_PIDFILE:-vacio}, tracked=${OUR_PID:-vacio}"
+call_cli stop >"$SCRATCH/final-stop.txt" 2>&1
+_FINAL_STOP_RC=$?
+echo "  stop: rc=$_FINAL_STOP_RC; $(cat "$SCRATCH/final-stop.txt")"
 sleep 0.3
 if [ -z "$OUR_PID" ] || ! pid_is_alive_as "$OUR_PID" "dnscrypt-proxy"; then
   ok "ningun proceso propio sigue vivo al terminar (verificado por cmdline, no solo PID)"
