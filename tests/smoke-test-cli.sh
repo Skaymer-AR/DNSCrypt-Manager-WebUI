@@ -75,7 +75,8 @@ pid_is_alive_as() {
   _pid="$1"; _needle="$2"
   [ -n "$_pid" ] || return 1
   [ -r "/proc/$_pid/cmdline" ] || return 1
-  tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -qF -- "$_needle"
+  _cmdline=$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null) || return 1
+  case "$_cmdline" in *"$_needle"*) return 0 ;; *) return 1 ;; esac
 }
 
 ##############################################################################
@@ -205,6 +206,41 @@ s.close()
 " 2>/dev/null
 }
 
+report_port_holders() {
+  "$PYTHON_BIN" - "$TEST_PORT" <<'PY'
+import os, sys
+port = int(sys.argv[1])
+inodes = set()
+for table in ("udp", "udp6", "tcp", "tcp6"):
+    try:
+        with open(f"/proc/net/{table}") as f:
+            next(f, None)
+            for line in f:
+                fields = line.split()
+                if len(fields) > 9 and int(fields[1].rsplit(":", 1)[1], 16) == port:
+                    inodes.add(fields[9])
+    except (OSError, ValueError, IndexError):
+        pass
+found = False
+for name in os.listdir("/proc"):
+    if not name.isdigit():
+        continue
+    pid = int(name)
+    try:
+        owned = {os.readlink(f"/proc/{pid}/fd/{fd}") for fd in os.listdir(f"/proc/{pid}/fd")}
+        matches = [link[8:-1] for link in owned if link.startswith("socket:[") and link.endswith("]") and link[8:-1] in inodes]
+        if matches:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\\0", b" ").decode(errors="replace").strip()
+            state = next((x.split("\t", 1)[1].strip() for x in open(f"/proc/{pid}/status") if x.startswith("State:")), "?")
+            print(f"  socket owner PID={pid} state={state} inode={','.join(matches)} cmd={cmd or '[sin cmdline]'}")
+            found = True
+    except (OSError, PermissionError):
+        pass
+if not found:
+    print("  no se pudo correlacionar el socket con un PID via /proc")
+PY
+}
+
 ##############################################################################
 # 0) Desplegar copia aislada + puerto dinamico
 ##############################################################################
@@ -284,7 +320,12 @@ kill -9 "$DECOY" 2>/dev/null; wait "$DECOY" 2>/dev/null
 EXTRA_PIDS=""
 rm -f "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid"
 sleep 0.3
-bind_port_free "$TEST_PORT" && ok "puerto $TEST_PORT libre tras matar impostor+señuelo" || bad "puerto $TEST_PORT sigue ocupado"
+if bind_port_free "$TEST_PORT"; then
+  ok "puerto $TEST_PORT libre tras matar impostor+señuelo"
+else
+  bad "puerto $TEST_PORT sigue ocupado tras matar impostor+señuelo"
+  report_port_holders
+fi
 
 ##############################################################################
 # 4) start NO debe declarar exito con el puerto ya ocupado por otro proceso
@@ -636,7 +677,12 @@ if [ -z "$OUR_PID" ] || ! pid_is_alive_as "$OUR_PID" "dnscrypt-proxy"; then
 else
   bad "el PID $OUR_PID sigue vivo (confirmado por cmdline) al terminar"
 fi
-bind_port_free "$TEST_PORT" && ok "puerto $TEST_PORT libre al terminar" || bad "puerto $TEST_PORT sigue ocupado al terminar"
+if bind_port_free "$TEST_PORT"; then
+  ok "puerto $TEST_PORT libre al terminar"
+else
+  bad "puerto $TEST_PORT sigue ocupado al terminar"
+  report_port_holders
+fi
 if [ ! -e /data/adb ]; then
   ok "/data/adb no existe (nunca se toco)"
 else
@@ -645,12 +691,12 @@ fi
 # Barrido final riguroso: ningun proceso hijo de este arbol de pruebas
 # (fake-dnscrypt-proxy o los fixtures de firewall) debe seguir vivo.
 STRAY=$(find /proc -maxdepth 1 -name '[0-9]*' 2>/dev/null | while read -r p; do
-  pid_is_alive_as "${p#/proc/}" "dnscrypt-proxy" && echo "${p#/proc/}"
+  pid_is_alive_as "${p#/proc/}" "$DNSCRYPT_TEST_DATA_DIR/bin/dnscrypt-proxy" && echo "${p#/proc/}"
 done)
 if [ -z "$STRAY" ]; then
-  ok "barrido final: ningun proceso fake-dnscrypt-proxy residual en todo el sistema"
+  ok "barrido final: ningun proceso fake-dnscrypt-proxy de esta prueba quedo vivo"
 else
-  bad "barrido final: procesos residuales detectados: $STRAY"
+  bad "barrido final: procesos fake-dnscrypt-proxy residuales: $STRAY"
   for p in $STRAY; do kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; done
 fi
 
