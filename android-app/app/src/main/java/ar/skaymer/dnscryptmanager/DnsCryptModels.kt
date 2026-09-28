@@ -29,6 +29,30 @@ data class ActivityStats(
     val available: Boolean = false,
 )
 
+data class ActivitySnapshotData(
+    val enabled: Boolean,
+    val stats: ActivityStats,
+    val events: List<ActivityEvent>,
+)
+
+data class DiagnosticCheck(
+    val title: String,
+    val state: String,
+    val detail: String,
+)
+
+data class BackupPreview(
+    val entryCount: Int,
+    val savedSourceCount: Int,
+    val hasDnsConfig: Boolean,
+    val hasAllowlist: Boolean,
+    val hasEnabledLists: Boolean,
+    val hasCustomSources: Boolean,
+    val hasFirewallRules: Boolean,
+    val hasFirewallProfiles: Boolean,
+    val includesActivity: Boolean,
+)
+
 data class CatalogGroup(
     val key: String,
     val count: Int,
@@ -113,6 +137,10 @@ data class DnsCryptUiState(
     val snapshot: DashboardSnapshot? = null,
     val activityLoading: Boolean = false,
     val activityError: String? = null,
+    val diagnostics: List<DiagnosticCheck> = emptyList(),
+    val diagnosticsRunning: Boolean = false,
+    val restoreBackupPath: String? = null,
+    val backupPreview: BackupPreview? = null,
     val error: String? = null,
     val notice: String? = null,
     val busyAction: String? = null,

@@ -70,6 +70,14 @@ grep -q '^com.foo.temp[[:space:]]block-internet[[:space:]]10123$' "$TR/data/appp
 DCM_AP_TEST_OWNER=yes DCM_AP_TEST_IPV6_OWNER=yes DCM_AP_TEST_UID=10123 DCM_AP_TEST_NOW=1900 "$SH" "$M" app-policy sweep >/dev/null 2>&1
 ! grep -q '^com.foo.temp[[:space:]]' "$TR/data/apppolicy/policies.tsv" && ok 'el barrido elimina la regla vencida' || bad 'temp-after-expiry'
 
+# La limpieza de otra regla vencida no debe pisar el paquete que se está agregando.
+printf 'com.foo.expired\t1900\n' > "$TR/data/apppolicy/temporary.tsv"
+printf 'com.foo.expired\tblock-internet\t10123\n' > "$TR/data/apppolicy/policies.tsv"
+DCM_AP_TEST_OWNER=yes DCM_AP_TEST_IPV6_OWNER=yes DCM_AP_TEST_UID=10123 DCM_AP_TEST_NOW=1900 "$SH" "$M" app-policy set com.foo.target block-internet >/dev/null 2>&1
+grep -qx 'com.foo.target[[:space:]]block-internet[[:space:]]10123' "$TR/data/apppolicy/policies.tsv" && \
+  ! grep -q '^com.foo.expired[[:space:]]' "$TR/data/apppolicy/policies.tsv" && \
+  ok 'al agregar una app, sweep vencido elimina la anterior sin pisar el paquete nuevo' || bad 'sweep-clobbers-target'
+
 DCM_AP_TEST_OWNER=yes DCM_AP_TEST_IPV6_OWNER=yes DCM_AP_TEST_UID=10123 "$SH" "$M" app-policy clear-all >/dev/null 2>&1
 [ ! -f "$FAKE_FW_STATE/iptables.filter.DCM_APP_OUT.exists" ] && ok 'clear-all retira solo la cadena IPv4 propia' || bad 'clear-all-v4'
 [ ! -f "$FAKE_FW_STATE/ip6tables.filter.DCM_APP_OUT.exists" ] && ok 'clear-all retira solo la cadena IPv6 propia' || bad 'clear-all-v6'

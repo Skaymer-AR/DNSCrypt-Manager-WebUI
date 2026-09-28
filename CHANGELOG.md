@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.1-rc5 — actividad confiable y controles guiados (candidata)
+
+- Actividad carga contadores y consultas en una sola lectura. Si no se puede
+  actualizar, conserva lo último leído y muestra el error con una acción para
+  reintentar; no presenta una falla como si fueran ceros.
+- Agrega un diagnóstico en Inicio para revisar módulo, proxy, redirección,
+  consulta DNS real, listas y soporte del firewall por app, cada uno por separado.
+- Permite encender listas preparadas de una categoría en un solo paso. No descarga
+  listas ni activa fuentes incompatibles o sin caché; revierte la selección si
+  falla la compilación. También muestra la cuenta regresiva de bloqueos temporales.
+- Antes de restaurar una copia, valida el archivo y muestra qué ajustes reemplaza.
+  El historial DNS queda en el teléfono. La app pasa a 0.3.1 (versionCode 4);
+  el módulo pasa a v1.1.1-rc5 (versionCode 11015).
+- Requiere instalar y probar el APK y el módulo en el teléfono antes de marcar
+  esta candidata como estable.
+
 ## v1.1.1-rc4 — firewall, conexiones y copias desde Android (candidata)
 
 - Agrega perfiles guardables del firewall y bloqueos por app con vencimiento

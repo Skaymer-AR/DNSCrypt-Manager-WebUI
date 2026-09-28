@@ -148,6 +148,8 @@ else
   python3 "$ROOT/tools/build-catalog.py" --check || fail "El catalogo generado no es reproducible (build-catalog.py --check)."
   echo "  --- tests/smoke-test-catalog.sh ---"
   bash "$ROOT/tests/smoke-test-catalog.sh" || fail "tests/smoke-test-catalog.sh fallo. No hay release con tests rotos."
+  echo "  --- tests/smoke-test-catalog-group.sh (activación por categoría con rollback) ---"
+  bash "$ROOT/tests/smoke-test-catalog-group.sh" || fail "tests/smoke-test-catalog-group.sh fallo. No hay release con activación por categoría rota."
   echo "  --- tests/smoke-test-catalog-bootstrap.sh (upgrade schema 3 sin índice) ---"
   bash "$ROOT/tests/smoke-test-catalog-bootstrap.sh" || fail "tests/smoke-test-catalog-bootstrap.sh fallo. No hay release con catalogo inaccesible."
   echo "  --- tests/smoke-test-catalog-download-all.sh (job asíncrono y límites 5M) ---"

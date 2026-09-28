@@ -1720,10 +1720,87 @@ cat_test_source() {
 # ---------------------------------------------------------------------------
 cat_json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
+cat_group_apply() {
+  _cga_action="$1"; _cga_group="$2"
+  case "$_cga_group" in
+    Security|Privacy|ParentalControl|dcm|RethinkUnassigned|rethink_unassigned) : ;;
+    *) echo "ERROR: grupo invalido" >&2; return 2 ;;
+  esac
+  [ "$_cga_group" = RethinkUnassigned ] && _cga_group=rethink_unassigned
+  case "$_cga_action" in enable|disable) : ;; *) echo "ERROR: accion de grupo invalida" >&2; return 2 ;; esac
+  cat_ensure_index || return 1
+  if cat_download_all_running; then
+    echo "ERROR: esperá a que termine la preparación de listas antes de cambiar una categoría." >&2
+    return 1
+  fi
+
+  _cga_ids="$RUN_DIR/catalog.group.ids.$$"
+  _cga_before="$RUN_DIR/catalog.group.enabled.$$"
+  _cga_compile_log="$RUN_DIR/catalog.group.compile.$$"
+  awk -F '\t' -v custom_file="$CAT_CUSTOM" -v index_file="$CAT_INDEX" -v wanted="$_cga_group" '
+    function group_key(    g) {
+      if ($20=="") g="dcm"
+      else if ($21=="") g="rethink_unassigned"
+      else g=$21
+      return g
+    }
+    FILENAME == custom_file || FILENAME == index_file {
+      if ($1=="" || $1 ~ /^#/) next
+      if ($1!="" && group_key()==wanted && !seen[$1]++) print $1
+    }
+  ' "$CAT_CUSTOM" "$CAT_INDEX" > "$_cga_ids" || { rm -f "$_cga_ids"; return 1; }
+  [ -s "$_cga_ids" ] || { rm -f "$_cga_ids"; echo "ERROR: la categoría no tiene fuentes." >&2; return 1; }
+  cp -p "$CAT_ENABLED" "$_cga_before" || { rm -f "$_cga_ids"; echo "ERROR: no se pudo guardar el estado previo." >&2; return 1; }
+
+  _cga_changed=0; _cga_skipped=0
+  while IFS= read -r _cga_id; do
+    [ -n "$_cga_id" ] || continue
+    if [ "$_cga_action" = enable ]; then
+      cat_is_enabled "$_cga_id" && continue
+      # Una acción de categoría no inicia descargas ni activa fuentes heredadas
+      # o incompatibles en bloque. Lo que no esté listo sigue apagado.
+      if [ ! -s "$CAT_CACHE_DIR/$_cga_id.list" ] || [ "$(cat_field "$_cga_id" 13)" = 1 ] || ! cat_activation_check "$_cga_id" >/dev/null 2>&1; then
+        _cga_skipped=$((_cga_skipped + 1)); continue
+      fi
+      if cat_enable "$_cga_id" >/dev/null 2>&1; then
+        _cga_changed=$((_cga_changed + 1))
+      else
+        _cga_skipped=$((_cga_skipped + 1))
+      fi
+    else
+      if cat_is_enabled "$_cga_id"; then
+        cat_disable "$_cga_id" || { cp -p "$_cga_before" "$CAT_ENABLED"; rm -f "$_cga_ids" "$_cga_before" "$_cga_compile_log"; return 1; }
+        _cga_changed=$((_cga_changed + 1))
+      fi
+    fi
+  done < "$_cga_ids"
+  rm -f "$_cga_ids"
+
+  if [ "$_cga_changed" -eq 0 ]; then
+    rm -f "$_cga_before"
+    echo "OK: categoría sin cambios; 0 fuentes modificadas, $_cga_skipped omitidas por no estar preparadas o ser incompatibles."
+    return 0
+  fi
+  if ! cat_compile > "$_cga_compile_log" 2>&1; then
+    cp -p "$_cga_before" "$CAT_ENABLED"
+    chmod 0600 "$CAT_ENABLED" 2>/dev/null
+    cat_compile >/dev/null 2>&1 || log_msg "[BLOCKLIST] ERROR rollback compile failed after group update"
+    rm -f "$_cga_before" "$_cga_compile_log"
+    echo "ERROR: falló la compilación; se restauró el estado anterior de la categoría." >&2
+    return 1
+  fi
+  rm -f "$_cga_before" "$_cga_compile_log"
+  echo "OK: categoría actualizada; $_cga_changed fuentes modificadas, $_cga_skipped omitidas por no estar preparadas o ser incompatibles."
+}
+
 cmd_catalog() {
   cat_init_dirs
   _sub="${1:-list}"; shift 2>/dev/null
   case "$_sub" in
+    group)
+      _action="${1:-}"; _group="${2:-}"
+      cat_group_apply "$_action" "$_group"
+      ;;
     sync)
       cat_sync_index || return 1
       echo "OK: index del catalogo sincronizado ($(cat_all_ids | wc -l | tr -d ' ') entradas)."
@@ -1999,7 +2076,7 @@ cmd_catalog() {
       esac ;;
 
     *)
-      echo "Uso: dnscrypt-manager catalog {list [--json][--search S][--category C][--maintainer M][--enabled][--recommended][--archived]|info <id>|enable <id>|disable <id>|update [id|enabled|all]|download-all --confirmed|download-all status --json|rollback <id>|manifest|provenance|compile|conflicts [id1 id2]|metrics <id>|test <id>|custom ...|sync}" >&2
+      echo "Uso: dnscrypt-manager catalog {list ...|info <id>|enable <id>|disable <id>|group <enable|disable> <categoria>|update [id|enabled|all]|download-all --confirmed|download-all status --json|rollback <id>|manifest|provenance|compile|conflicts|metrics|test|custom ...|sync}" >&2
       return 1 ;;
   esac
 }

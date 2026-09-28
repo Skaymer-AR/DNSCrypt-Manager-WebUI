@@ -46,6 +46,11 @@ internal class RootShell(private val tempDirectory: File) {
             override val args = listOf("activity", "stats", "--json")
             override val timeoutSeconds = 45L
         }
+        data class ActivitySnapshot(val limit: Int = 200) : Command {
+            init { require(limit in 1..200) }
+            override val args = listOf("activity", "snapshot", "--limit", limit.toString(), "--json")
+            override val timeoutSeconds = 60L
+        }
         data object ActivityEnable : Command { override val args = listOf("activity", "enable") }
         data object ActivityDisable : Command { override val args = listOf("activity", "disable") }
         data object ActivityClear : Command { override val args = listOf("activity", "clear") }
@@ -115,6 +120,11 @@ internal class RootShell(private val tempDirectory: File) {
             override val args = listOf("restore-app-backup", inputPath)
             override val timeoutSeconds = 180L
         }
+        data class BackupInspect(val inputPath: String) : Command {
+            init { require(isAppCacheName(inputPath)) }
+            override val args = listOf("backup", "inspect", "--input", inputPath)
+            override val timeoutSeconds = 60L
+        }
 
         data object CatalogGroups : Command { override val args = listOf("catalog", "groups", "--json") }
         data class CatalogList(val group: String) : Command {
@@ -131,6 +141,11 @@ internal class RootShell(private val tempDirectory: File) {
             init { require(validCatalogId(id)) }
             override val args = listOf("catalog", "disable", id)
             override val timeoutSeconds = 180L
+        }
+        data class CatalogGroupApply(val group: String, val enabled: Boolean) : Command {
+            init { require(group in CATALOG_GROUPS) }
+            override val args = listOf("catalog", "group", if (enabled) "enable" else "disable", group)
+            override val timeoutSeconds = 600L
         }
         data object CatalogDownloadAllStart : Command {
             override val args = listOf("catalog", "download-all", "--confirmed")
@@ -170,6 +185,7 @@ internal class RootShell(private val tempDirectory: File) {
         val artifactPath = when (command) {
             is Command.BackupExport -> command.outputPath
             is Command.BackupRestore -> command.inputPath
+            is Command.BackupInspect -> command.inputPath
             else -> null
         }
         if (artifactPath != null && !isAppCacheArtifact(artifactPath)) {

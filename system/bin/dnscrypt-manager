@@ -994,6 +994,11 @@ _restore_app_backup_stage() {
 }
 
 cmd_backup() {
+  if [ "${1:-}" = inspect ]; then
+    [ "${2:-}" = "--input" ] && [ -n "${3:-}" ] || { echo "Uso: backup inspect --input archivo.tar.gz" >&2; return 2; }
+    cmd_backup_inspect "$3"
+    return $?
+  fi
   if [ "${1:-}" = "--output" ]; then
     _out="${2:-}"
     _valid_app_cache_file "$_out" || { echo "ERROR: ruta de copia no permitida" >&2; return 1; }
@@ -1017,6 +1022,31 @@ cmd_backup() {
   [ "$_external" = no ] || chmod 0644 "$_out" 2>/dev/null
   rm -f "$_list"
   echo "OK: copia de configuración creada en $_out"
+}
+
+cmd_backup_inspect() {
+  _cbi_file="$1"
+  _valid_app_cache_file "$_cbi_file" && [ -f "$_cbi_file" ] || { echo "ERROR: archivo de copia no válido" >&2; return 1; }
+  _validate_backup_archive "$_cbi_file" yes || { echo "ERROR: la copia está dañada o contiene rutas no permitidas" >&2; return 1; }
+  _cbi_list="$RUN_DIR/backup-inspect.$$"
+  tar -tzf "$_cbi_file" 2>/dev/null | sed 's#^\./##' > "$_cbi_list" || { rm -f "$_cbi_list"; echo "ERROR: no se pudo leer el contenido de la copia" >&2; return 1; }
+  _cbi_has() { grep -qxF "$1" "$_cbi_list" 2>/dev/null; }
+  _cbi_bool() { _cbi_has "$1" && printf true || printf false; }
+  _cbi_files=$(wc -l < "$_cbi_list" 2>/dev/null | tr -d ' ')
+  _cbi_sources=$(awk '/^security\/blocklists\/sources\.d\/[^/]+\.src$/ { n++ } END { print n+0 }' "$_cbi_list")
+  if ! _cbi_has config/dnscrypt-proxy.toml; then
+    rm -f "$_cbi_list"
+    echo "ERROR: falta la configuración DNS; el archivo no se puede restaurar desde la app." >&2
+    return 1
+  fi
+  printf '{"valid":true,"entry_count":%s,"saved_source_count":%s,"dns_config":true,"allowlist":%s,"enabled_lists":%s,"custom_sources":%s,"firewall_rules":%s,"firewall_profiles":%s,"activity_included":false}\n' \
+    "${_cbi_files:-0}" "${_cbi_sources:-0}" \
+    "$(_cbi_bool security/allowlist.txt)" \
+    "$(_cbi_bool catalog/enabled.txt)" \
+    "$(_cbi_bool catalog/custom.tsv)" \
+    "$([ -e "$_cbi_list" ] && { _cbi_has apppolicy/policies.tsv || _cbi_has apppolicy/temporary.tsv; } && printf true || printf false)" \
+    "$(_cbi_bool apppolicy/profiles.tsv)"
+  rm -f "$_cbi_list"
 }
 
 cmd_restore() {
@@ -1336,6 +1366,7 @@ DNSCrypt Manager - comandos
   Backups:
     backup | restore <archivo> | list-backups
     backup --output <archivo.tar.gz> | restore-app-backup <archivo.tar.gz>
+    backup inspect --input <archivo.tar.gz> (valida y muestra qué contiene, sin extraer)
 
   EMERGENCIA:
     panic                  todo abajo + red restaurada + modulo off
@@ -1357,7 +1388,7 @@ DNSCrypt Manager - comandos
     failclosed {status|enable [--confirmed]|disable}
     leak-test [--json]
     events [list [--limit N] [--filter S] [--json]|clear|export|stats|pause|resume]
-    activity {status [--json]|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|clear|prune}
+    activity {status [--json]|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|snapshot [--limit N] --json|clear|prune}
     app-policy {support|list|profile|set|temp-block|clear|clear-all|restore|sweep}
     connections             conexiones IP activas por UID (muestra puntual)
     migrate
@@ -1365,6 +1396,7 @@ DNSCrypt Manager - comandos
   Catalogo de listas (v0.2.0-RC2):
     catalog list [--json][--search S][--category C][--maintainer M][--enabled][--recommended][--archived]
     catalog info <id> | enable <id> | disable <id>
+    catalog group <enable|disable> <Security|Privacy|ParentalControl|dcm|RethinkUnassigned>
     catalog update [id|enabled|all] | download-all --confirmed
     catalog download-all status --json | compile
     catalog conflicts [id1 id2] | metrics <id> | test <id>

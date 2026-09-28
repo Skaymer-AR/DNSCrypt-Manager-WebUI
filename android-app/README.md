@@ -6,17 +6,22 @@ Aplicación nativa en español para manejar el módulo DNSCrypt desde el teléfo
 
 - Ver si `dnscrypt-proxy` escucha y si la redirección DNS está activa.
 - Consultar las estadísticas y los eventos DNS locales cuando la versión del módulo ofrece esa función.
+- Ejecutar un diagnóstico guiado de módulo, proxy, redirección, prueba DNS, listas y soporte del firewall.
 - Revisar las apps instaladas y bloquear o permitir su tráfico de internet con el firewall por UID, si el teléfono confirma soporte IPv4 e IPv6.
 - Activar o pausar el registro local; empieza apagado.
 - Explorar el catálogo real por categorías, buscar y filtrar fuentes activas o recomendadas.
 - Activar o desactivar una fuente con confirmación antes de cambiar el filtrado.
+- Activar de una vez las fuentes ya preparadas de una categoría; lo que no tenga caché queda apagado y no se descarga en segundo plano.
 - Preparar las cachés de todas las fuentes sin activarlas automáticamente y ver el progreso.
 - Agregar o quitar dominios de la allowlist.
 - Elegir Cloudflare, Quad9, AdGuard, Mullvad o un perfil NextDNS y reiniciar el proxy para aplicar el cambio.
+- Revisar qué contiene una copia antes de restaurarla. La actividad DNS no se incluye.
 
 La interfaz usa Kotlin, Jetpack Compose y Material 3. El puente root ejecuta únicamente operaciones concretas y validadas del CLI `dnscrypt-manager`; no acepta comandos escritos libremente.
 
 Al iniciar, la app consulta primero el estado del módulo y carga la actividad local en segundo plano. Si KernelSU Next solicita acceso root, hay que aprobarlo; si una orden no responde, la app muestra un diagnóstico y permite reintentar.
+
+Actividad lee eventos y contadores juntos. Ante un error conserva los datos anteriores y los distingue de una lectura válida sin consultas. El diagnóstico ejecuta una prueba DNS real; si esa prueba falla, el módulo intenta restaurar el estado de red.
 
 ## Límites actuales
 
@@ -25,6 +30,7 @@ Al iniciar, la app consulta primero el estado del módulo y carga la actividad l
 - Para mostrar el selector local, Android permite consultar los paquetes instalados. La lista y sus nombres se procesan en el teléfono y no se envían a un servidor.
 - Los perfiles de seguridad, el rollback de listas y la validación avanzada siguen disponibles en la WebUI del módulo; todavía no tienen controles nativos propios.
 - Cambiar resolver reinicia `dnscrypt-proxy` y puede pausar la conectividad unos segundos.
+- El diagnóstico no identifica qué aplicación inició cada consulta DNS; el firewall sigue siendo un control de tráfico completo por app.
 - Compilar el APK no prueba que funcione en el Motorola. La primera instalación física debe comprobar permiso root, lectura del módulo, actividad, catálogo, allowlist, firewall por Wi‑Fi y datos, cambio de resolver y conectividad por hotspot.
 
 ## Build y evidencia

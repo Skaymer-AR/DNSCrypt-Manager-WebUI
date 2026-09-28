@@ -18,7 +18,16 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
     private val _state = MutableStateFlow(DnsCryptUiState())
     val state: StateFlow<DnsCryptUiState> = _state.asStateFlow()
 
-    init { refresh() }
+    init {
+        app.cacheDir.listFiles { _, name -> name.startsWith("dcm-backup-import-") && name.endsWith(".tar.gz") }
+            ?.forEach { it.delete() }
+        refresh()
+    }
+
+    override fun onCleared() {
+        _state.value.restoreBackupPath?.let { java.io.File(it).delete() }
+        super.onCleared()
+    }
 
     fun refresh() {
         if (_state.value.busyAction != null) return
@@ -146,6 +155,11 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
         afterSuccess = { refreshSnapshot() },
     )
 
+    fun retryActivity() {
+        if (_state.value.activityLoading || _state.value.busyAction != null) return
+        viewModelScope.launch { refreshActivityData() }
+    }
+
     fun clearActivity() = runAction(
         action = "Borrando la actividad…",
         success = "La actividad DNS local se borró.",
@@ -172,6 +186,32 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
         }
     }
 
+    fun runDiagnostics() {
+        if (_state.value.diagnosticsRunning || _state.value.busyAction != null) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(
+                diagnosticsRunning = true,
+                busyAction = "Revisando módulo, DNS y firewall…",
+                error = null,
+                notice = null,
+            )
+            try {
+                val checks = repository.runDiagnostics()
+                _state.value = _state.value.copy(diagnostics = checks, diagnosticsRunning = false, busyAction = null)
+                refreshSnapshot()
+                refreshFirewall()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    diagnostics = listOf(DiagnosticCheck("Conexión con el módulo", "attention", error.message ?: "No se pudo completar el diagnóstico.")),
+                    diagnosticsRunning = false,
+                    busyAction = null,
+                )
+            }
+        }
+    }
+
     fun setActivityRetention(days: Int, maxEntries: Int) = runAction(
         action = "Actualizando la retención…",
         success = "Retención actualizada y aplicada a los registros guardados.",
@@ -189,6 +229,18 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
             _state.value = _state.value.copy(catalogGroups = repository.loadCatalogGroups())
             refreshSnapshot()
         },
+    )
+
+    fun setCatalogGroupEnabled(group: String, enabled: Boolean) = runAction(
+        action = if (enabled) "Activando listas preparadas de ${catalogGroupLabel(group)}…" else "Desactivando las listas de ${catalogGroupLabel(group)}…",
+        success = "",
+        operation = { repository.setCatalogGroupEnabled(group, enabled) },
+        afterSuccess = {
+            loadCatalogGroupInternal(_state.value.selectedCatalogGroup)
+            _state.value = _state.value.copy(catalogGroups = repository.loadCatalogGroups())
+            refreshSnapshot()
+        },
+        afterFailure = { refreshCatalog() },
     )
 
     fun startDownloadAll() = runAction(
@@ -350,7 +402,7 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
                         ?: error("No se pudo abrir el destino elegido.")
                     output.use { target -> file.inputStream().use { it.copyTo(target) } }
                 }
-                _state.value = _state.value.copy(busyAction = null, notice = "Copia creada. Incluye ajustes y listas guardadas, no el historial de dominios DNS.")
+                _state.value = _state.value.copy(busyAction = null, notice = "Copia creada. No incluye historial DNS ni cachés descargadas del catálogo.")
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 _state.value = _state.value.copy(busyAction = null, error = error.message ?: "No se pudo guardar la copia.")
@@ -360,11 +412,18 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
         }
     }
 
-    fun restoreBackup(uri: Uri) {
+    fun inspectBackup(uri: Uri) {
         if (_state.value.busyAction != null) return
+        _state.value.restoreBackupPath?.let { java.io.File(it).delete() }
         viewModelScope.launch {
-            val file = java.io.File(app.cacheDir, "dcm-backup-${java.util.UUID.randomUUID()}.tar.gz")
-            _state.value = _state.value.copy(busyAction = "Validando y restaurando la copia…", error = null, notice = null)
+            val file = java.io.File(app.cacheDir, "dcm-backup-import-${java.util.UUID.randomUUID()}.tar.gz")
+            _state.value = _state.value.copy(
+                busyAction = "Validando la copia sin restaurarla…",
+                error = null,
+                notice = null,
+                backupPreview = null,
+                restoreBackupPath = null,
+            )
             try {
                 withContext(Dispatchers.IO) {
                     val input = app.contentResolver.openInputStream(uri) ?: error("No se pudo leer el archivo elegido.")
@@ -382,23 +441,61 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
                         }
                     }
                 }
-                val result = repository.restoreBackup(file.absolutePath)
-                if (!result.ok) {
-                    _state.value = _state.value.copy(busyAction = null, error = result.output.ifBlank { "No se pudo restaurar la copia." })
-                    refreshSnapshot()
-                    refreshFirewall()
-                    return@launch
+                val preview = repository.inspectBackup(file.absolutePath)
+                _state.value = _state.value.copy(
+                    busyAction = null,
+                    backupPreview = preview,
+                    restoreBackupPath = file.absolutePath,
+                )
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                _state.value = _state.value.copy(busyAction = null, error = error.message ?: "No se pudo validar la copia.")
+                file.delete()
+            }
+        }
+    }
+
+    fun dismissBackupPreview() {
+        _state.value.restoreBackupPath?.let { java.io.File(it).delete() }
+        _state.value = _state.value.copy(backupPreview = null, restoreBackupPath = null)
+    }
+
+    fun confirmBackupRestore() {
+        val path = _state.value.restoreBackupPath ?: return
+        if (_state.value.busyAction != null) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busyAction = "Restaurando la copia validada…", error = null, notice = null)
+            try {
+                val result = repository.restoreBackup(path)
+                _state.value = if (result.ok) {
+                    _state.value.copy(
+                        busyAction = null,
+                        backupPreview = null,
+                        restoreBackupPath = null,
+                        notice = "Copia restaurada. El módulo DNS se reinició. El historial local no se reemplazó.",
+                    )
+                } else {
+                    _state.value.copy(
+                        busyAction = null,
+                        backupPreview = null,
+                        restoreBackupPath = null,
+                        error = result.output.ifBlank { "No se pudo restaurar la copia." },
+                    )
                 }
-                _state.value = _state.value.copy(busyAction = null, notice = "Copia restaurada. El módulo DNS se reinició.")
                 refreshSnapshot()
                 refreshFirewall()
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                _state.value = _state.value.copy(busyAction = null, error = error.message ?: "No se pudo restaurar la copia.")
+                _state.value = _state.value.copy(
+                    busyAction = null,
+                    backupPreview = null,
+                    restoreBackupPath = null,
+                    error = error.message ?: "No se pudo restaurar la copia.",
+                )
                 refreshSnapshot()
                 refreshFirewall()
             } finally {
-                file.delete()
+                java.io.File(path).delete()
             }
         }
     }
@@ -427,7 +524,10 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
                     afterFailure()
                     return@launch
                 }
-                _state.value = _state.value.copy(busyAction = null, notice = success)
+                _state.value = _state.value.copy(
+                    busyAction = null,
+                    notice = success.ifBlank { result.output.ifBlank { "La operación se completó." } },
+                )
                 afterSuccess()
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
@@ -461,32 +561,38 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
         if (_state.value.activityLoading) return
 
         _state.value = _state.value.copy(activityLoading = true, activityError = null)
-        val errors = mutableListOf<String>()
         try {
-            val stats = repository.loadActivityStats()
+            val activity = repository.loadActivitySnapshot()
             val latestSnapshot = _state.value.snapshot ?: snapshot
-            _state.value = _state.value.copy(snapshot = latestSnapshot.copy(stats = stats))
+            _state.value = _state.value.copy(
+                snapshot = latestSnapshot.copy(
+                    status = latestSnapshot.status.copy(activityEnabled = activity.enabled),
+                    stats = activity.stats,
+                    events = activity.events,
+                ),
+                activityLoading = false,
+                activityError = null,
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            errors += error.message ?: "No se pudieron leer los contadores DNS."
+            _state.value = _state.value.copy(
+                activityLoading = false,
+                activityError = error.message ?: "No se pudo leer la actividad DNS. Los contadores anteriores se conservan.",
+            )
         }
-        try {
-            val events = repository.loadActivityEvents()
-            val latestSnapshot = _state.value.snapshot ?: snapshot
-            _state.value = _state.value.copy(snapshot = latestSnapshot.copy(events = events))
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            errors += error.message ?: "No se pudieron leer los dominios consultados."
-        }
-        _state.value = _state.value.copy(
-            activityLoading = false,
-            activityError = errors.distinct().joinToString("\n").ifBlank { null },
-        )
     }
 }
 
 private const val MAX_BACKUP_BYTES = 64L * 1024L * 1024L
 
 private fun CatalogEntry.displayName(): String = sourceName.ifBlank { name.ifBlank { id } }
+
+private fun catalogGroupLabel(key: String): String = when (key) {
+    "Security" -> "Seguridad"
+    "Privacy" -> "Privacidad"
+    "ParentalControl" -> "Control parental"
+    "dcm" -> "Otras fuentes"
+    "RethinkUnassigned", "rethink_unassigned" -> "Sin categoría"
+    else -> key
+}

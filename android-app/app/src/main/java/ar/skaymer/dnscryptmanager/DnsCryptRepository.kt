@@ -36,6 +36,78 @@ internal class DnsCryptRepository(
 
     suspend fun testDns(): RootShell.Result = shell.run(RootShell.Command.TestDns)
 
+    suspend fun loadActivitySnapshot(): ActivitySnapshotData {
+        val result = shell.run(RootShell.Command.ActivitySnapshot(200))
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo leer la actividad DNS." })
+        val root = JSONObject(result.output)
+        val stats = root.optJSONObject("stats") ?: throw ModuleOperationException("La respuesta de actividad no incluyó contadores.")
+        return ActivitySnapshotData(
+            enabled = root.optBoolean("enabled", false),
+            stats = parseStats(stats),
+            events = parseEvents(root),
+        )
+    }
+
+    suspend fun runDiagnostics(): List<DiagnosticCheck> {
+        val snapshot = loadSnapshot()
+        val status = snapshot.status
+        val checks = mutableListOf(
+            DiagnosticCheck(
+                "Root y módulo",
+                if (status.moduleEnabled) "ok" else "attention",
+                if (status.moduleEnabled) "El módulo respondió y está habilitado (${status.version.ifBlank { "versión sin informar" }})."
+                else "El módulo respondió, pero figura deshabilitado. Activarlo es necesario para aplicar sus reglas.",
+            ),
+            DiagnosticCheck(
+                "Proxy DNS",
+                if (status.running && status.listening) "ok" else "attention",
+                if (status.running && status.listening) "dnscrypt-proxy está en marcha y escucha consultas."
+                else "El proxy no confirmó a la vez proceso activo y puerto de escucha.",
+            ),
+            DiagnosticCheck(
+                "Redirección del sistema",
+                if (status.redirectActive) "ok" else "info",
+                if (status.redirectActive) "La redirección DNS está activa."
+                else "Está apagada: el módulo no intercepta las consultas DNS del sistema. Esto no corta la conectividad.",
+            ),
+        )
+
+        val dnsResult = testDns()
+        checks += DiagnosticCheck(
+            "Consulta DNS real",
+            if (dnsResult.ok) "ok" else "attention",
+            if (dnsResult.ok) dnsResult.output.ifBlank { "La prueba de resolución terminó correctamente." }
+            else dnsResult.output.ifBlank { "La prueba de resolución no terminó correctamente; el módulo intentó restaurar la red." },
+        )
+
+        val groups = try { loadCatalogGroups() } catch (_: Exception) { null }
+        checks += if (groups == null) {
+            DiagnosticCheck("Listas DNS", "info", "No se pudo leer el catálogo. Podés reintentar desde la sección Listas.")
+        } else {
+            val active = groups.sumOf { it.active }
+            val total = groups.sumOf { it.count }
+            DiagnosticCheck(
+                "Listas DNS",
+                if (active > 0) "ok" else "info",
+                if (active > 0) "$active de $total fuentes están activas."
+                else "No hay fuentes activas: el catálogo no agrega bloqueos de dominios en este momento.",
+            )
+        }
+
+        val firewall = loadFirewallData()
+        val support = firewall.support
+        checks += when {
+            support == null -> DiagnosticCheck("Firewall por app", "info", firewall.error ?: "No se pudo verificar el soporte del firewall.")
+            support.supported -> DiagnosticCheck("Firewall por app", "ok", "El teléfono confirmó soporte IPv4 e IPv6. El firewall se controla por separado del filtrado DNS.")
+            else -> DiagnosticCheck(
+                "Firewall por app",
+                "unsupported",
+                "No se confirmaron ambos ganchos. No se aplican reglas por app. IPv4: ${if (support.ipv4Owner) "sí" else "no"}; IPv6: ${if (support.ipv6Owner) "sí" else "no"}.",
+            )
+        }
+        return checks
+    }
+
     suspend fun loadActivityStats(): ActivityStats {
         val result = shell.run(RootShell.Command.ActivityStats)
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudieron leer los contadores de actividad." })
@@ -120,6 +192,24 @@ internal class DnsCryptRepository(
 
     suspend fun restoreBackup(path: String): RootShell.Result = shell.run(RootShell.Command.BackupRestore(path))
 
+    suspend fun inspectBackup(path: String): BackupPreview {
+        val result = shell.run(RootShell.Command.BackupInspect(path))
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo validar la copia." })
+        val item = JSONObject(result.output)
+        if (!item.optBoolean("valid", false)) throw ModuleOperationException("El archivo no es una copia válida de DNSCrypt Manager.")
+        return BackupPreview(
+            entryCount = item.optInt("entry_count"),
+            savedSourceCount = item.optInt("saved_source_count"),
+            hasDnsConfig = item.optBoolean("dns_config"),
+            hasAllowlist = item.optBoolean("allowlist"),
+            hasEnabledLists = item.optBoolean("enabled_lists"),
+            hasCustomSources = item.optBoolean("custom_sources"),
+            hasFirewallRules = item.optBoolean("firewall_rules"),
+            hasFirewallProfiles = item.optBoolean("firewall_profiles"),
+            includesActivity = item.optBoolean("activity_included", false),
+        )
+    }
+
     suspend fun loadCatalogGroups(): List<CatalogGroup> {
         val result = shell.run(RootShell.Command.CatalogGroups)
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo abrir el catálogo." })
@@ -203,6 +293,9 @@ internal class DnsCryptRepository(
     suspend fun setCatalogEnabled(entry: CatalogEntry, enabled: Boolean): RootShell.Result =
         shell.run(if (enabled) RootShell.Command.CatalogEnable(entry.id) else RootShell.Command.CatalogDisable(entry.id))
 
+    suspend fun setCatalogGroupEnabled(group: String, enabled: Boolean): RootShell.Result =
+        shell.run(RootShell.Command.CatalogGroupApply(group, enabled))
+
     suspend fun startDownloadAll(): RootShell.Result = shell.run(RootShell.Command.CatalogDownloadAllStart)
 
     suspend fun addAllowlist(domain: String): RootShell.Result = shell.run(RootShell.Command.AllowlistAdd(domain))
@@ -225,7 +318,10 @@ internal class DnsCryptRepository(
     }
 
     private fun parseEvents(raw: String): List<ActivityEvent> {
-        val root = JSONObject(raw)
+        return parseEvents(JSONObject(raw))
+    }
+
+    private fun parseEvents(root: JSONObject): List<ActivityEvent> {
         val array = root.optJSONArray("events") ?: return emptyList()
         return buildList(array.length()) {
             for (index in 0 until array.length()) {
@@ -245,8 +341,9 @@ internal class DnsCryptRepository(
         }
     }
 
-    private fun parseStats(raw: String): ActivityStats {
-        val item = JSONObject(raw)
+    private fun parseStats(raw: String): ActivityStats = parseStats(JSONObject(raw))
+
+    private fun parseStats(item: JSONObject): ActivityStats {
         return ActivityStats(
             total = item.optInt("total"),
             blocked = item.optInt("blocked"),
