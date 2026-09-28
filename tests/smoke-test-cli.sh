@@ -575,6 +575,7 @@ if call_cli is-running >/dev/null 2>&1; then
 else
   if pid_is_alive_as "$OUR_PID" "$DNSCRYPT_TEST_DATA_DIR/bin/dnscrypt-proxy"; then
     bad "uninstall.sh: retiro el pidfile pero el daemon PID $OUR_PID sigue vivo"
+    cat "$SCRATCH/uninstall-out.txt" 2>/dev/null
   else
     ok "uninstall.sh: daemon detenido y pidfile retirado"
   fi

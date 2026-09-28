@@ -403,7 +403,17 @@ cmd_stop() {
   # Si el pidfile no tiene un PID valido, no hay nada seguro que matar.
   _pid=$(read_pid 2>/dev/null)
   if [ -n "$_pid" ]; then
+    _stop_pgrp=$(pid_process_group "$_pid" 2>/dev/null)
     stop_service_pid "$_pid"
+    if service_pid_matches "$_pid"; then
+      echo "ERROR: no se pudo detener dnscrypt-proxy (PID $_pid, grupo ${_stop_pgrp:-desconocido}). Se conserva el PID para reintentar."
+      log_msg "stop: fallo; PID $_pid sigue vivo despues de TERM/KILL"
+      return 1
+    fi
+    log_msg "stop: daemon detenido (PID $_pid)"
+  elif [ -f "$PIDFILE" ]; then
+    _stale_pid=$(cat "$PIDFILE" 2>/dev/null)
+    log_msg "stop: pidfile invalido o PID ajeno ($_stale_pid); no se envio senal"
   fi
   rm -f "$PIDFILE" 2>/dev/null
   # Parada MANUAL (intencional): se retiran las reglas fail-closed para no
