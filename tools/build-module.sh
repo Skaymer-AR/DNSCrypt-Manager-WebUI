@@ -157,7 +157,11 @@ else
   echo "  --- tests/smoke-test-webui-args.cjs ---"
   node "$ROOT/tests/smoke-test-webui-args.cjs" || fail "tests/smoke-test-webui-args.cjs fallo (seguridad de argumentos)."
 fi
-echo "  OK: suites RC2 pasaron"
+if [ "${DCM_SKIP_TESTS:-0}" = "1" ]; then
+  echo "  NOTA: este empaquetado omitio las suites; deben aparecer aprobadas por separado en CI."
+else
+  echo "  OK: todas las suites requeridas pasaron"
+fi
 
 ##############################################################################
 step "6) Ningun fixture debe colarse en el instalable"

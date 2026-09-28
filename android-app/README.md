@@ -35,6 +35,6 @@ Actividad lee eventos y contadores juntos. Ante un error conserva los datos ante
 
 ## Build y evidencia
 
-El workflow `Build DNSCrypt Manager Android app` usa JDK 17, Gradle 8.9 y Android SDK 35. Produce un APK `debug` y su SHA-256 como artefacto de GitHub Actions; el artefacto es temporal, no una release estable. El mismo workflow ejecuta por separado el gate y empaquetado de la candidata del módulo, sin incluir `android-app/` dentro de su ZIP.
+El workflow `Build DNSCrypt Manager Android app` usa JDK 17, Gradle 8.9 y Android SDK 35. En cada PR compila el APK `debug` y ejecuta el gate completo del módulo. Al integrar esta candidata en `main`, publica una pre-release de GitHub con el APK Android 0.3.1, el ZIP del módulo v1.1.1-rc5 y sus SHA-256. Esta publicación sigue siendo candidata: la prueba física en el Edge 40 Pro todavía está pendiente y no se marca como versión estable.
 
 Para cada commit, confirmar que el build Android del workflow haya terminado correctamente. La instalación y la prueba física en el Edge 40 Pro siguen pendientes. El APK no actualiza el módulo: revisar su versión y SHA-256 por separado antes de instalar una candidata.
