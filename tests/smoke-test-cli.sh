@@ -570,7 +570,16 @@ kill -TERM -- "-$_ungrp" 2>/dev/null; wait "$_ungrp" 2>/dev/null
 sleep 0.15
 kill -KILL -- "-$_ungrp" 2>/dev/null; wait "$_ungrp" 2>/dev/null
 CALL_GROUPS=$(printf '%s' "$CALL_GROUPS" | sed "s/\b$_ungrp\b//")
-if call_cli is-running >/dev/null 2>&1; then bad "uninstall.sh: el proceso SIGUE corriendo"; else ok "uninstall.sh: proceso detenido"; OUR_PID=""; fi
+if call_cli is-running >/dev/null 2>&1; then
+  bad "uninstall.sh: el pidfile aun informa que el proceso corre"
+else
+  if pid_is_alive_as "$OUR_PID" "$DNSCRYPT_TEST_DATA_DIR/bin/dnscrypt-proxy"; then
+    bad "uninstall.sh: retiro el pidfile pero el daemon PID $OUR_PID sigue vivo"
+  else
+    ok "uninstall.sh: daemon detenido y pidfile retirado"
+  fi
+  OUR_PID=""
+fi
 if [ -f "$NAT_OUT" ] && grep -qxF -- '-j DNSCRYPT_OUTPUT' "$NAT_OUT" 2>/dev/null; then
   bad "uninstall.sh: la regla de redireccion SIGUE enganchada"
 else

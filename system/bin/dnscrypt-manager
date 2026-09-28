@@ -185,6 +185,50 @@ cmd_nextdns() {
 
 cmd_is_running() { read_pid >/dev/null 2>&1; }
 
+# PID group of a service process. cmd_start creates a private session when
+# setsid is available, so its group can include a launcher child on systems
+# where nohup does not exec in place. Only signal a whole group when /proc
+# confirms that the verified service PID is its leader.
+pid_process_group() {
+  _ppg_pid="$1"
+  [ -r "/proc/$_ppg_pid/stat" ] || return 1
+  _ppg_stat=$(cat "/proc/$_ppg_pid/stat" 2>/dev/null) || return 1
+  _ppg_stat=${_ppg_stat##*) }
+  set -- $_ppg_stat
+  [ "$#" -ge 3 ] || return 1
+  case "$3" in ''|*[!0-9]*) return 1 ;; esac
+  echo "$3"
+}
+
+service_pid_matches() {
+  _spm_pid="$1"
+  [ -n "$_spm_pid" ] && kill -0 "$_spm_pid" 2>/dev/null &&
+    grep -aq dnscrypt "/proc/$_spm_pid/cmdline" 2>/dev/null
+}
+
+stop_service_pid() {
+  _stop_pid="$1"
+  case "$_stop_pid" in ''|*[!0-9]*) return 0 ;; esac
+  service_pid_matches "$_stop_pid" || return 0
+  _stop_pgrp=$(pid_process_group "$_stop_pid" 2>/dev/null)
+  if [ "$_stop_pgrp" = "$_stop_pid" ]; then
+    kill -TERM -- "-$_stop_pid" 2>/dev/null
+  else
+    kill -TERM "$_stop_pid" 2>/dev/null
+  fi
+  _stop_i=0
+  while [ "$_stop_i" -lt 5 ] && service_pid_matches "$_stop_pid"; do
+    sleep 1
+    _stop_i=$((_stop_i + 1))
+  done
+  if service_pid_matches "$_stop_pid"; then
+    if [ "$_stop_pgrp" = "$_stop_pid" ]; then
+      kill -KILL -- "-$_stop_pid" 2>/dev/null
+    fi
+    kill -9 "$_stop_pid" 2>/dev/null
+  fi
+}
+
 # is-listening ESTRICTO:
 #   1) Debe existir nuestro PID valido (pidfile + cmdline dnscrypt).
 #   2) Algun socket local en el/los puerto(s) configurados debe PERTENECER
@@ -273,7 +317,7 @@ cmd_start() {
     # detenemos limpio antes de reintentar un arranque fresco, en vez de
     # informar "ya esta corriendo" sobre un proceso a medio morir.
     _stale=$(read_pid 2>/dev/null)
-    [ -n "$_stale" ] && kill -9 "$_stale" 2>/dev/null
+    [ -n "$_stale" ] && stop_service_pid "$_stale"
     rm -f "$PIDFILE" 2>/dev/null
     log_msg "start: PID previo vivo pero no sano (sin listener/respuesta); se elimino antes de reintentar"
   fi
@@ -342,7 +386,7 @@ cmd_start() {
     return 0
   else
     _p=$(read_pid 2>/dev/null)
-    [ -n "$_p" ] && kill -9 "$_p" 2>/dev/null
+    [ -n "$_p" ] && stop_service_pid "$_p"
     rm -f "$PIDFILE" 2>/dev/null
     echo "ERROR: el servicio no confirmo PID+listener+respuesta dentro de ~15s. Revisa: dnscrypt-manager logs" >&2
     log_msg "start: timeout (~15s de reloj) esperando PID+listener+respuesta; PID eliminado, pidfile borrado"
@@ -359,10 +403,7 @@ cmd_stop() {
   # Si el pidfile no tiene un PID valido, no hay nada seguro que matar.
   _pid=$(read_pid 2>/dev/null)
   if [ -n "$_pid" ]; then
-    kill "$_pid" 2>/dev/null
-    _i=0
-    while [ "$_i" -lt 5 ] && kill -0 "$_pid" 2>/dev/null; do sleep 1; _i=$((_i+1)); done
-    kill -0 "$_pid" 2>/dev/null && kill -9 "$_pid" 2>/dev/null
+    stop_service_pid "$_pid"
   fi
   rm -f "$PIDFILE" 2>/dev/null
   # Parada MANUAL (intencional): se retiran las reglas fail-closed para no
