@@ -1750,6 +1750,50 @@ cmd_activity() {
       fi
       rm -f "$_norm" "$_sel" 2>/dev/null
       ;;
+    snapshot)
+      # Una sola normalización produce contadores y filas. Así la app no mezcla
+      # dos lecturas separadas si llegan consultas entre `stats` y `list`.
+      sec_query_prune; sec_events_prune
+      _lim=200; _json=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --limit)
+            case "${2:-}" in
+              ''|*[!0-9]*) _lim=200 ;;
+              *) [ "$2" -ge 1 ] 2>/dev/null && [ "$2" -le 200 ] 2>/dev/null && _lim="$2" || _lim=200 ;;
+            esac
+            shift 2 ;;
+          --json) _json=1; shift ;;
+          *) shift ;;
+        esac
+      done
+      [ "$_json" = 1 ] || { echo "Uso: activity snapshot [--limit 1..200] --json" >&2; return 2; }
+      _norm="$RUN_DIR/activity.snapshot.norm.$$"; _sel="$RUN_DIR/activity.snapshot.sel.$$"
+      sec_activity_normalize "$_norm"
+      _total=$(awk 'END { print NR + 0 }' "$_norm" 2>/dev/null)
+      _blocked=$(awk -F '\t' '$3 == "blocked" {n++} END {print n+0}' "$_norm" 2>/dev/null)
+      _allowed=$(awk -F '\t' '$3 == "allowed" {n++} END {print n+0}' "$_norm" 2>/dev/null)
+      _allowlisted=$(awk -F '\t' '$3 == "allowlisted" {n++} END {print n+0}' "$_norm" 2>/dev/null)
+      _errors=$(awk -F '\t' '$3 == "error" {n++} END {print n+0}' "$_norm" 2>/dev/null)
+      sort -r "$_norm" | head -n "$_lim" > "$_sel"
+      _enabled=false; [ "$(sec_query_mode)" != off ] && _enabled=true
+      printf '{"enabled":%s,"stats":{"available":true,"total":%s,"blocked":%s,"allowed":%s,"allowlisted":%s,"errors":%s},"events":[' \
+        "$_enabled" "${_total:-0}" "${_blocked:-0}" "${_allowed:-0}" "${_allowlisted:-0}" "${_errors:-0}"
+      _first=1
+      while IFS="$(printf '\t')" read -r _t _dom _state _detail _qtype _rcode _duration _server _relay; do
+        [ -n "$_dom" ] || continue
+        _cat=""; [ "$_state" = blocked ] && _cat=$(sec_event_category "$_dom" "$_detail")
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
+          "$(json_kv time "$_t")" "$(json_kv domain "$_dom")" "$(json_kv status "$_state")" \
+          "$(json_kv rule "$_detail")" "$(json_kv category "$_cat")" "$(json_kv query_type "$_qtype")" \
+          "$(json_kv return_code "$_rcode")" "$(json_kv duration "$_duration")" \
+          "$(json_kv server "$_server")" "$(json_kv relay "$_relay")"
+      done < "$_sel"
+      printf ']}\n'
+      rm -f "$_norm" "$_sel" 2>/dev/null
+      ;;
     stats)
       sec_query_prune; sec_events_prune
       _json=0; [ "${1:-}" = "--json" ] && _json=1
@@ -1778,7 +1822,7 @@ cmd_activity() {
       echo "OK: retencion aplicada ($(sec_query_days) dia(s) / max $(sec_query_max) consultas)."
       ;;
     *)
-      echo "Uso: dnscrypt-manager activity {status [--json]|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|clear|prune}" >&2
+      echo "Uso: dnscrypt-manager activity {status [--json]|snapshot [--limit N] --json|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|clear|prune}" >&2
       return 1
       ;;
   esac

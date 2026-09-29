@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.1.1-rc5 — actividad confiable y controles guiados (candidata)
+
+- Actividad carga contadores y consultas en una sola lectura. Si no se puede
+  actualizar, conserva lo último leído y muestra el error con una acción para
+  reintentar; no presenta una falla como si fueran ceros.
+- Agrega un diagnóstico en Inicio para revisar módulo, proxy, redirección,
+  consulta DNS real, listas y soporte del firewall por app, cada uno por separado.
+- Permite encender listas preparadas de una categoría en un solo paso. No descarga
+  listas ni activa fuentes incompatibles o sin caché; revierte la selección si
+  falla la compilación. También muestra la cuenta regresiva de bloqueos temporales.
+- Antes de restaurar una copia, valida el archivo y muestra qué ajustes reemplaza.
+  El historial DNS queda en el teléfono. La app pasa a 0.3.1 (versionCode 4);
+  el módulo pasa a v1.1.1-rc5 (versionCode 11015).
+- Requiere instalar y probar el APK y el módulo en el teléfono antes de marcar
+  esta candidata como estable.
+
+## v1.1.1-rc4 — firewall, conexiones y copias desde Android (candidata)
+
+- Agrega perfiles guardables del firewall y bloqueos por app con vencimiento
+  automático, incluso después de reiniciar el teléfono.
+- Agrega una vista puntual de conexiones TCP/UDP por aplicación, una prueba DNS
+  de un toque y acciones para agregar o quitar excepciones desde Actividad.
+- Permite elegir la retención de actividad, exportar hasta 200 consultas y
+  crear o restaurar una copia de preferencias desde la app Android.
+- Sube la versión de la app Android a 0.3.0 (versionCode 3) para instalarla como
+  actualización. Los contadores DNS siguen siendo del registro local y no
+  identifican qué aplicación originó cada consulta.
+- Esta candidata requiere validación final en el teléfono Motorola antes de
+  considerarse estable.
+
 ## v1.1.1-rc3 — firewall por aplicación y correcciones de actividad (candidata)
 
 - Corrige la lectura de actividad para que un error de registro no convierta
@@ -154,3 +184,11 @@ Primera versión pública funcional de **DNSCrypt Manager**, creada por **Skayme
 - Probado en Moto Edge 40 Pro con Android 16 sin pérdida de conectividad.
 
 La redirección global permanece desactivada por defecto.
+## v1.1.1-rc4 — herramientas nuevas de la app nativa (candidata)
+
+- Agrega prueba DNS manual con rollback automático si falla.
+- Permite exportar actividad y ajustar su retención desde Ajustes.
+- Permite administrar allowlist desde los dominios de Actividad.
+- Agrega perfiles guardados y bloqueos temporales de apps con vencimiento persistente.
+- Agrega una vista puntual de conexiones TCP/UDP por UID; no guarda historial ni atribuye dominios.
+- Agrega copia y restauración validada de configuración y preferencias, sin incluir el historial DNS.

@@ -75,7 +75,8 @@ pid_is_alive_as() {
   _pid="$1"; _needle="$2"
   [ -n "$_pid" ] || return 1
   [ -r "/proc/$_pid/cmdline" ] || return 1
-  tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -qF -- "$_needle"
+  _cmdline=$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null) || return 1
+  case "$_cmdline" in *"$_needle"*) return 0 ;; *) return 1 ;; esac
 }
 
 ##############################################################################
@@ -205,6 +206,41 @@ s.close()
 " 2>/dev/null
 }
 
+report_port_holders() {
+  "$PYTHON_BIN" - "$TEST_PORT" <<'PY'
+import os, sys
+port = int(sys.argv[1])
+inodes = set()
+for table in ("udp", "udp6", "tcp", "tcp6"):
+    try:
+        with open(f"/proc/net/{table}") as f:
+            next(f, None)
+            for line in f:
+                fields = line.split()
+                if len(fields) > 9 and int(fields[1].rsplit(":", 1)[1], 16) == port:
+                    inodes.add(fields[9])
+    except (OSError, ValueError, IndexError):
+        pass
+found = False
+for name in os.listdir("/proc"):
+    if not name.isdigit():
+        continue
+    pid = int(name)
+    try:
+        owned = {os.readlink(f"/proc/{pid}/fd/{fd}") for fd in os.listdir(f"/proc/{pid}/fd")}
+        matches = [link[8:-1] for link in owned if link.startswith("socket:[") and link.endswith("]") and link[8:-1] in inodes]
+        if matches:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\\0", b" ").decode(errors="replace").strip()
+            state = next((x.split("\t", 1)[1].strip() for x in open(f"/proc/{pid}/status") if x.startswith("State:")), "?")
+            print(f"  socket owner PID={pid} state={state} inode={','.join(matches)} cmd={cmd or '[sin cmdline]'}")
+            found = True
+    except (OSError, PermissionError):
+        pass
+if not found:
+    print("  no se pudo correlacionar el socket con un PID via /proc")
+PY
+}
+
 ##############################################################################
 # 0) Desplegar copia aislada + puerto dinamico
 ##############################################################################
@@ -284,7 +320,12 @@ kill -9 "$DECOY" 2>/dev/null; wait "$DECOY" 2>/dev/null
 EXTRA_PIDS=""
 rm -f "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid"
 sleep 0.3
-bind_port_free "$TEST_PORT" && ok "puerto $TEST_PORT libre tras matar impostor+señuelo" || bad "puerto $TEST_PORT sigue ocupado"
+if bind_port_free "$TEST_PORT"; then
+  ok "puerto $TEST_PORT libre tras matar impostor+señuelo"
+else
+  bad "puerto $TEST_PORT sigue ocupado tras matar impostor+señuelo"
+  report_port_holders
+fi
 
 ##############################################################################
 # 4) start NO debe declarar exito con el puerto ya ocupado por otro proceso
@@ -333,6 +374,7 @@ echo
 echo "=== [5] test-dns: 4 etapas reales ==="
 call_cli start >/dev/null 2>&1
 OUR_PID="$(read_test_pid)"
+echo "  prueba DNS: pidfile=$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null || true), tracked=$OUR_PID"
 OUT=$(call_cli test-dns 2>&1)
 echo "$OUT" | grep -q '^\[1/4\]' && echo "$OUT" | grep -q '^\[2/4\]' && \
 echo "$OUT" | grep -q '^\[3/4\]' && echo "$OUT" | grep -q '^\[4/4\]' && \
@@ -498,6 +540,7 @@ echo
 echo "=== [12] NextDNS: stamp verificado contra tools/stamps.py ==="
 call_cli start >/dev/null 2>&1
 OUR_PID="$(read_test_pid)"
+echo "  prueba NextDNS: pidfile=$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null || true), tracked=$OUR_PID"
 call_cli nextdns abcdef >/dev/null 2>&1
 STAMP=$(grep -o 'sdns://[A-Za-z0-9_-]*' "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml" | tail -n1)
 "$PYTHON_BIN" - "$STAMP" << 'EOF'
@@ -527,7 +570,17 @@ kill -TERM -- "-$_ungrp" 2>/dev/null; wait "$_ungrp" 2>/dev/null
 sleep 0.15
 kill -KILL -- "-$_ungrp" 2>/dev/null; wait "$_ungrp" 2>/dev/null
 CALL_GROUPS=$(printf '%s' "$CALL_GROUPS" | sed "s/\b$_ungrp\b//")
-if call_cli is-running >/dev/null 2>&1; then bad "uninstall.sh: el proceso SIGUE corriendo"; else ok "uninstall.sh: proceso detenido"; OUR_PID=""; fi
+if call_cli is-running >/dev/null 2>&1; then
+  bad "uninstall.sh: el pidfile aun informa que el proceso corre"
+else
+  if pid_is_alive_as "$OUR_PID" "$DNSCRYPT_TEST_DATA_DIR/bin/dnscrypt-proxy"; then
+    bad "uninstall.sh: retiro el pidfile pero el daemon PID $OUR_PID sigue vivo"
+    cat "$SCRATCH/uninstall-out.txt" 2>/dev/null
+  else
+    ok "uninstall.sh: daemon detenido y pidfile retirado"
+  fi
+  OUR_PID=""
+fi
 if [ -f "$NAT_OUT" ] && grep -qxF -- '-j DNSCRYPT_OUTPUT' "$NAT_OUT" 2>/dev/null; then
   bad "uninstall.sh: la regla de redireccion SIGUE enganchada"
 else
@@ -607,6 +660,7 @@ echo
 echo "=== [14e] dos llamadas CONCURRENTES a 'status --json' ==="
 call_cli start >/dev/null 2>&1
 OUR_PID="$(read_test_pid)"
+echo "  prueba concurrente: pidfile=$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null || true), tracked=$OUR_PID"
 ( call_cli status --json > "$SCRATCH/concurrent1.json" 2>"$SCRATCH/concurrent1.err" ) &
 CPID1=$!
 EXTRA_PIDS="$EXTRA_PIDS $CPID1"
@@ -629,14 +683,23 @@ fi
 ##############################################################################
 echo
 echo "=== [15] Confirmaciones de aislamiento ==="
-call_cli stop >/dev/null 2>&1
+_FINAL_PIDFILE=$(cat "$DNSCRYPT_TEST_DATA_DIR/run/dnscrypt-proxy.pid" 2>/dev/null)
+echo "  antes de stop: pidfile=${_FINAL_PIDFILE:-vacio}, tracked=${OUR_PID:-vacio}"
+call_cli stop >"$SCRATCH/final-stop.txt" 2>&1
+_FINAL_STOP_RC=$?
+echo "  stop: rc=$_FINAL_STOP_RC; $(cat "$SCRATCH/final-stop.txt")"
 sleep 0.3
 if [ -z "$OUR_PID" ] || ! pid_is_alive_as "$OUR_PID" "dnscrypt-proxy"; then
   ok "ningun proceso propio sigue vivo al terminar (verificado por cmdline, no solo PID)"
 else
   bad "el PID $OUR_PID sigue vivo (confirmado por cmdline) al terminar"
 fi
-bind_port_free "$TEST_PORT" && ok "puerto $TEST_PORT libre al terminar" || bad "puerto $TEST_PORT sigue ocupado al terminar"
+if bind_port_free "$TEST_PORT"; then
+  ok "puerto $TEST_PORT libre al terminar"
+else
+  bad "puerto $TEST_PORT sigue ocupado al terminar"
+  report_port_holders
+fi
 if [ ! -e /data/adb ]; then
   ok "/data/adb no existe (nunca se toco)"
 else
@@ -645,12 +708,12 @@ fi
 # Barrido final riguroso: ningun proceso hijo de este arbol de pruebas
 # (fake-dnscrypt-proxy o los fixtures de firewall) debe seguir vivo.
 STRAY=$(find /proc -maxdepth 1 -name '[0-9]*' 2>/dev/null | while read -r p; do
-  pid_is_alive_as "${p#/proc/}" "dnscrypt-proxy" && echo "${p#/proc/}"
+  pid_is_alive_as "${p#/proc/}" "$DNSCRYPT_TEST_DATA_DIR/bin/dnscrypt-proxy" && echo "${p#/proc/}"
 done)
 if [ -z "$STRAY" ]; then
-  ok "barrido final: ningun proceso fake-dnscrypt-proxy residual en todo el sistema"
+  ok "barrido final: ningun proceso fake-dnscrypt-proxy de esta prueba quedo vivo"
 else
-  bad "barrido final: procesos residuales detectados: $STRAY"
+  bad "barrido final: procesos fake-dnscrypt-proxy residuales: $STRAY"
   for p in $STRAY; do kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; done
 fi
 

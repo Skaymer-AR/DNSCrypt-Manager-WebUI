@@ -72,7 +72,7 @@ for _lib3 in captive bypass monitor; do
   # shellcheck source=/dev/null
   [ -f "$_LP" ] && . "$_LP"
 done
-for _lib4 in servicectl apppolicy; do
+for _lib4 in servicectl apppolicy connections; do
   _LP4="${COMMON%/*}/$_lib4.sh"
   # shellcheck source=/dev/null
   [ -f "$_LP4" ] && . "$_LP4"
@@ -287,12 +287,18 @@ cmd_start() {
   # aunque haya arrancado bien y deba seguir vivo. 'setsid' (disponible
   # via toybox/busybox en Android; si no esta, se cae a nohup solo) lo
   # vuelve lider de un grupo propio, totalmente independiente.
+  rm -f "$PIDFILE" 2>/dev/null
   if have setsid; then
-    ( cd "$CONF_DIR" && exec setsid nohup "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1 ) &
+    (
+      cd "$CONF_DIR" &&
+      setsid sh -c 'printf "%s\n" "$$" > "$1"; shift; exec nohup "$@"' dcm-start "$PIDFILE" "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1
+    ) &
   else
-    ( cd "$CONF_DIR" && exec nohup "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1 ) &
+    (
+      cd "$CONF_DIR" &&
+      sh -c 'printf "%s\n" "$$" > "$1"; shift; exec nohup "$@"' dcm-start "$PIDFILE" "$BIN" -config "$TOML" >> "$DAEMON_LOG" 2>&1
+    ) &
   fi
-  echo $! > "$PIDFILE"
 
   # Esperar, con timeout acotado (hasta ~15s, en pasos de 1s por
   # portabilidad: 'sleep' fraccionario no esta garantizado en
@@ -886,27 +892,187 @@ cmd_provider() {
 ##############################################################################
 # Backups
 ##############################################################################
-cmd_backup() {
-  _ts=$(date '+%Y%m%d-%H%M%S')
-  if have tar; then
-    _out="$BACKUP_DIR/full-backup-$_ts.tar.gz"
-    ( cd "$CONF_DIR" && tar -czf "$_out" . 2>/dev/null )
-    echo "OK: backup creado en $_out"
+_valid_app_cache_file() {
+  _vac_path="$1"
+  if [ "${DNSCRYPT_TEST_MODE:-0}" = 1 ]; then
+    _vac_root="${DNSCRYPT_TEST_APP_CACHE:-}"
+    [ -n "$_vac_root" ] || return 1
+    case "$_vac_path" in "$_vac_root"/dcm-backup-[A-Za-z0-9-]*.tar.gz) ;; *) return 1 ;; esac
   else
-    cp -f "$TOML" "$BACKUP_DIR/dnscrypt-proxy.toml.$_ts.bak"
-    echo "OK: copia del TOML creada (tar no disponible)."
+    case "$_vac_path" in /data/user/*/ar.skaymer.dnscryptmanager/cache/dcm-backup-[A-Za-z0-9-]*.tar.gz) ;; *) return 1 ;; esac
+    _vac_user=${_vac_path#/data/user/}
+    _vac_user=${_vac_user%%/*}
+    case "$_vac_user" in ''|*[!0-9]*) return 1 ;; esac
   fi
+  case "$_vac_path" in *[!A-Za-z0-9_./-]*|*"/../"*|*/..|*/./*) return 1 ;; esac
+  [ ! -L "$_vac_path" ]
+}
+
+_backup_tar_file_list() {
+  _btf_out="$1"
+  : > "$_btf_out" || return 1
+  for _btf_path in \
+    config/dnscrypt-proxy.toml run/state.env schema_version \
+    security/allowlist.txt security/exceptions.tsv security/blocklists/sources.d \
+    catalog/enabled.txt catalog/custom.tsv catalog/blacklist.txt \
+    apppolicy/policies.tsv apppolicy/temporary.tsv apppolicy/profiles.tsv; do
+    [ -e "$DATA_DIR/$_btf_path" ] || continue
+    printf '%s\n' "$_btf_path" >> "$_btf_out" || return 1
+  done
+  [ -s "$_btf_out" ]
+}
+
+_validate_backup_archive() {
+  _vba_file="$1"; _vba_app_only="${2:-no}"
+  _vba_list="$RUN_DIR/backup-list.$$"
+  _vba_verbose="$RUN_DIR/backup-verbose.$$"
+  have tar && have gzip || return 1
+  _vba_compressed=$(wc -c < "$_vba_file" 2>/dev/null | tr -d ' ')
+  case "$_vba_compressed" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$_vba_compressed" -le 67108864 ] 2>/dev/null || return 1
+  gzip -t "$_vba_file" >/dev/null 2>&1 || return 1
+  _vba_uncompressed=$(gzip -cd "$_vba_file" 2>/dev/null | head -c 268435457 | wc -c | tr -d ' ')
+  case "$_vba_uncompressed" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$_vba_uncompressed" -le 268435456 ] 2>/dev/null || return 1
+  tar -tzf "$_vba_file" > "$_vba_list" 2>/dev/null || { rm -f "$_vba_list"; return 1; }
+  [ -s "$_vba_list" ] || { rm -f "$_vba_list"; return 1; }
+  while IFS= read -r _vba_path; do
+    case "$_vba_path" in /*|*"/../"*|../*|*/..|*"/./"*|*[!A-Za-z0-9._/-]*) rm -f "$_vba_list"; return 1 ;; esac
+    case "$_vba_path" in "./"*) _vba_rel=${_vba_path#./} ;; *) _vba_rel="$_vba_path" ;; esac
+    case "$_vba_rel" in *'..'*) rm -f "$_vba_list"; return 1 ;; esac
+    _vba_rel=${_vba_rel%/}
+    if [ "$_vba_app_only" = yes ]; then
+      case "$_vba_rel" in
+        config|config/dnscrypt-proxy.toml|run|run/state.env|schema_version|security|security/allowlist.txt|security/exceptions.tsv|security/blocklists|security/blocklists/sources.d|security/blocklists/sources.d/*.src|catalog|catalog/enabled.txt|catalog/custom.tsv|catalog/blacklist.txt|apppolicy|apppolicy/policies.tsv|apppolicy/temporary.tsv|apppolicy/profiles.tsv) : ;;
+        *) rm -f "$_vba_list"; return 1 ;;
+      esac
+    fi
+  done < "$_vba_list"
+  tar -tvzf "$_vba_file" > "$_vba_verbose" 2>/dev/null || { rm -f "$_vba_list" "$_vba_verbose"; return 1; }
+  if ! awk 'substr($1,1,1)!="-" && substr($1,1,1)!="d" {bad=1} END {exit bad}' "$_vba_verbose"; then
+    rm -f "$_vba_list" "$_vba_verbose"
+    return 1
+  fi
+  while IFS= read -r _vba_path; do
+    case "$_vba_path" in "./"*) _vba_rel=${_vba_path#./} ;; *) _vba_rel="$_vba_path" ;; esac
+    _vba_rel=${_vba_rel%/}
+    _vba_expected_type=""
+    case "$_vba_rel" in
+      config|run|security|security/blocklists|security/blocklists/sources.d|catalog|apppolicy) _vba_expected_type=d ;;
+      config/dnscrypt-proxy.toml|run/state.env|schema_version|security/allowlist.txt|security/exceptions.tsv|security/blocklists/sources.d/*.src|catalog/enabled.txt|catalog/custom.tsv|catalog/blacklist.txt|apppolicy/policies.tsv|apppolicy/temporary.tsv|apppolicy/profiles.tsv) _vba_expected_type=- ;;
+    esac
+    [ -n "$_vba_expected_type" ] || continue
+    _vba_actual_type=$(awk -v p="$_vba_rel" '{ t=substr($1,1,1); n=$NF; sub(/\/$/,"",n); sub(/^\.\//,"",n); if(n==p){print t; exit} }' "$_vba_verbose")
+    if [ "$_vba_actual_type" != "$_vba_expected_type" ]; then
+      rm -f "$_vba_list" "$_vba_verbose"
+      return 1
+    fi
+  done < "$_vba_list"
+  rm -f "$_vba_list" "$_vba_verbose"
+  return 0
+}
+
+_restore_app_backup_stage() {
+  _rbs_stage="$1"
+  [ -s "$_rbs_stage/config/dnscrypt-proxy.toml" ] || { echo "ERROR: falta la configuración DNS en la copia" >&2; return 1; }
+  cmd_config_validate "$_rbs_stage/config/dnscrypt-proxy.toml" >/dev/null 2>&1 || { echo "ERROR: la configuración DNS de la copia no valida" >&2; return 1; }
+  for _rbs_path in config/dnscrypt-proxy.toml run/state.env schema_version security/allowlist.txt security/exceptions.tsv security/blocklists/sources.d catalog/enabled.txt catalog/custom.tsv catalog/blacklist.txt apppolicy/policies.tsv apppolicy/temporary.tsv apppolicy/profiles.tsv; do
+    [ -e "$_rbs_stage/$_rbs_path" ] || continue
+    _rbs_dest="$DATA_DIR/$_rbs_path"
+    mkdir -p "$(dirname "$_rbs_dest")" || return 1
+    rm -rf "$_rbs_dest" || return 1
+    if [ -d "$_rbs_stage/$_rbs_path" ]; then
+      mkdir -p "$_rbs_dest" || return 1
+      cp -R "$_rbs_stage/$_rbs_path/." "$_rbs_dest/" || return 1
+    else
+      cp -f "$_rbs_stage/$_rbs_path" "$_rbs_dest" || return 1
+    fi
+  done
+  chmod 0600 "$DATA_DIR/run/state.env" "$DATA_DIR/security/allowlist.txt" "$DATA_DIR/security/exceptions.tsv" "$DATA_DIR/apppolicy/policies.tsv" "$DATA_DIR/apppolicy/temporary.tsv" 2>/dev/null || true
+  chmod 0700 "$DATA_DIR/security" "$DATA_DIR/apppolicy" 2>/dev/null || true
+  return 0
+}
+
+cmd_backup() {
+  if [ "${1:-}" = inspect ]; then
+    [ "${2:-}" = "--input" ] && [ -n "${3:-}" ] || { echo "Uso: backup inspect --input archivo.tar.gz" >&2; return 2; }
+    cmd_backup_inspect "$3"
+    return $?
+  fi
+  if [ "${1:-}" = "--output" ]; then
+    _out="${2:-}"
+    _valid_app_cache_file "$_out" || { echo "ERROR: ruta de copia no permitida" >&2; return 1; }
+    _external=yes
+  else
+    _ts=$(date '+%Y%m%d-%H%M%S')
+    _out="$BACKUP_DIR/full-backup-$_ts.tar.gz"
+    _external=no
+  fi
+  have tar || { echo "ERROR: tar no disponible" >&2; return 1; }
+  _list="$RUN_DIR/backup-files.$$"
+  _tmp="$_out.tmp.$$"
+  _backup_tar_file_list "$_list" || { rm -f "$_list"; echo "ERROR: no se encontraron preferencias para guardar" >&2; return 1; }
+  if ! tar -czf "$_tmp" -C "$DATA_DIR" -T "$_list" 2>/dev/null; then
+    rm -f "$_tmp" "$_list"
+    echo "ERROR: no se pudo crear la copia" >&2
+    return 1
+  fi
+  chmod 0600 "$_tmp" 2>/dev/null
+  mv -f "$_tmp" "$_out" || { rm -f "$_tmp" "$_list"; return 1; }
+  [ "$_external" = no ] || chmod 0644 "$_out" 2>/dev/null
+  rm -f "$_list"
+  echo "OK: copia de configuración creada en $_out"
+}
+
+cmd_backup_inspect() {
+  _cbi_file="$1"
+  _valid_app_cache_file "$_cbi_file" && [ -f "$_cbi_file" ] || { echo "ERROR: archivo de copia no válido" >&2; return 1; }
+  _validate_backup_archive "$_cbi_file" yes || { echo "ERROR: la copia está dañada o contiene rutas no permitidas" >&2; return 1; }
+  _cbi_list="$RUN_DIR/backup-inspect.$$"
+  tar -tzf "$_cbi_file" 2>/dev/null | sed 's#^\./##' > "$_cbi_list" || { rm -f "$_cbi_list"; echo "ERROR: no se pudo leer el contenido de la copia" >&2; return 1; }
+  _cbi_has() { grep -qxF "$1" "$_cbi_list" 2>/dev/null; }
+  _cbi_bool() { _cbi_has "$1" && printf true || printf false; }
+  _cbi_files=$(wc -l < "$_cbi_list" 2>/dev/null | tr -d ' ')
+  _cbi_sources=$(awk '/^security\/blocklists\/sources\.d\/[^/]+\.src$/ { n++ } END { print n+0 }' "$_cbi_list")
+  if ! _cbi_has config/dnscrypt-proxy.toml; then
+    rm -f "$_cbi_list"
+    echo "ERROR: falta la configuración DNS; el archivo no se puede restaurar desde la app." >&2
+    return 1
+  fi
+  printf '{"valid":true,"entry_count":%s,"saved_source_count":%s,"dns_config":true,"allowlist":%s,"enabled_lists":%s,"custom_sources":%s,"firewall_rules":%s,"firewall_profiles":%s,"activity_included":false}\n' \
+    "${_cbi_files:-0}" "${_cbi_sources:-0}" \
+    "$(_cbi_bool security/allowlist.txt)" \
+    "$(_cbi_bool catalog/enabled.txt)" \
+    "$(_cbi_bool catalog/custom.tsv)" \
+    "$([ -e "$_cbi_list" ] && { _cbi_has apppolicy/policies.tsv || _cbi_has apppolicy/temporary.tsv; } && printf true || printf false)" \
+    "$(_cbi_bool apppolicy/profiles.tsv)"
+  rm -f "$_cbi_list"
 }
 
 cmd_restore() {
-  _f="$1"
+  _f="${1:-}"
   [ -f "$_f" ] || { echo "ERROR: archivo no encontrado: $_f" >&2; return 1; }
   case "$_f" in
     *.tar.gz)
       have tar || { echo "ERROR: tar no disponible" >&2; return 1; }
-      toml_backup >/dev/null
-      ( cd "$CONF_DIR" && tar -xzf "$_f" 2>/dev/null )
-      echo "OK: backup restaurado. Reinicia: dnscrypt-manager restart" ;;
+      _validate_backup_archive "$_f" no || { echo "ERROR: el archivo contiene rutas inválidas o enlaces" >&2; return 1; }
+      _stage="$RUN_DIR/restore-general.$"
+      rm -rf "$_stage"; mkdir -m 0700 -p "$_stage" || return 1
+      tar -xzf "$_f" -C "$_stage" 2>/dev/null || { rm -rf "$_stage"; echo "ERROR: no se pudo extraer el archivo" >&2; return 1; }
+      if [ -s "$_stage/config/dnscrypt-proxy.toml" ]; then
+        cmd_backup >/dev/null || { rm -rf "$_stage"; echo "ERROR: no se pudo guardar el estado actual" >&2; return 1; }
+        _restore_app_backup_stage "$_stage" || { rm -rf "$_stage"; echo "ERROR: no se pudo restaurar la copia" >&2; return 1; }
+        rm -rf "$_stage"
+        command -v app_policy_restore >/dev/null 2>&1 && app_policy_restore >/dev/null 2>&1 || true
+        command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload --no-restart || { echo "ERROR: se restauraron los archivos, pero no se pudo regenerar el filtro DNS" >&2; return 1; }
+        cmd_restart
+        echo "OK: backup restaurado. El módulo se reinició."
+      else
+        toml_backup >/dev/null
+        cp -R "$_stage/." "$CONF_DIR/" || { rm -rf "$_stage"; echo "ERROR: no se pudo copiar la configuración" >&2; return 1; }
+        rm -rf "$_stage"
+        echo "OK: backup de configuración restaurado. Reinicia: dnscrypt-manager restart"
+      fi ;;
     *.toml|*.bak)
       toml_backup >/dev/null
       cp -f "$_f" "$TOML"; chmod 0600 "$TOML" 2>/dev/null
@@ -914,6 +1080,30 @@ cmd_restore() {
       echo "OK: TOML restaurado." ;;
     *) echo "ERROR: formato no reconocido (.tar.gz o .toml)" >&2; return 1 ;;
   esac
+}
+
+cmd_restore_app_backup() {
+  _f="${1:-}"
+  _valid_app_cache_file "$_f" && [ -f "$_f" ] || { echo "ERROR: archivo de copia no válido" >&2; return 1; }
+  _validate_backup_archive "$_f" yes || { echo "ERROR: la copia está dañada o contiene rutas no permitidas" >&2; return 1; }
+  cmd_backup >/dev/null || { echo "ERROR: no se pudo guardar el estado actual antes de restaurar" >&2; return 1; }
+  _stage="$RUN_DIR/restore-app.$$"
+  rm -rf "$_stage"
+  mkdir -m 0700 -p "$_stage" || return 1
+  if ! tar -xzf "$_f" -C "$_stage" 2>/dev/null; then
+    rm -rf "$_stage"
+    echo "ERROR: no se pudo extraer la copia" >&2
+    return 1
+  fi
+  _restore_app_backup_stage "$_stage" || { rm -rf "$_stage"; echo "ERROR: no se pudo restaurar la copia" >&2; return 1; }
+  rm -rf "$_stage"
+  command -v app_policy_restore >/dev/null 2>&1 && app_policy_restore >/dev/null 2>&1 || true
+  command -v sec_regen_and_reload >/dev/null 2>&1 && sec_regen_and_reload --no-restart || {
+    echo "ERROR: se restauraron los archivos, pero no se pudo regenerar el filtro DNS" >&2
+    return 1
+  }
+  echo "OK: preferencias restauradas. Se reiniciará el módulo."
+  cmd_restart
 }
 
 cmd_list_backups() {
@@ -1175,6 +1365,8 @@ DNSCrypt Manager - comandos
 
   Backups:
     backup | restore <archivo> | list-backups
+    backup --output <archivo.tar.gz> | restore-app-backup <archivo.tar.gz>
+    backup inspect --input <archivo.tar.gz> (valida y muestra qué contiene, sin extraer)
 
   EMERGENCIA:
     panic                  todo abajo + red restaurada + modulo off
@@ -1196,13 +1388,15 @@ DNSCrypt Manager - comandos
     failclosed {status|enable [--confirmed]|disable}
     leak-test [--json]
     events [list [--limit N] [--filter S] [--json]|clear|export|stats|pause|resume]
-    activity {status [--json]|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|clear|prune}
-    app-policy {support [--json]|list [--json]|set PACKAGE block-internet|clear PACKAGE|clear-all|restore}
+    activity {status [--json]|enable|disable|list [--limit N] [--filter S] [--kind blocked|allowed|allowlisted|error] [--json]|stats [--json]|snapshot [--limit N] --json|clear|prune}
+    app-policy {support|list|profile|set|temp-block|clear|clear-all|restore|sweep}
+    connections             conexiones IP activas por UID (muestra puntual)
     migrate
 
   Catalogo de listas (v0.2.0-RC2):
     catalog list [--json][--search S][--category C][--maintainer M][--enabled][--recommended][--archived]
     catalog info <id> | enable <id> | disable <id>
+    catalog group <enable|disable> <Security|Privacy|ParentalControl|dcm|RethinkUnassigned>
     catalog update [id|enabled|all] | download-all --confirmed
     catalog download-all status --json | compile
     catalog conflicts [id1 id2] | metrics <id> | test <id>
@@ -1357,11 +1551,14 @@ cmd_app_policy() {
   case "$_s" in
     support) app_policy_support "${1:-}" ;;
     list)    app_policy_list "${1:-}" ;;
+    profile) app_policy_profiles "${1:-}" "${2:-}" "${3:-}" ;;
     set)     [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "Uso: app-policy set PACKAGE POLICY" >&2; return 1; }; app_policy_set "$1" "$2" ;;
+    temp-block) [ -n "${1:-}" ] && [ -n "${2:-}" ] || { echo "Uso: app-policy temp-block PACKAGE {15m|1h|8h}" >&2; return 1; }; app_policy_temp_block "$1" "$2" ;;
     clear)   [ -n "${1:-}" ] || { echo "Uso: app-policy clear PACKAGE" >&2; return 1; }; app_policy_clear "$1" ;;
     clear-all) app_policy_clear_all ;;
     restore) app_policy_restore ;;
-    *) echo "Uso: app-policy support [--json]|list [--json]|set PACKAGE block-internet|clear PACKAGE|clear-all|restore" >&2; return 1 ;;
+    sweep) app_policy_sweep ;;
+    *) echo "Uso: app-policy support [--json]|list [--json]|profile list [--json]|save NAME PACKAGE[,PACKAGE...]|remove NAME|set PACKAGE block-internet|temp-block PACKAGE {15m|1h|8h}|clear PACKAGE|clear-all|restore|sweep" >&2; return 1 ;;
   esac
 }
 
@@ -1448,6 +1645,7 @@ cmd_odoh() {
     monitor)          cmd_monitor "$@" ;;
     service-control)  cmd_service_control "$@" ;;
     app-policy)       cmd_app_policy "$@" ;;
+    connections)      connections_snapshot "$@" ;;
     start)            cmd_start "$@" ;;
     stop)             cmd_stop "$@" ;;
     restart)          cmd_restart "$@" ;;
@@ -1466,6 +1664,7 @@ cmd_odoh() {
     logs)             cmd_logs "$@" ;;
     backup)           cmd_backup "$@" ;;
     restore)          cmd_restore "$@" ;;
+    restore-app-backup) cmd_restore_app_backup "$@" ;;
     list-backups)     cmd_list_backups "$@" ;;
     panic)            cmd_panic "$@" ;;
     disable)          cmd_disable "$@" ;;

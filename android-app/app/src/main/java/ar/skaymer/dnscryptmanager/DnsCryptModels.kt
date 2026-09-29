@@ -29,6 +29,30 @@ data class ActivityStats(
     val available: Boolean = false,
 )
 
+data class ActivitySnapshotData(
+    val enabled: Boolean,
+    val stats: ActivityStats,
+    val events: List<ActivityEvent>,
+)
+
+data class DiagnosticCheck(
+    val title: String,
+    val state: String,
+    val detail: String,
+)
+
+data class BackupPreview(
+    val entryCount: Int,
+    val savedSourceCount: Int,
+    val hasDnsConfig: Boolean,
+    val hasAllowlist: Boolean,
+    val hasEnabledLists: Boolean,
+    val hasCustomSources: Boolean,
+    val hasFirewallRules: Boolean,
+    val hasFirewallProfiles: Boolean,
+    val includesActivity: Boolean,
+)
+
 data class CatalogGroup(
     val key: String,
     val count: Int,
@@ -70,6 +94,8 @@ data class DashboardSnapshot(
     val activitySupported: Boolean,
     val events: List<ActivityEvent>,
     val stats: ActivityStats,
+    val activityRetentionDays: Int = 1,
+    val activityMaxEntries: Int = 2000,
 )
 
 data class FirewallSupport(
@@ -82,7 +108,19 @@ data class FirewallSupport(
 data class FirewallData(
     val support: FirewallSupport?,
     val blockedUids: Set<Int>,
+    val temporaryRules: Map<String, Long> = emptyMap(),
+    val profiles: List<FirewallProfile> = emptyList(),
     val error: String? = null,
+)
+
+data class FirewallProfile(val name: String, val packages: List<String>)
+
+data class ConnectionEvent(
+    val protocol: String,
+    val remoteAddress: String,
+    val remotePort: Int,
+    val uid: Int,
+    val state: String,
 )
 
 data class FirewallApp(
@@ -99,6 +137,10 @@ data class DnsCryptUiState(
     val snapshot: DashboardSnapshot? = null,
     val activityLoading: Boolean = false,
     val activityError: String? = null,
+    val diagnostics: List<DiagnosticCheck> = emptyList(),
+    val diagnosticsRunning: Boolean = false,
+    val restoreBackupPath: String? = null,
+    val backupPreview: BackupPreview? = null,
     val error: String? = null,
     val notice: String? = null,
     val busyAction: String? = null,
@@ -112,6 +154,12 @@ data class DnsCryptUiState(
     val allowlistLoading: Boolean = false,
     val firewall: FirewallSupport? = null,
     val firewallBlockedUids: Set<Int> = emptySet(),
+    val firewallTemporaryRules: Map<String, Long> = emptyMap(),
+    val firewallProfiles: List<FirewallProfile> = emptyList(),
     val firewallLoading: Boolean = false,
     val firewallError: String? = null,
+    val allowlistLoaded: Boolean = false,
+    val connections: List<ConnectionEvent> = emptyList(),
+    val connectionsLoading: Boolean = false,
+    val connectionsError: String? = null,
 )

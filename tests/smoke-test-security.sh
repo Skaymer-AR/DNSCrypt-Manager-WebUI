@@ -446,6 +446,17 @@ for(const k of ['blocked','allowed','allowlisted']) if(!s.has(k)){console.error(
 " && ok "G actividad distingue bloqueada, permitida y allowlist" || bad "G actividad no distingue estados"
 call_cap "$SCRATCH/g_activity_stats.json" activity stats --json
 json_ok "$SCRATCH/g_activity_stats.json" && ok "G activity stats --json valido" || bad "G activity stats JSON invalido"
+call_cap "$SCRATCH/g_activity_snapshot.json" activity snapshot --limit 200 --json
+json_ok "$SCRATCH/g_activity_snapshot.json" && ok "G activity snapshot incluye lectura conjunta valida" || bad "G activity snapshot JSON invalido"
+"$NODE_BIN" -e "
+const d=JSON.parse(require('fs').readFileSync('$SCRATCH/g_activity_snapshot.json','utf8'));
+if(!d.stats || d.stats.available!==true || !Array.isArray(d.events)){console.error('faltan stats/events');process.exit(1);}
+if(d.stats.total < d.events.length){console.error('el total no puede ser menor que las filas devueltas');process.exit(1);}
+const counts={blocked:0,allowed:0,allowlisted:0,error:0};
+for(const e of d.events) if(e.status in counts) counts[e.status]++;
+for(const k of Object.keys(counts)) if(counts[k] > d.stats[k]){console.error('filas exceden contador '+k);process.exit(1);}
+for(const k of ['blocked','allowed','allowlisted']) if(!d.events.some(e=>e.status===k)){console.error('faltan eventos '+k);process.exit(1);}
+" && ok "G contadores y eventos vienen de una respuesta coherente" || bad "G snapshot mezcla contadores/eventos"
 call_cli activity disable >/dev/null 2>&1 && ! grep -q 'DCM:query_activity BEGIN' "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml" \
   && ok "G activity disable retira query_log sin tocar listas" || bad "G activity disable no retiro query_log"
 call_cli set-flag query_max 10001 >/dev/null 2>&1; [ $? -ne 0 ] && ok "G query_max fuera de rango rechazado" || bad "G query_max invalido aceptado"

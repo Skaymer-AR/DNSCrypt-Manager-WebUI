@@ -39,7 +39,7 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') uninstall: $*" >> "$DATA_DIR/logs/boo
 log "iniciando desinstalacion"
 
 # 1. Retirar reglas de redireccion (idempotente; no falla si no habia)
-if [ -x "$CLI" ]; then
+if [ -x "$CLI" ] || { [ "${DNSCRYPT_TEST_MODE:-0}" = "1" ] && [ -f "$CLI" ]; }; then
   run_cli app-policy clear-all 2>/dev/null
   run_cli redirect remove 2>/dev/null
   run_cli restore-network 2>/dev/null

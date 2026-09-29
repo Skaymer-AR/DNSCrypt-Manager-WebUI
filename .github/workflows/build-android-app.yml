@@ -3,7 +3,8 @@ name: Build DNSCrypt Manager Android app
 on:
   push:
     branches:
-      - codex/native-android-app-ci
+      - main
+      - codex/android-manager-next-features
   pull_request:
     branches:
       - main
@@ -32,7 +33,7 @@ jobs:
 
       - name: Run module gate and package candidate
         env:
-          DCM_OUTPUT: ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc3.zip
+          DCM_OUTPUT: ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc5.zip
         shell: bash
         run: |
           set -euo pipefail
@@ -40,18 +41,18 @@ jobs:
           test -s "$DCM_OUTPUT"
           unzip -tq "$DCM_OUTPUT"
           unzip -p "$DCM_OUTPUT" module.prop | tr -d '\r' > "$RUNNER_TEMP/module.prop"
-          grep -qx 'version=v1.1.1-rc3' "$RUNNER_TEMP/module.prop"
-          grep -qx 'versionCode=11013' "$RUNNER_TEMP/module.prop"
+          grep -qx 'version=v1.1.1-rc5' "$RUNNER_TEMP/module.prop"
+          grep -qx 'versionCode=11015' "$RUNNER_TEMP/module.prop"
           module_zip="$(basename "$DCM_OUTPUT")"
           (cd "$(dirname "$DCM_OUTPUT")" && sha256sum "$module_zip" > "$module_zip.sha256")
 
       - name: Upload module candidate
         uses: actions/upload-artifact@v4
         with:
-          name: DNSCrypt-Manager-v1.1.1-rc3-candidate
+          name: DNSCrypt-Manager-v1.1.1-rc5-candidate
           path: |
-            ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc3.zip
-            ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc3.zip.sha256
+            ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc5.zip
+            ${{ runner.temp }}/DNSCrypt-Manager-v1.1.1-rc5.zip.sha256
             ${{ runner.temp }}/build-module.log
           if-no-files-found: error
           retention-days: 14
@@ -103,3 +104,73 @@ jobs:
             android-app/app/build/outputs/apk/debug/app-debug.apk.sha256
           if-no-files-found: error
           retention-days: 14
+
+  publish-big-update:
+    needs:
+      - build-module-candidate
+      - build-debug-apk
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Skaymer-AR/DNSCrypt-Manager-WebUI'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v7
+
+      - name: Download verified module ZIP
+        uses: actions/download-artifact@v4
+        with:
+          name: DNSCrypt-Manager-v1.1.1-rc5-candidate
+          path: ${{ runner.temp }}/module
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: DNSCrypt-Manager-Android-debug
+          path: ${{ runner.temp }}/android
+
+      - name: Verify and prepare release assets
+        shell: bash
+        env:
+          ASSETS: ${{ runner.temp }}/release-assets
+        run: |
+          set -euo pipefail
+          mkdir -p "$ASSETS"
+          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.1.1-rc5.zip" "$ASSETS/"
+          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.1.1-rc5.zip.sha256" "$ASSETS/"
+          cp "$RUNNER_TEMP/android/app-debug.apk" "$ASSETS/DNSCrypt-Manager-Android-v0.3.1-debug.apk"
+
+          unzip -tq "$ASSETS/DNSCrypt-Manager-v1.1.1-rc5.zip"
+          unzip -p "$ASSETS/DNSCrypt-Manager-v1.1.1-rc5.zip" module.prop | tr -d '\r' > "$RUNNER_TEMP/release-module.prop"
+          grep -qx 'version=v1.1.1-rc5' "$RUNNER_TEMP/release-module.prop"
+          grep -qx 'versionCode=11015' "$RUNNER_TEMP/release-module.prop"
+          grep -qx 'versionName = "0.3.1"' android-app/app/build.gradle.kts
+          test -s "$ASSETS/DNSCrypt-Manager-Android-v0.3.1-debug.apk"
+          (cd "$ASSETS" && sha256sum DNSCrypt-Manager-Android-v0.3.1-debug.apk > DNSCrypt-Manager-Android-v0.3.1-debug.apk.sha256)
+          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-v1.1.1-rc5.zip.sha256)
+          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-Android-v0.3.1-debug.apk.sha256)
+          test -s release/v1.1.1-rc5/RELEASE_NOTES_ES.md
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSETS: ${{ runner.temp }}/release-assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG='v1.1.1-rc5'
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "La pre-release $TAG ya existe; no se reemplaza automáticamente."
+            exit 0
+          fi
+          if git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "El tag $TAG ya existe sin una Release; se omite para evitar moverlo."
+            exit 0
+          fi
+          gh release create "$TAG" "$ASSETS"/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title 'Big Update — DNSCrypt Manager Android 0.3.1 + módulo v1.1.1 RC5' \
+            --notes-file release/v1.1.1-rc5/RELEASE_NOTES_ES.md \
+            --prerelease

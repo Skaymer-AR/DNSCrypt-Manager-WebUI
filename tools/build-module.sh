@@ -136,6 +136,10 @@ else
   bash "$ROOT/tests/smoke-test-security.sh" || fail "tests/smoke-test-security.sh fallo. No hay release con tests rotos."
   echo "  --- tests/smoke-test-app-policy.sh (firewall por UID) ---"
   bash "$ROOT/tests/smoke-test-app-policy.sh" || fail "tests/smoke-test-app-policy.sh fallo. No hay release con firewall por app roto."
+  echo "  --- tests/smoke-test-connections.sh (muestra puntual por UID) ---"
+  bash "$ROOT/tests/smoke-test-connections.sh" || fail "tests/smoke-test-connections.sh fallo. No hay release con el monitor de conexiones roto."
+  echo "  --- tests/smoke-test-app-backup.sh (copia y restauración segura) ---"
+  bash "$ROOT/tests/smoke-test-app-backup.sh" || fail "tests/smoke-test-app-backup.sh fallo. No hay release con la copia de seguridad rota."
   echo "  --- tests/smoke-test-blocklist-engine.sh (parser, rollback, allowlist, red) ---"
   bash "$ROOT/tests/smoke-test-blocklist-engine.sh" || fail "tests/smoke-test-blocklist-engine.sh fallo. No hay release con el motor de blocklists roto."
   echo "  --- tests/smoke-test-webui.sh ---"
@@ -144,6 +148,8 @@ else
   python3 "$ROOT/tools/build-catalog.py" --check || fail "El catalogo generado no es reproducible (build-catalog.py --check)."
   echo "  --- tests/smoke-test-catalog.sh ---"
   bash "$ROOT/tests/smoke-test-catalog.sh" || fail "tests/smoke-test-catalog.sh fallo. No hay release con tests rotos."
+  echo "  --- tests/smoke-test-catalog-group.sh (activación por categoría con rollback) ---"
+  bash "$ROOT/tests/smoke-test-catalog-group.sh" || fail "tests/smoke-test-catalog-group.sh fallo. No hay release con activación por categoría rota."
   echo "  --- tests/smoke-test-catalog-bootstrap.sh (upgrade schema 3 sin índice) ---"
   bash "$ROOT/tests/smoke-test-catalog-bootstrap.sh" || fail "tests/smoke-test-catalog-bootstrap.sh fallo. No hay release con catalogo inaccesible."
   echo "  --- tests/smoke-test-catalog-download-all.sh (job asíncrono y límites 5M) ---"
@@ -151,7 +157,11 @@ else
   echo "  --- tests/smoke-test-webui-args.cjs ---"
   node "$ROOT/tests/smoke-test-webui-args.cjs" || fail "tests/smoke-test-webui-args.cjs fallo (seguridad de argumentos)."
 fi
-echo "  OK: suites RC2 pasaron"
+if [ "${DCM_SKIP_TESTS:-0}" = "1" ]; then
+  echo "  NOTA: este empaquetado omitio las suites; deben aparecer aprobadas por separado en CI."
+else
+  echo "  OK: todas las suites requeridas pasaron"
+fi
 
 ##############################################################################
 step "6) Ningun fixture debe colarse en el instalable"

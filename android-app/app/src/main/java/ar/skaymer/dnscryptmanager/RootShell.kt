@@ -29,11 +29,15 @@ internal class RootShell(private val tempDirectory: File) {
             override val args = listOf("status", "--json")
             override val timeoutSeconds = 20L
         }
+        data object TestDns : Command {
+            override val args = listOf("test-dns")
+            override val timeoutSeconds = 120L
+        }
         data object ActivityStatus : Command {
             override val args = listOf("activity", "status", "--json")
             override val timeoutSeconds = 10L
         }
-        data class ActivityList(val limit: Int = 100) : Command {
+        data class ActivityList(val limit: Int = 200) : Command {
             init { require(limit in 1..200) }
             override val args = listOf("activity", "list", "--limit", limit.toString(), "--json")
             override val timeoutSeconds = 45L
@@ -42,9 +46,23 @@ internal class RootShell(private val tempDirectory: File) {
             override val args = listOf("activity", "stats", "--json")
             override val timeoutSeconds = 45L
         }
+        data class ActivitySnapshot(val limit: Int = 200) : Command {
+            init { require(limit in 1..200) }
+            override val args = listOf("activity", "snapshot", "--limit", limit.toString(), "--json")
+            override val timeoutSeconds = 60L
+        }
         data object ActivityEnable : Command { override val args = listOf("activity", "enable") }
         data object ActivityDisable : Command { override val args = listOf("activity", "disable") }
         data object ActivityClear : Command { override val args = listOf("activity", "clear") }
+        data class ActivityRetentionDays(val days: Int) : Command {
+            init { require(days in setOf(1, 3, 7)) }
+            override val args = listOf("set-flag", "query_days", days.toString())
+        }
+        data class ActivityRetentionMax(val entries: Int) : Command {
+            init { require(entries in 50..10_000) }
+            override val args = listOf("set-flag", "query_max", entries.toString())
+        }
+        data object ActivityPrune : Command { override val args = listOf("activity", "prune") }
 
         data object AppPolicySupport : Command {
             override val args = listOf("app-policy", "support", "--json")
@@ -68,6 +86,45 @@ internal class RootShell(private val tempDirectory: File) {
             override val args = listOf("app-policy", "clear-all")
             override val timeoutSeconds = 30L
         }
+        data class AppPolicyTempBlock(val packageName: String, val duration: String) : Command {
+            init { require(validPackageName(packageName)); require(duration in setOf("15m", "1h", "8h")) }
+            override val args = listOf("app-policy", "temp-block", packageName, duration)
+            override val timeoutSeconds = 30L
+        }
+        data object AppPolicyProfileList : Command {
+            override val args = listOf("app-policy", "profile", "list", "--json")
+        }
+        data class AppPolicyProfileSave(val name: String, val packageNames: List<String>) : Command {
+            init {
+                require(name.matches(Regex("^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$")))
+                require(!name.endsWith(" ") && !name.contains("  "))
+                require(packageNames.size <= 200 && packageNames.all(::validPackageName))
+            }
+            override val args = listOf("app-policy", "profile", "save", name, packageNames.distinct().joinToString(","))
+        }
+        data class AppPolicyProfileRemove(val name: String) : Command {
+            init { require(name.matches(Regex("^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$"))); require(!name.endsWith(" ") && !name.contains("  ")) }
+            override val args = listOf("app-policy", "profile", "remove", name)
+        }
+        data object Connections : Command {
+            override val args = listOf("connections")
+            override val timeoutSeconds = 15L
+        }
+        data class BackupExport(val outputPath: String) : Command {
+            init { require(isAppCacheName(outputPath)) }
+            override val args = listOf("backup", "--output", outputPath)
+            override val timeoutSeconds = 120L
+        }
+        data class BackupRestore(val inputPath: String) : Command {
+            init { require(isAppCacheName(inputPath)) }
+            override val args = listOf("restore-app-backup", inputPath)
+            override val timeoutSeconds = 180L
+        }
+        data class BackupInspect(val inputPath: String) : Command {
+            init { require(isAppCacheName(inputPath)) }
+            override val args = listOf("backup", "inspect", "--input", inputPath)
+            override val timeoutSeconds = 60L
+        }
 
         data object CatalogGroups : Command { override val args = listOf("catalog", "groups", "--json") }
         data class CatalogList(val group: String) : Command {
@@ -84,6 +141,11 @@ internal class RootShell(private val tempDirectory: File) {
             init { require(validCatalogId(id)) }
             override val args = listOf("catalog", "disable", id)
             override val timeoutSeconds = 180L
+        }
+        data class CatalogGroupApply(val group: String, val enabled: Boolean) : Command {
+            init { require(group in CATALOG_GROUPS) }
+            override val args = listOf("catalog", "group", if (enabled) "enable" else "disable", group)
+            override val timeoutSeconds = 600L
         }
         data object CatalogDownloadAllStart : Command {
             override val args = listOf("catalog", "download-all", "--confirmed")
@@ -120,6 +182,15 @@ internal class RootShell(private val tempDirectory: File) {
     }
 
     suspend fun run(command: Command): Result = withContext(Dispatchers.IO) {
+        val artifactPath = when (command) {
+            is Command.BackupExport -> command.outputPath
+            is Command.BackupRestore -> command.inputPath
+            is Command.BackupInspect -> command.inputPath
+            else -> null
+        }
+        if (artifactPath != null && !isAppCacheArtifact(artifactPath)) {
+            return@withContext Result(2, "La ruta de la copia no pertenece al caché privado de la app.")
+        }
         val script = buildScript(command.args)
         val outputFile = try {
             File.createTempFile("dcm-root-", ".out", tempDirectory)
@@ -189,12 +260,19 @@ internal class RootShell(private val tempDirectory: File) {
     private fun shellQuote(value: String): String =
         "'${value.replace("'", "'\"'\"'")}'"
 
+    private fun isAppCacheArtifact(path: String): Boolean = runCatching {
+        val file = File(path)
+        isAppCacheName(path) &&
+            file.parentFile?.canonicalFile == tempDirectory.canonicalFile
+    }.getOrDefault(false)
+
     private companion object {
         val CATALOG_GROUPS = setOf("Security", "Privacy", "ParentalControl", "dcm", "RethinkUnassigned")
         val PROVIDERS = setOf("cloudflare", "quad9", "adguard", "mullvad")
         val NEXTDNS_ID = Regex("^[0-9a-fA-F]{4,12}$")
         val PACKAGE_NAME = Regex("^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$")
         const val MAX_OUTPUT_BYTES = 16L * 1024L * 1024L
+        fun isAppCacheName(path: String): Boolean = File(path).name.matches(Regex("^dcm-backup-[A-Za-z0-9-]+\\.tar\\.gz$"))
         val CATALOG_ID = Regex("^[a-z0-9][a-z0-9_-]{0,127}$")
         val DOMAIN = Regex("^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 

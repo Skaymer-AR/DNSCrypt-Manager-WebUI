@@ -1,6 +1,11 @@
 package ar.skaymer.dnscryptmanager.ui
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,6 +64,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -66,6 +72,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,11 +85,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.state.ToggleableState
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ar.skaymer.dnscryptmanager.ActivityEvent
 import ar.skaymer.dnscryptmanager.CatalogEntry
 import ar.skaymer.dnscryptmanager.DnsCryptUiState
 import ar.skaymer.dnscryptmanager.DnsCryptViewModel
+import ar.skaymer.dnscryptmanager.DiagnosticCheck
+import ar.skaymer.dnscryptmanager.ConnectionEvent
+import ar.skaymer.dnscryptmanager.FirewallProfile
 import ar.skaymer.dnscryptmanager.FirewallApp
 import ar.skaymer.dnscryptmanager.FirewallAppInventory
 import kotlinx.coroutines.Dispatchers
@@ -90,6 +101,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 private enum class Tab(val label: String) {
     HOME("Inicio"),
@@ -103,6 +117,7 @@ private enum class Tab(val label: String) {
 internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.HOME.name) }
+    var connectionMode by rememberSaveable { mutableStateOf(false) }
     val currentTab = Tab.valueOf(tab)
     val snackbar = remember { SnackbarHostState() }
 
@@ -120,7 +135,16 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
                 viewModel.refreshDownloadProgress()
             }
             Tab.FIREWALL -> viewModel.refreshFirewall()
+            Tab.ACTIVITY -> viewModel.loadAllowlist()
             else -> Unit
+        }
+    }
+    LaunchedEffect(currentTab, connectionMode) {
+        if (currentTab == Tab.ACTIVITY && connectionMode) {
+            while (true) {
+                viewModel.refreshConnections()
+                delay(5_000)
+            }
         }
     }
     LaunchedEffect(currentTab, state.downloadProgress.running) {
@@ -151,18 +175,34 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
                     onRefresh = viewModel::refresh,
                     onActivityToggle = viewModel::setActivityEnabled,
                     onOpenActivity = { tab = Tab.ACTIVITY.name },
+                    onTestDns = viewModel::testDns,
+                    onRunDiagnostics = viewModel::runDiagnostics,
+                    onRetryActivity = viewModel::retryActivity,
                 )
                 Tab.ACTIVITY -> ActivityScreen(
                     state = state,
-                    onRefresh = viewModel::refresh,
+                    onRefresh = viewModel::retryActivity,
                     onClear = viewModel::clearActivity,
                     onEnable = { viewModel.setActivityEnabled(true) },
+                    connectionMode = connectionMode,
+                    onConnectionModeChange = { connectionMode = it },
+                    onRefreshConnections = viewModel::refreshConnections,
+                    allowlistedDomains = state.allowlist.toSet(),
+                    allowlistReady = state.allowlistLoaded,
+                    onToggleDomain = { domain ->
+                        if (domain.lowercase(Locale.ROOT) in state.allowlist.map { it.lowercase(Locale.ROOT) }.toSet()) viewModel.removeAllowlist(domain)
+                        else viewModel.addAllowlist(domain)
+                    },
                 )
                 Tab.FIREWALL -> FirewallScreen(
                     state = state,
                     onRefresh = viewModel::refreshFirewall,
                     onSetBlocked = viewModel::setAppBlocked,
                     onClearAll = viewModel::clearAllAppBlocks,
+                    onTempBlock = viewModel::setAppBlockedTemporarily,
+                    onSaveProfile = viewModel::saveFirewallProfile,
+                    onApplyProfile = viewModel::applyFirewallProfile,
+                    onRemoveProfile = viewModel::removeFirewallProfile,
                 )
                 Tab.LISTS -> ListsScreen(
                     state = state,
@@ -170,6 +210,7 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
                     onSelectGroup = { viewModel.loadCatalogGroup(it) },
                     onSetEnabled = viewModel::setCatalogEnabled,
                     onStartDownloadAll = viewModel::startDownloadAll,
+                    onSetGroupEnabled = viewModel::setCatalogGroupEnabled,
                     onRefreshProgress = viewModel::refreshDownloadProgress,
                     onLoadAllowlist = viewModel::loadAllowlist,
                     onAddAllowlist = viewModel::addAllowlist,
@@ -179,6 +220,11 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
                     state = state,
                     onRefresh = viewModel::refresh,
                     onSetProvider = viewModel::setProvider,
+                    onSetRetention = viewModel::setActivityRetention,
+                    onBackupExport = viewModel::exportBackup,
+                    onBackupInspect = viewModel::inspectBackup,
+                    onConfirmBackupRestore = viewModel::confirmBackupRestore,
+                    onCancelBackupRestore = viewModel::dismissBackupPreview,
                 )
             }
         }
@@ -227,6 +273,9 @@ private fun HomeScreen(
     onRefresh: () -> Unit,
     onActivityToggle: (Boolean) -> Unit,
     onOpenActivity: () -> Unit,
+    onTestDns: () -> Unit,
+    onRunDiagnostics: () -> Unit,
+    onRetryActivity: () -> Unit,
 ) {
     val snapshot = state.snapshot ?: return
     val status = snapshot.status
@@ -236,6 +285,26 @@ private fun HomeScreen(
     ) {
         ScreenHeader("Tu DNS", "Protección y actividad de la red", onRefresh, state.busyAction != null || state.loading)
         StatusHero(status.running && status.listening && status.redirectActive, status.running && status.listening, status.redirectActive)
+        OutlinedButton(
+            onClick = onTestDns,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = state.busyAction == null,
+            shape = RoundedCornerShape(18.dp),
+        ) {
+            Icon(Icons.Outlined.CheckCircle, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (state.busyAction?.contains("DNS", ignoreCase = true) == true) "Probando DNS…" else "Probar mi DNS")
+        }
+        Text(
+            "Hace una prueba real de resolución y revierte la redirección si algo falla.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        DiagnosticsCard(
+            checks = state.diagnostics,
+            running = state.diagnosticsRunning,
+            onRun = onRunDiagnostics,
+        )
         ActivityStatsGrid(state)
         ResolverCard(status.server, status.version)
         ActivityControlCard(
@@ -244,12 +313,13 @@ private fun HomeScreen(
             busy = state.busyAction != null,
             onToggle = onActivityToggle,
         )
+        if (!state.activityError.isNullOrBlank()) {
+            ActivityErrorCard(state.activityError, state.activityLoading, onRetryActivity)
+        }
         SectionHeading("Actividad reciente", "Consultas DNS de este dispositivo", onOpenActivity)
         if (state.activityLoading && snapshot.events.isEmpty()) {
             QuietCard(Icons.Outlined.History, "Leyendo actividad", "El estado del módulo ya está disponible. Los registros se están cargando aparte.")
-        } else if (!state.activityError.isNullOrBlank() && snapshot.events.isEmpty()) {
-            QuietCard(Icons.Outlined.Info, "Actividad no disponible", state.activityError)
-        } else if (snapshot.events.isEmpty()) {
+        } else if (snapshot.events.isEmpty() && state.activityError.isNullOrBlank()) {
             QuietCard(
                 icon = Icons.Outlined.History,
                 title = "Todavía no hay consultas registradas",
@@ -268,6 +338,57 @@ private fun HomeScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 8.dp),
         )
+    }
+}
+
+@Composable
+private fun DiagnosticsCard(
+    checks: List<DiagnosticCheck>,
+    running: Boolean,
+    onRun: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(9.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Diagnóstico", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Comprobá el módulo, DNS, listas y firewall", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else TextButton(onClick = onRun, enabled = !running) { Text(if (checks.isEmpty()) "Revisar" else "Repetir") }
+            }
+            if (running) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text("La prueba DNS puede tardar hasta dos minutos. Si falla, el módulo intenta restaurar la red.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (checks.isEmpty()) {
+                Text("Hace una consulta DNS real y muestra cada resultado por separado; no combina el firewall con las estadísticas DNS.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                checks.forEach { DiagnosticCheckRow(it) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticCheckRow(check: DiagnosticCheck) {
+    val tint = when (check.state) {
+        "ok" -> MaterialTheme.colorScheme.primary
+        "attention" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.tertiary
+    }
+    val icon = when (check.state) {
+        "ok" -> Icons.Outlined.CheckCircle
+        "attention" -> Icons.Outlined.ErrorOutline
+        else -> Icons.Outlined.Info
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.padding(top = 1.dp).size(18.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(check.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text(check.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -414,6 +535,27 @@ private fun ActivityControlCard(enabled: Boolean, supported: Boolean, busy: Bool
 }
 
 @Composable
+private fun ActivityErrorCard(message: String, loading: Boolean, onRetry: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 7.dp, top = 11.dp, bottom = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("No se pudo actualizar Actividad", fontWeight = FontWeight.SemiBold)
+                Text(message, style = MaterialTheme.typography.bodySmall)
+                Text("Se conservan los datos anteriores; el error no se muestra como cero.", style = MaterialTheme.typography.labelSmall)
+            }
+            TextButton(onClick = onRetry, enabled = !loading) {
+                if (loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                else Text("Reintentar")
+            }
+        }
+    }
+}
+
+@Composable
 private fun SectionHeading(title: String, subtitle: String, onClick: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -430,11 +572,51 @@ private fun ActivityScreen(
     onRefresh: () -> Unit,
     onClear: () -> Unit,
     onEnable: () -> Unit,
+    connectionMode: Boolean,
+    onConnectionModeChange: (Boolean) -> Unit,
+    onRefreshConnections: () -> Unit,
+    allowlistedDomains: Set<String>,
+    allowlistReady: Boolean,
+    onToggleDomain: (String) -> Unit,
 ) {
     val snapshot = state.snapshot ?: return
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var filter by rememberSaveable { mutableStateOf("todas") }
     var query by rememberSaveable { mutableStateOf("") }
     var showClearDialog by remember { mutableStateOf(false) }
+    var selectedEvent by remember { mutableStateOf<ActivityEvent?>(null) }
+    val exportActivity = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            val payload = JSONObject()
+                .put("format", "dnscrypt-manager-activity-v1")
+                .put("exported_at_epoch_ms", System.currentTimeMillis())
+                .put("source", "registro local de DNS")
+                .put("events", JSONArray().apply {
+                    snapshot.events.forEach { event ->
+                        put(
+                            JSONObject()
+                                .put("time", event.time)
+                                .put("domain", event.domain)
+                                .put("status", event.status)
+                                .put("rule", event.rule)
+                                .put("category", event.category)
+                                .put("return_code", event.returnCode)
+                                .put("duration", event.duration),
+                        )
+                    }
+                }).toString(2)
+            scope.launch(Dispatchers.IO) {
+                val result = runCatching {
+                    val output = context.contentResolver.openOutputStream(uri, "w") ?: error("No se pudo abrir el archivo elegido.")
+                    output.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                }
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    Toast.makeText(context, result.fold({ "Actividad exportada (${snapshot.events.size} registros)" }, { it.message ?: "No se pudo exportar" }), Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
     val filtered = snapshot.events.filter { event ->
         val filterMatches = when (filter) {
             "bloqueadas" -> event.status == "blocked"
@@ -446,12 +628,23 @@ private fun ActivityScreen(
         filterMatches && (query.isBlank() || event.domain.contains(query.trim(), ignoreCase = true))
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        ScreenHeader("Actividad", "Dominios consultados y resultado", onRefresh, state.loading || state.busyAction != null)
+        ScreenHeader(
+            "Actividad",
+            if (connectionMode) "Conexiones activas por aplicación" else "Dominios consultados y resultado",
+            if (connectionMode) onRefreshConnections else onRefresh,
+            if (connectionMode) state.connectionsLoading || state.busyAction != null else state.activityLoading || state.busyAction != null,
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = !connectionMode, onClick = { onConnectionModeChange(false) }, label = { Text("Consultas DNS") })
+            FilterChip(selected = connectionMode, onClick = { onConnectionModeChange(true) }, label = { Text("Conexiones") })
+        }
         Spacer(Modifier.height(12.dp))
-        if (!snapshot.activitySupported) {
+        if (connectionMode) {
+            ConnectionsBody(state, onRefreshConnections, Modifier.weight(1f))
+        } else if (!snapshot.activitySupported) {
             QuietCard(Icons.Outlined.Info, "Registro no disponible", "La versión instalada del módulo todavía no expone la actividad DNS local.")
             return@Column
-        }
+        } else {
         if (!snapshot.status.activityEnabled) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Row(Modifier.fillMaxWidth().padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -463,6 +656,10 @@ private fun ActivityScreen(
                 }
             }
             Spacer(Modifier.height(10.dp))
+        }
+        if (!state.activityError.isNullOrBlank()) {
+            ActivityErrorCard(state.activityError, state.activityLoading, onRefresh)
+            Spacer(Modifier.height(9.dp))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             MiniMetric("Total", snapshot.stats.total.takeIf { snapshot.stats.available }, Modifier.weight(1f))
@@ -488,6 +685,9 @@ private fun ActivityScreen(
         Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("${filtered.size} resultados", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
+            TextButton(onClick = { exportActivity.launch("actividad-dns.json") }, enabled = snapshot.events.isNotEmpty()) {
+                Text("Exportar")
+            }
             TextButton(onClick = { showClearDialog = true }, enabled = state.busyAction == null && snapshot.events.isNotEmpty()) {
                 Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(4.dp))
@@ -504,7 +704,7 @@ private fun ActivityScreen(
             }
         } else if (!state.activityError.isNullOrBlank() && snapshot.events.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                EmptyState("No se pudo leer la actividad", state.activityError ?: "Volvé a intentar.")
+                EmptyState("Lectura pendiente", "Tocá Reintentar en el aviso de arriba. No se muestran ceros como si fueran datos reales.")
             }
         } else if (filtered.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -514,14 +714,21 @@ private fun ActivityScreen(
             LazyColumn(
                 modifier = Modifier.weight(1f).padding(top = 9.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) { items(filtered, key = { "${it.time}-${it.domain}-${it.status}" }) { ActivityRow(it) } }
+            ) { items(filtered, key = { "${it.time}-${it.domain}-${it.status}" }) {
+                ActivityRow(
+                    it,
+                    onClick = { selectedEvent = it },
+                    enabled = allowlistReady && state.busyAction == null && validDomainForForm(it.domain.lowercase(Locale.ROOT)),
+                )
+            } }
         }
         Text(
-            "La actividad muestra consultas DNS. Todavía no identifica de forma confiable qué app las inició.",
+            "Tocá un dominio para permitirlo o quitarlo de tus excepciones. Se muestran y exportan hasta 200 consultas recientes; no se atribuyen a una app.",
             modifier = Modifier.padding(top = 9.dp, bottom = 3.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        }
     }
     if (showClearDialog) {
         ConfirmDialog(
@@ -531,6 +738,70 @@ private fun ActivityScreen(
             onDismiss = { showClearDialog = false },
             onConfirm = { showClearDialog = false; onClear() },
         )
+    }
+    selectedEvent?.let { event ->
+        val isAllowlisted = event.domain.lowercase(Locale.ROOT) in allowlistedDomains.map { it.lowercase(Locale.ROOT) }.toSet()
+        ConfirmDialog(
+            title = if (isAllowlisted) "¿Quitar la excepción?" else "¿Permitir ${event.domain}?",
+            body = if (isAllowlisted) "${event.domain} volverá a estar sujeto a las listas DNS activas." else "${event.domain} se agregará a tus dominios permitidos. Puede dejar de bloquearse por una lista DNS.",
+            confirm = if (isAllowlisted) "Quitar excepción" else "Permitir dominio",
+            onDismiss = { selectedEvent = null },
+            onConfirm = { selectedEvent = null; onToggleDomain(event.domain) },
+        )
+    }
+}
+
+@Composable
+private fun ConnectionsBody(state: DnsCryptUiState, onRefresh: () -> Unit, modifier: Modifier) {
+    val context = LocalContext.current
+    val appResult by produceState<Result<List<FirewallApp>>?>(null, context) {
+        value = try {
+            Result.success(withContext(Dispatchers.IO) { FirewallAppInventory.load(context) })
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+    }
+    val appsByUid = appResult?.getOrNull().orEmpty().associateBy { it.uid }
+    Column(modifier.fillMaxWidth()) {
+        QuietCard(
+            Icons.Outlined.Info,
+            "Muestra en vivo, sin historial",
+            "Solo enseña sockets TCP/UDP conectados que el sistema expone. No ve conexiones muy breves ni convierte IPs en dominios.",
+        )
+        Spacer(Modifier.height(8.dp))
+        if (state.connectionsError != null && state.connections.isEmpty()) {
+            EmptyState("No se pudieron leer las conexiones", state.connectionsError)
+        } else if (state.connectionsLoading && state.connections.isEmpty()) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        } else if (state.connections.isEmpty()) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                EmptyState("No hay conexiones activas", "La próxima lectura se hace automáticamente cada 5 segundos mientras mirás esta pantalla.")
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                items(state.connections.mapIndexed { index, connection -> index to connection }, key = { it.first }) { (_, connection) ->
+                    ConnectionRow(connection, appsByUid[connection.uid]?.label ?: "UID ${connection.uid}")
+                }
+            }
+        }
+        if (state.connectionsError != null && state.connections.isNotEmpty()) {
+            Text("No se pudo actualizar: ${state.connectionsError}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        TextButton(onClick = onRefresh, enabled = !state.connectionsLoading && state.busyAction == null) { Text("Actualizar ahora") }
+    }
+}
+
+@Composable
+private fun ConnectionRow(connection: ConnectionEvent, appLabel: String) {
+    val address = if (connection.remoteAddress.contains(':')) "[${connection.remoteAddress}]:${connection.remotePort}" else "${connection.remoteAddress}:${connection.remotePort}"
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(appLabel, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(address, style = MaterialTheme.typography.bodyMedium)
+            Text("${connection.protocol.replace("v4", " IPv4").replace("v6", " IPv6")} · ${connection.state}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -545,13 +816,16 @@ private fun MiniMetric(label: String, value: Int?, modifier: Modifier, tint: Col
 }
 
 @Composable
-private fun ActivityRow(event: ActivityEvent) {
+private fun ActivityRow(event: ActivityEvent, onClick: (() -> Unit)? = null, enabled: Boolean = false) {
     val tint = when (event.status) {
         "blocked" -> MaterialTheme.colorScheme.error
         "allowed", "allowlisted" -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.tertiary
     }
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    Card(
+        modifier = if (onClick != null && enabled) Modifier.clickable(onClick = onClick) else Modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(9.dp).clip(CircleShape).background(tint))
             Spacer(Modifier.width(11.dp))
@@ -578,6 +852,10 @@ private fun FirewallScreen(
     onRefresh: () -> Unit,
     onSetBlocked: (List<String>, Boolean) -> Unit,
     onClearAll: () -> Unit,
+    onTempBlock: (String, String) -> Unit,
+    onSaveProfile: (String, List<String>) -> Unit,
+    onApplyProfile: (FirewallProfile) -> Unit,
+    onRemoveProfile: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val appResult by produceState<Result<List<FirewallApp>>?>(null, context) {
@@ -596,6 +874,11 @@ private fun FirewallScreen(
     var search by rememberSaveable { mutableStateOf("") }
     var pendingApp by remember { mutableStateOf<FirewallApp?>(null) }
     var confirmClearAll by remember { mutableStateOf(false) }
+    var blockDuration by rememberSaveable { mutableStateOf("1h") }
+    var profileName by rememberSaveable { mutableStateOf("") }
+    var showSaveProfile by remember { mutableStateOf(false) }
+    var pendingProfile by remember { mutableStateOf<FirewallProfile?>(null) }
+    var pendingDeleteProfile by remember { mutableStateOf<FirewallProfile?>(null) }
     val filteredApps = apps.filter { app ->
         val terms = listOf(app.label, app.packageName) + app.sharedLabels
         search.isBlank() || terms.any { it.contains(search.trim(), ignoreCase = true) }
@@ -659,6 +942,33 @@ private fun FirewallScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Perfiles rápidos", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { showSaveProfile = true }, enabled = canClear && canBlock) { Text("Guardar actual") }
+                }
+                if (state.firewallProfiles.isEmpty()) {
+                    Text("Guardá un conjunto de apps bloqueadas para volver a aplicarlo cuando quieras.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                        state.firewallProfiles.forEach { profile ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                FilterChip(
+                                    selected = false,
+                                    onClick = { pendingProfile = profile },
+                                    label = { Text(profile.name) },
+                                    enabled = canClear && canBlock,
+                                )
+                                IconButton(onClick = { pendingDeleteProfile = profile }, enabled = canClear) {
+                                    Icon(Icons.Outlined.Delete, contentDescription = "Borrar perfil ${profile.name}", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(9.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Aplicaciones", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -701,7 +1011,9 @@ private fun FirewallScreen(
                     FirewallAppRow(
                         app = app,
                         blocked = blocked,
+                        temporaryUntil = app.packageNames.firstNotNullOfOrNull { state.firewallTemporaryRules[it] },
                         enabled = if (blocked) canClear else canBlock,
+                        onRefresh = onRefresh,
                         onToggle = { requested ->
                             if (requested) pendingApp = app else onSetBlocked(app.packageNames, false)
                         },
@@ -713,20 +1025,83 @@ private fun FirewallScreen(
 
     pendingApp?.let { app ->
         val sharedNames = app.sharedLabels.distinct()
-        ConfirmDialog(
-            title = "¿Bloquear ${app.label} de internet?",
-            body = buildString {
-                append("Va a perder el acceso a internet por Wi‑Fi y datos móviles. Puede dejar de sincronizar o conectarse.")
-                if (sharedNames.isNotEmpty()) {
-                    append(" También se bloquearán las apps que comparten su identificador: ")
-                    append(sharedNames.joinToString(", "))
-                    append(".")
+        AlertDialog(
+            onDismissRequest = { pendingApp = null },
+            title = { Text("¿Bloquear ${app.label} de internet?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text(buildString {
+                        append("Va a perder el acceso a internet por Wi‑Fi y datos móviles. Puede dejar de sincronizar o conectarse.")
+                        if (sharedNames.isNotEmpty()) append(" También afecta a: ${sharedNames.joinToString(", ")}.")
+                    })
+                    Text("Duración", style = MaterialTheme.typography.labelLarge)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("15m" to "15 min", "1h" to "1 hora", "8h" to "8 horas", "siempre" to "Siempre").forEach { (value, label) ->
+                            FilterChip(selected = blockDuration == value, onClick = { blockDuration = value }, label = { Text(label) })
+                        }
+                    }
+                    Text("Los bloqueos temporales vencen aunque cierres la app o reinicies el teléfono.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                append(" Podés revertirlo desde esta pantalla.")
             },
-            confirm = "Bloquear app",
-            onDismiss = { pendingApp = null },
-            onConfirm = { pendingApp = null; onSetBlocked(app.packageNames, true) },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    Button(onClick = {
+                        pendingApp = null
+                        if (blockDuration == "siempre") onSetBlocked(app.packageNames, true)
+                        else onTempBlock(app.packageNames.first(), blockDuration)
+                    }, enabled = canBlock) { Text(if (blockDuration == "siempre") "Bloquear siempre" else "Bloquear por ${when (blockDuration) { "15m" -> "15 min"; "1h" -> "1 hora"; else -> "8 horas" }}") }
+                    TextButton(onClick = { pendingApp = null }) { Text("Volver") }
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+        )
+    }
+    if (showSaveProfile) {
+        AlertDialog(
+            onDismissRequest = { showSaveProfile = false },
+            title = { Text("Guardar perfil") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Se guardará qué apps están bloqueadas ahora.")
+                    OutlinedTextField(
+                        value = profileName,
+                        onValueChange = { profileName = it.take(32) },
+                        label = { Text("Nombre") },
+                        singleLine = true,
+                    )
+                    Text("Usá letras, números, espacios, guion o guion bajo.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val blocked = apps.filter { it.uid in state.firewallBlockedUids }.mapNotNull { it.packageNames.firstOrNull() }
+                        showSaveProfile = false
+                        onSaveProfile(profileName.trim(), blocked)
+                    },
+                    enabled = canBlock && profileName.trim().matches(Regex("^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$")) && !profileName.trim().endsWith(" ") && !profileName.contains("  "),
+                ) { Text("Guardar") }
+            },
+            dismissButton = { TextButton(onClick = { showSaveProfile = false }) { Text("Cancelar") } },
+            containerColor = MaterialTheme.colorScheme.surface,
+        )
+    }
+    pendingProfile?.let { profile ->
+        ConfirmDialog(
+            title = "Aplicar ${profile.name}",
+            body = "Se ajustará el firewall para que coincida con este perfil (${profile.packages.size} apps guardadas). Las apps que ya no estén instaladas se omiten.",
+            confirm = "Aplicar perfil",
+            onDismiss = { pendingProfile = null },
+            onConfirm = { pendingProfile = null; onApplyProfile(profile) },
+        )
+    }
+    pendingDeleteProfile?.let { profile ->
+        ConfirmDialog(
+            title = "¿Borrar ${profile.name}?",
+            body = "Se elimina el perfil guardado; las reglas actuales del firewall no cambian.",
+            confirm = "Borrar perfil",
+            onDismiss = { pendingDeleteProfile = null },
+            onConfirm = { pendingDeleteProfile = null; onRemoveProfile(profile.name) },
         )
     }
     if (confirmClearAll) {
@@ -744,9 +1119,20 @@ private fun FirewallScreen(
 private fun FirewallAppRow(
     app: FirewallApp,
     blocked: Boolean,
+    temporaryUntil: Long?,
     enabled: Boolean,
+    onRefresh: () -> Unit,
     onToggle: (Boolean) -> Unit,
 ) {
+    val nowMillis by produceState(initialValue = System.currentTimeMillis(), key1 = temporaryUntil) {
+        while (temporaryUntil != null && value / 1000L < temporaryUntil) {
+            delay(30_000)
+            value = System.currentTimeMillis()
+        }
+    }
+    LaunchedEffect(temporaryUntil, nowMillis) {
+        if (temporaryUntil != null && nowMillis / 1000L >= temporaryUntil) onRefresh()
+    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),
@@ -769,6 +1155,14 @@ private fun FirewallAppRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (temporaryUntil != null) {
+                    val minutes = ((temporaryUntil * 1000L - nowMillis).coerceAtLeast(0L) + 59_999L) / 60_000L
+                    Text(
+                        if (minutes == 0L) "Bloqueo temporal · actualizando estado…" else "Bloqueo temporal · vence en $minutes min",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Switch(checked = blocked, onCheckedChange = onToggle, enabled = enabled)
@@ -783,6 +1177,7 @@ private fun ListsScreen(
     onSelectGroup: (String) -> Unit,
     onSetEnabled: (CatalogEntry, Boolean) -> Unit,
     onStartDownloadAll: () -> Unit,
+    onSetGroupEnabled: (String, Boolean) -> Unit,
     onRefreshProgress: () -> Unit,
     onLoadAllowlist: () -> Unit,
     onAddAllowlist: (String) -> Unit,
@@ -794,6 +1189,7 @@ private fun ListsScreen(
     var activeOnly by rememberSaveable { mutableStateOf(false) }
     var pendingEntry by remember { mutableStateOf<CatalogEntry?>(null) }
     var pendingEnabled by remember { mutableStateOf(false) }
+    var pendingGroupAction by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var confirmDownloadAll by remember { mutableStateOf(false) }
     var allowDomain by rememberSaveable { mutableStateOf("") }
     var allowError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -823,6 +1219,7 @@ private fun ListsScreen(
                 onSelectGroup = onSelectGroup,
                 onRequestToggle = { entry, enabled -> pendingEntry = entry; pendingEnabled = enabled },
                 onRequestDownloadAll = { confirmDownloadAll = true },
+                onRequestGroupToggle = { group, enabled -> pendingGroupAction = group to enabled },
                 onRefreshProgress = onRefreshProgress,
             )
         } else {
@@ -863,6 +1260,19 @@ private fun ListsScreen(
             onConfirm = { pendingEntry = null; onSetEnabled(entry, enabling) },
         )
     }
+    pendingGroupAction?.let { (group, enabling) ->
+        ConfirmDialog(
+            title = if (enabling) "¿Activar listas preparadas de ${groupLabel(group)}?" else "¿Desactivar las listas de ${groupLabel(group)}?",
+            body = if (enabling) {
+                "Se activan en una sola operación las fuentes descargadas y compatibles. No se descarga nada ahora; las fuentes archivadas, incompatibles o sin caché quedan apagadas. Después se recompila el filtro una sola vez."
+            } else {
+                "Se desactivan todas las fuentes activas de esta categoría y se recompila el filtro. Las demás categorías no cambian."
+            },
+            confirm = if (enabling) "Activar disponibles" else "Desactivar categoría",
+            onDismiss = { pendingGroupAction = null },
+            onConfirm = { pendingGroupAction = null; onSetGroupEnabled(group, enabling) },
+        )
+    }
     if (confirmDownloadAll) {
         ConfirmDialog(
             title = "Preparar todas las listas",
@@ -895,6 +1305,7 @@ private fun ColumnScope.CatalogPanel(
     onSelectGroup: (String) -> Unit,
     onRequestToggle: (CatalogEntry, Boolean) -> Unit,
     onRequestDownloadAll: () -> Unit,
+    onRequestGroupToggle: (String, Boolean) -> Unit,
     onRefreshProgress: () -> Unit,
 ) {
     Column(Modifier.weight(1f).padding(top = 8.dp)) {
@@ -908,6 +1319,37 @@ private fun ColumnScope.CatalogPanel(
                     onClick = { onSelectGroup(key) },
                     label = { Text("${groupLabel(key)}  ${group.active}/${group.count}") },
                 )
+            }
+        }
+        state.catalogGroups.firstOrNull { normalizedGroupKey(it.key) == state.selectedCatalogGroup }?.let { group ->
+            val key = normalizedGroupKey(group.key)
+            val checkboxState = when {
+                group.active == 0 -> ToggleableState.Off
+                group.count > 0 && group.active >= group.count -> ToggleableState.On
+                else -> ToggleableState.Indeterminate
+            }
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TriStateCheckbox(
+                        state = checkboxState,
+                        onClick = { onRequestGroupToggle(key, group.active == 0) },
+                        enabled = state.busyAction == null && state.catalogLoaded,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text("Toda la categoría", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        Text("${group.active} de ${group.count} activas", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(
+                        onClick = { onRequestGroupToggle(key, true) },
+                        enabled = state.busyAction == null && state.catalogLoaded && group.active < group.count,
+                    ) { Text("Activar preparadas") }
+                    if (group.active > 0) {
+                        TextButton(
+                            onClick = { onRequestGroupToggle(key, false) },
+                            enabled = state.busyAction == null && state.catalogLoaded,
+                        ) { Text("Apagar") }
+                    }
+                }
             }
         }
         Spacer(Modifier.height(7.dp))
@@ -1102,12 +1544,27 @@ private fun ColumnScope.AllowlistPanel(
 }
 
 @Composable
-private fun SettingsScreen(state: DnsCryptUiState, onRefresh: () -> Unit, onSetProvider: (String, String) -> Unit) {
+private fun SettingsScreen(
+    state: DnsCryptUiState,
+    onRefresh: () -> Unit,
+    onSetProvider: (String, String) -> Unit,
+    onSetRetention: (Int, Int) -> Unit,
+    onBackupExport: (Uri) -> Unit,
+    onBackupInspect: (Uri) -> Unit,
+    onConfirmBackupRestore: () -> Unit,
+    onCancelBackupRestore: () -> Unit,
+) {
     val snapshot = state.snapshot ?: return
     val current = snapshot.status.server.lowercase(Locale.ROOT).trim().removePrefix("[").removeSuffix("]")
     var pendingProvider by remember { mutableStateOf<String?>(null) }
     var nextDnsId by rememberSaveable { mutableStateOf("") }
     var pendingNextDns by remember { mutableStateOf(false) }
+    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/gzip")) { uri ->
+        uri?.let(onBackupExport)
+    }
+    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(onBackupInspect)
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp),
@@ -1160,6 +1617,48 @@ private fun SettingsScreen(state: DnsCryptUiState, onRefresh: () -> Unit, onSetP
                 }
             }
         }
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text("Retención de actividad", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("Se borra automáticamente lo que supere estos límites.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(1, 3, 7).forEach { days ->
+                        FilterChip(
+                            selected = snapshot.activityRetentionDays == days,
+                            onClick = { onSetRetention(days, snapshot.activityMaxEntries) },
+                            label = { Text("$days ${if (days == 1) "día" else "días"}") },
+                            enabled = state.busyAction == null,
+                        )
+                    }
+                }
+                Text("Máximo de consultas", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(50, 500, 1_000, 2_000, 5_000, 10_000).forEach { entries ->
+                        FilterChip(
+                            selected = snapshot.activityMaxEntries == entries,
+                            onClick = { onSetRetention(snapshot.activityRetentionDays, entries) },
+                            label = { Text(entries.toString()) },
+                            enabled = state.busyAction == null,
+                        )
+                    }
+                }
+            }
+        }
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Copia de seguridad", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("Guarda la configuración DNS, las listas elegidas y las reglas y perfiles del firewall. No incluye el historial DNS ni las cachés descargadas del catálogo.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { exportBackup.launch("dnscrypt-manager-backup.tar.gz") }, enabled = state.busyAction == null, modifier = Modifier.weight(1f)) { Text("Crear copia") }
+                    OutlinedButton(onClick = { importBackup.launch(arrayOf("application/gzip", "application/x-gzip", "application/octet-stream")) }, enabled = state.busyAction == null, modifier = Modifier.weight(1f)) { Text("Restaurar") }
+                }
+                if (state.busyAction?.startsWith("Validando la copia") == true) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text("La copia se está validando sin extraerla ni aplicarla.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("La copia incluye el ID de NextDNS si usás ese proveedor; guardá el archivo en un lugar privado.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+            }
+        }
         QuietCard(
             Icons.Outlined.History,
             "Actividad DNS en este teléfono",
@@ -1167,8 +1666,8 @@ private fun SettingsScreen(state: DnsCryptUiState, onRefresh: () -> Unit, onSetP
         )
         QuietCard(
             Icons.Outlined.Info,
-            "Todavía no identifica la aplicación",
-            "La primera etapa muestra dominios y resultados DNS. No atribuye una consulta a una app sin una fuente de datos confiable.",
+            "Conexiones por aplicación",
+            "Actividad muestra los dominios consultados. Conexiones muestra sockets activos con UID, sin atribuir cada consulta DNS a una app ni guardar historial.",
         )
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -1197,6 +1696,58 @@ private fun SettingsScreen(state: DnsCryptUiState, onRefresh: () -> Unit, onSetP
             onDismiss = { pendingNextDns = false },
             onConfirm = { pendingNextDns = false; onSetProvider("nextdns", nextDnsId) },
         )
+    }
+    state.backupPreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { if (state.busyAction == null) onCancelBackupRestore() },
+            title = { Text("Revisá antes de restaurar") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Copia válida · ${preview.entryCount} elementos", style = MaterialTheme.typography.labelLarge)
+                    BackupPreviewLine("Configuración DNS", preview.hasDnsConfig)
+                    BackupPreviewLine("Excepciones DNS", preview.hasAllowlist)
+                    BackupPreviewLine("Selección del catálogo", preview.hasEnabledLists)
+                    BackupPreviewLine("Fuentes personalizadas", preview.hasCustomSources)
+                    BackupPreviewLine("Reglas del firewall", preview.hasFirewallRules)
+                    BackupPreviewLine("Perfiles del firewall", preview.hasFirewallProfiles)
+                    if (preview.savedSourceCount > 0) {
+                        Text("También incluye ${preview.savedSourceCount} listas locales guardadas.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 2.dp), color = MaterialTheme.colorScheme.surfaceVariant)
+                    Text("Se guardará una copia del estado actual antes de aplicar. El módulo se reinicia al terminar.", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        if (preview.includesActivity) "Incluye actividad DNS." else "El historial DNS queda en este teléfono y no se reemplaza.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text("Las cachés descargadas no viajan en la copia; si restaurás en otro teléfono, prepará de nuevo las listas que necesites.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Si usás NextDNS, la copia puede contener el ID de tu perfil.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                    if (state.busyAction?.startsWith("Restaurando la copia") == true) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text("Validando los cambios y aplicando la copia…", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = onConfirmBackupRestore, enabled = state.busyAction == null) { Text("Restaurar copia") }
+            },
+            dismissButton = { TextButton(onClick = onCancelBackupRestore, enabled = state.busyAction == null) { Text("Cancelar") } },
+            containerColor = MaterialTheme.colorScheme.surface,
+        )
+    }
+}
+
+@Composable
+private fun BackupPreviewLine(label: String, included: Boolean) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            if (included) Icons.Outlined.CheckCircle else Icons.Outlined.Info,
+            contentDescription = null,
+            tint = if (included) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(17.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("$label: ${if (included) "se reemplaza" else "se conserva actual"}", style = MaterialTheme.typography.bodySmall)
     }
 }
 
