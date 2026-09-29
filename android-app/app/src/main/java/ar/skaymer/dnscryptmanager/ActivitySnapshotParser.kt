@@ -2,6 +2,7 @@ package ar.skaymer.dnscryptmanager
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 
 /**
  * Decodes the single, bounded response returned by activity snapshot.
@@ -24,7 +25,11 @@ internal object ActivitySnapshotParser {
         if (result.timedOut) throw ModuleOperationException(TIMED_OUT)
 
         val root = try {
-            JSONObject(result.output)
+            val tokener = JSONTokener(result.output)
+            val parsed = tokener.nextValue() as? JSONObject
+                ?: throw IllegalArgumentException("snapshot root is not an object")
+            require(tokener.nextClean() == '\u0000') { "trailing output after snapshot" }
+            parsed
         } catch (_: Exception) {
             throw ModuleOperationException(failureMessage(result))
         }
