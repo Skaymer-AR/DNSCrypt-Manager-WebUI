@@ -450,8 +450,26 @@ if(!d.events.some(e=>e.domain==='snapshot-marker.invalid' && e.category==='ads')
 " && ok "G actividad distingue bloqueada, permitida y allowlist" || bad "G actividad no distingue estados"
 call_cap "$SCRATCH/g_activity_stats.json" activity stats --json
 json_ok "$SCRATCH/g_activity_stats.json" && ok "G activity stats --json valido" || bad "G activity stats JSON invalido"
-call_cap "$SCRATCH/g_activity_snapshot.json" activity snapshot --limit 200 --json \
+mkdir -p "$SCRATCH/fail-snapshot-rm"
+REAL_RM_PATH="$(command -v rm)"
+cat > "$SCRATCH/fail-snapshot-rm/rm" <<'EOF'
+#!/bin/sh
+for _path do
+  case "$_path" in
+    */activity.snapshot.norm.*|*/activity.snapshot.sel.*)
+      printf '%s\n' "$_path" >> "$SNAP_RM_LOG"
+      exit 1
+      ;;
+  esac
+done
+exec "$REAL_RM_PATH" "$@"
+EOF
+chmod 0755 "$SCRATCH/fail-snapshot-rm/rm"
+SNAP_RM_LOG="$SCRATCH/fail-snapshot-rm/matched" REAL_RM_PATH="$REAL_RM_PATH" PATH="$SCRATCH/fail-snapshot-rm:$PATH" \
+  call_cap "$SCRATCH/g_activity_snapshot.json" activity snapshot --limit 200 --json \
   && ok "G activity snapshot termina con codigo cero" || bad "G activity snapshot devolvio error"
+[ -s "$SCRATCH/fail-snapshot-rm/matched" ] \
+  && ok "G snapshot tolera que falle la limpieza temporal" || bad "G snapshot no ejercito el fallo de limpieza"
 json_ok "$SCRATCH/g_activity_snapshot.json" && ok "G activity snapshot incluye lectura conjunta valida" || bad "G activity snapshot JSON invalido"
 "$NODE_BIN" -e "
 const d=JSON.parse(require('fs').readFileSync('$SCRATCH/g_activity_snapshot.json','utf8'));
