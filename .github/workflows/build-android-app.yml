@@ -145,7 +145,7 @@ jobs:
           unzip -p "$ASSETS/DNSCrypt-Manager-v1.1.1-rc5.zip" module.prop | tr -d '\r' > "$RUNNER_TEMP/release-module.prop"
           grep -qx 'version=v1.1.1-rc5' "$RUNNER_TEMP/release-module.prop"
           grep -qx 'versionCode=11015' "$RUNNER_TEMP/release-module.prop"
-          grep -qx 'versionName = "0.3.1"' android-app/app/build.gradle.kts
+          grep -Eq '^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"0[.]3[.]1"[[:space:]]*$' android-app/app/build.gradle.kts
           test -s "$ASSETS/DNSCrypt-Manager-Android-v0.3.1-debug.apk"
           (cd "$ASSETS" && sha256sum DNSCrypt-Manager-Android-v0.3.1-debug.apk > DNSCrypt-Manager-Android-v0.3.1-debug.apk.sha256)
           (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-v1.1.1-rc5.zip.sha256)
