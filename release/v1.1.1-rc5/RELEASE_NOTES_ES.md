@@ -18,6 +18,10 @@ Esta es una **pre-release candidata**. La versión estable publicada sigue siend
 - `DNSCrypt-Manager-v1.1.1-rc5.zip` — módulo instalable, versionCode 11015.
 - Cada archivo incluye su suma SHA-256 para comprobar integridad.
 
+## Compatibilidad de instalación del APK
+
+El último APK 0.3.0 entregado y este APK 0.3.1 debug tienen certificados distintos (SHA-256 `22728805f7c092c7f10e734a2626da5138efd2bc5c529acc88868b24b0b40957` y `d629e2e62eca725feab5d2763e9a1b5a6fbe72dfcfc36e76e5a3572a8a5875f5`). Android puede rechazar la instalación encima de la app anterior. Para instalar sin borrar sus datos hace falta un instalador autorizado que admita el cambio de firma; si desinstalás solo la app y después instalás esta versión, el módulo KernelSU y sus ajustes DNS siguen separados y no se eliminan. Guardá antes cualquier copia que todavía esté en la caché privada de la app.
+
 ## Verificación y alcance
 
 GitHub Actions aprobó las pruebas de sintaxis, CLI, seguridad, WebUI, firewall por UID, conexiones, copias, listas y compilación del APK. También validó el ZIP, la versión interna y el binario ARM64 oficial. Estas pruebas automatizadas no sustituyen la instalación y prueba en el Motorola Edge 40 Pro con Android 16; esa validación física sigue pendiente, por eso esta versión permanece como candidata.
