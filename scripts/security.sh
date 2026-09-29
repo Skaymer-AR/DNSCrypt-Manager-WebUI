@@ -1782,7 +1782,12 @@ cmd_activity() {
       _first=1
       while IFS="$(printf '\t')" read -r _t _dom _state _detail _qtype _rcode _duration _server _relay; do
         [ -n "$_dom" ] || continue
-        _cat=""; [ "$_state" = blocked ] && _cat=$(sec_event_category "$_dom" "$_detail")
+        # La app necesita contadores rápidos. sec_event_category recorre las
+        # cachés completas con grep y esas listas pueden sumar millones de
+        # dominios; repetirlo por cada fila bloqueada deja la pantalla cargando.
+        # Se conserva la regla original en `rule`; las vistas detalladas siguen
+        # resolviendo categorías cuando hace falta.
+        _cat=""
         [ "$_first" = 1 ] || printf ','
         _first=0
         printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \

@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.1-rc6 — actividad rápida en teléfonos con listas grandes (candidata)
+
+- Evita recorrer las cachés de blocklists por cada consulta al abrir Actividad.
+  Mantiene el dominio, el motivo del bloqueo y los contadores en la misma lectura;
+  la clasificación de categoría queda para las vistas detalladas.
+- Acota a 30 segundos la lectura de actividad en Android y muestra el error con
+  opción de reintento si el módulo no responde.
+- Sube la app Android a 0.3.2 (versionCode 5) y el módulo a v1.1.1-rc6
+  (versionCode 11016). Requiere probar el APK y el ZIP en el teléfono.
+
 ## v1.1.1-rc5 — actividad confiable y controles guiados (candidata)
 
 - Actividad carga contadores y consultas en una sola lectura. Si no se puede
