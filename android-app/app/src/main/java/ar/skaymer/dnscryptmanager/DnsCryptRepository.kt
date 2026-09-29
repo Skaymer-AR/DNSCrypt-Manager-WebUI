@@ -38,14 +38,7 @@ internal class DnsCryptRepository(
 
     suspend fun loadActivitySnapshot(): ActivitySnapshotData {
         val result = shell.run(RootShell.Command.ActivitySnapshot(200))
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo leer la actividad DNS." })
-        val root = JSONObject(result.output)
-        val stats = root.optJSONObject("stats") ?: throw ModuleOperationException("La respuesta de actividad no incluyó contadores.")
-        return ActivitySnapshotData(
-            enabled = root.optBoolean("enabled", false),
-            stats = parseStats(stats),
-            events = parseEvents(root),
-        )
+        return ActivitySnapshotParser.parse(result)
     }
 
     suspend fun runDiagnostics(): List<DiagnosticCheck> {

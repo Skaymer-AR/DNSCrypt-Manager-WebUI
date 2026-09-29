@@ -12,8 +12,8 @@ android {
         applicationId = "ar.skaymer.dnscryptmanager"
         minSdk = 29
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.2"
+        versionCode = 6
+        versionName = "0.3.3"
     }
 
     compileOptions {
@@ -56,4 +56,6 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

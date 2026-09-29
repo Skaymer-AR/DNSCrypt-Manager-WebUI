@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.1-rc7 — mostrar snapshots válidos de Actividad (candidata)
+
+- El módulo termina la lectura rápida con código cero aunque falle la limpieza
+  secundaria de archivos temporales y deja el diagnóstico en manager.log.
+- Android ahora valida el esquema completo, contadores y eventos JSON, y
+  aprovecha un snapshot válido aunque el comando devuelva otro código de salida.
+  Si la respuesta está dañada o vence el tiempo límite, muestra un mensaje
+  breve y permite reintentar en vez de pegar el JSON entero en pantalla.
+- El snapshot comprueba cada etapa antes de imprimir; la lectura rápida sigue
+  conservando la regla y evitando búsquedas repetidas en listas grandes.
+- La app sube a 0.3.3 (versionCode 6) y el módulo a v1.1.1-rc7
+  (versionCode 11017). Requiere volver a instalar ambos y probar en el teléfono.
+
 ## v1.1.1-rc6 — actividad rápida en teléfonos con listas grandes (candidata)
 
 - Evita recorrer las cachés de blocklists por cada consulta al abrir Actividad.
