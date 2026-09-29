@@ -6,7 +6,7 @@ Esta es una **pre-release candidata**. La versión estable publicada sigue siend
 
 - **Actividad deja de revisar las blocklists por cada consulta.** La vista rápida devuelve juntos los contadores y hasta 200 eventos sin buscar repetidamente en listas que pueden contener millones de dominios. Conserva el dominio, el estado y la regla que produjo el bloqueo.
 - **Espera limitada en Android.** Si el módulo no responde, Actividad deja de girar a los 30 segundos y muestra el error para reintentar.
-- **Las vistas detalladas mantienen su clasificación.** El listado tradicional del módulo sigue resolviendo la categoría; el snapshot de la app prioriza devolver rápido la información que necesita para dibujar la pantalla.
+- **Filas más claras.** La app no repite el dominio como si fuera un segundo motivo y muestra “Bloqueada por una regla DNS” cuando la categoría no está disponible. El listado detallado conserva el motivo original.
 
 ## Archivos
 

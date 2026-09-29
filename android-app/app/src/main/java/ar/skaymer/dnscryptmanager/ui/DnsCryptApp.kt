@@ -833,9 +833,10 @@ private fun ActivityRow(event: ActivityEvent, onClick: (() -> Unit)? = null, ena
                 Text(event.domain.ifBlank { "Dominio desconocido" }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                 val detail = listOfNotNull(
                     event.category.takeIf { it.isNotBlank() }?.let(::categoryLabel),
-                    event.rule.takeIf { it.isNotBlank() },
+                    event.rule.takeIf { it.isNotBlank() && !it.equals(event.domain, ignoreCase = true) },
                 ).joinToString(" · ")
-                Text(detail.ifBlank { "Consulta DNS" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val fallback = if (event.status == "blocked") "Bloqueada por una regla DNS" else "Consulta DNS"
+                Text(detail.ifBlank { fallback }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {

@@ -4,7 +4,8 @@
 
 - Evita recorrer las cachés de blocklists por cada consulta al abrir Actividad.
   Mantiene el dominio, el motivo del bloqueo y los contadores en la misma lectura;
-  la clasificación de categoría queda para las vistas detalladas.
+  la clasificación de categoría queda para las vistas detalladas. La app evita
+  repetir el dominio como motivo cuando no hay categoría disponible.
 - Acota a 30 segundos la lectura de actividad en Android y muestra el error con
   opción de reintento si el módulo no responde.
 - Sube la app Android a 0.3.2 (versionCode 5) y el módulo a v1.1.1-rc6
