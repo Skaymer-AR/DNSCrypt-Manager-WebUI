@@ -1797,7 +1797,10 @@ cmd_activity() {
           "$(json_kv server "$_server")" "$(json_kv relay "$_relay")"
       done < "$_sel"
       printf ']}\n'
-      rm -f "$_norm" "$_sel" 2>/dev/null
+      # La limpieza es secundaria: no debe convertir una respuesta JSON
+      # completa en fallo para la app si el sistema no permite borrar un tmp.
+      rm -f "$_norm" "$_sel" 2>/dev/null || :
+      return 0
       ;;
     stats)
       sec_query_prune; sec_events_prune

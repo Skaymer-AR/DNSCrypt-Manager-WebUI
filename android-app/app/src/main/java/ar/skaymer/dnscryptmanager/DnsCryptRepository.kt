@@ -38,14 +38,38 @@ internal class DnsCryptRepository(
 
     suspend fun loadActivitySnapshot(): ActivitySnapshotData {
         val result = shell.run(RootShell.Command.ActivitySnapshot(200))
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo leer la actividad DNS." })
-        val root = JSONObject(result.output)
-        val stats = root.optJSONObject("stats") ?: throw ModuleOperationException("La respuesta de actividad no incluyó contadores.")
+        val root = runCatching { JSONObject(result.output) }.getOrElse {
+            val fallback = if (result.ok) {
+                "El módulo devolvió una respuesta de actividad con formato inválido."
+            } else {
+                "No se pudo leer la actividad DNS. Revisá el módulo y volvé a intentar."
+            }
+            throw ModuleOperationException(activityFailureMessage(result.output, fallback))
+        }
+        val stats = root.optJSONObject("stats")
+        val events = root.optJSONArray("events")
+        if (stats == null || !stats.optBoolean("available", false) || events == null) {
+            val fallback = if (result.ok) {
+                "La respuesta de actividad no incluyó contadores y eventos válidos."
+            } else {
+                "El módulo no devolvió una lectura completa de actividad. Revisá que esté actualizado."
+            }
+            throw ModuleOperationException(activityFailureMessage(result.output, fallback))
+        }
+        // Una limpieza temporal puede devolver un código distinto de cero luego
+        // de haber escrito un snapshot completo. En ese caso, priorizamos los
+        // datos validados y no mostramos el JSON entero como si fuera un error.
         return ActivitySnapshotData(
             enabled = root.optBoolean("enabled", false),
             stats = parseStats(stats),
             events = parseEvents(root),
         )
+    }
+
+    private fun activityFailureMessage(raw: String, fallback: String): String {
+        val output = raw.trim()
+        if (output.isBlank() || output.startsWith("{") || output.startsWith("[")) return fallback
+        return output.lineSequence().firstOrNull().orEmpty().take(180).ifBlank { fallback }
     }
 
     suspend fun runDiagnostics(): List<DiagnosticCheck> {

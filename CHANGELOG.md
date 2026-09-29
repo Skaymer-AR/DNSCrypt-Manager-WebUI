@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.1-rc7 — mostrar snapshots válidos de Actividad (candidata)
+
+- El módulo termina la lectura rápida con código cero aunque falle la limpieza
+  secundaria de archivos temporales.
+- Android ahora valida y aprovecha contadores/eventos JSON completos incluso si
+  el comando devuelve un código de salida incorrecto. Si la respuesta sí está
+  dañada, muestra un mensaje breve en vez de pegar el JSON entero en pantalla.
+- La app sube a 0.3.3 (versionCode 6) y el módulo a v1.1.1-rc7
+  (versionCode 11017). Requiere volver a instalar ambos y probar en el teléfono.
+
 ## v1.1.1-rc6 — actividad rápida en teléfonos con listas grandes (candidata)
 
 - Evita recorrer las cachés de blocklists por cada consulta al abrir Actividad.
