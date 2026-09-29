@@ -20,7 +20,7 @@ Esta es una **pre-release candidata**. La versión estable publicada sigue siend
 
 ## Compatibilidad de instalación del APK
 
-El último APK 0.3.0 entregado y este APK 0.3.1 debug tienen certificados distintos (SHA-256 `22728805f7c092c7f10e734a2626da5138efd2bc5c529acc88868b24b0b40957` y `d629e2e62eca725feab5d2763e9a1b5a6fbe72dfcfc36e76e5a3572a8a5875f5`). Android puede rechazar la instalación encima de la app anterior. Para instalar sin borrar sus datos hace falta un instalador autorizado que admita el cambio de firma; si desinstalás solo la app y después instalás esta versión, el módulo KernelSU y sus ajustes DNS siguen separados y no se eliminan. Guardá antes cualquier copia que todavía esté en la caché privada de la app.
+El último APK 0.3.0 entregado y este APK 0.3.1 debug tienen certificados distintos (SHA-256 `22728805f7c092c7f10e734a2626da5138efd2bc5c529acc88868b24b0b40957` y `5db617cf174652bcdf6332a405222674e67cba10937b06f19c39246780662fdc`). Android puede rechazar la instalación encima de la app anterior. Para instalar sin borrar sus datos hace falta un instalador autorizado que admita el cambio de firma; si desinstalás solo la app y después instalás esta versión, el módulo KernelSU y sus ajustes DNS siguen separados y no se eliminan. Guardá antes cualquier copia que todavía esté en la caché privada de la app.
 
 ## Verificación y alcance
 
