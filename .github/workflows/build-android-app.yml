@@ -83,7 +83,39 @@ jobs:
 
       - name: Build debug APK
         working-directory: android-app
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Compare APK signing certificate with the last published APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          candidate="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          previous="$RUNNER_TEMP/previous-DNSCrypt-Manager-Android-v0.3.2-debug.apk"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$previous" \
+            "https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/download/v1.1.1-rc6/DNSCrypt-Manager-Android-v0.3.2-debug.apk"
+          candidate_cert="$("$apksigner" verify --print-certs "$candidate" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr 'A-F' 'a-f')"
+          previous_cert="$("$apksigner" verify --print-certs "$previous" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr 'A-F' 'a-f')"
+          test -n "$candidate_cert"
+          test -n "$previous_cert"
+          {
+            echo "### Android APK signing compatibility"
+            echo
+            echo "- Previous release APK: \`v1.1.1-rc6\`"
+            echo "- Candidate SHA-256 certificate: \`$candidate_cert\`"
+            echo "- Previous SHA-256 certificate: \`$previous_cert\`"
+            if [ "$candidate_cert" = "$previous_cert" ]; then
+              echo "- Can install over the previous APK without removing it: **yes**"
+            else
+              echo "- Can install over the previous APK without removing it: **no**; uninstall the old app first. The DNSCrypt module and its settings are separate."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$candidate_cert" = "$previous_cert" ]; then
+            echo "The candidate APK can update the last published APK in place."
+          else
+            echo "::warning::The candidate APK uses a different signing certificate. Install it after uninstalling the old app."
+          fi
 
       - name: Verify and hash APK
         working-directory: android-app

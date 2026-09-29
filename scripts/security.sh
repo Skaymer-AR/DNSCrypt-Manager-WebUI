@@ -1636,7 +1636,24 @@ sec_activity_normalize() {
       }
     }
   ' "$_ev" "$_al" "$_qu" > "$_out"
+  return $?
+}
+
+sec_activity_snapshot_cleanup() {
+  for _snapshot_tmp do
+    if ! rm -f "$_snapshot_tmp" 2>/dev/null; then
+      log_msg "security: activity snapshot cleanup failed" 2>/dev/null || :
+    fi
+  done
   return 0
+}
+
+sec_activity_snapshot_fail() {
+  _snapshot_reason="$1"; shift
+  log_msg "security: activity snapshot generation failed during $_snapshot_reason" 2>/dev/null || :
+  sec_activity_snapshot_cleanup "$@"
+  echo "ERROR: No se pudo generar una lectura completa de actividad DNS." >&2
+  return 1
 }
 
 # API de actividad para la app nativa y, luego, para la WebUI compartida.
@@ -1768,38 +1785,84 @@ cmd_activity() {
         esac
       done
       [ "$_json" = 1 ] || { echo "Uso: activity snapshot [--limit 1..200] --json" >&2; return 2; }
-      _norm="$RUN_DIR/activity.snapshot.norm.$$"; _sel="$RUN_DIR/activity.snapshot.sel.$$"
-      sec_activity_normalize "$_norm"
-      _total=$(awk 'END { print NR + 0 }' "$_norm" 2>/dev/null)
-      _blocked=$(awk -F '\t' '$3 == "blocked" {n++} END {print n+0}' "$_norm" 2>/dev/null)
-      _allowed=$(awk -F '\t' '$3 == "allowed" {n++} END {print n+0}' "$_norm" 2>/dev/null)
-      _allowlisted=$(awk -F '\t' '$3 == "allowlisted" {n++} END {print n+0}' "$_norm" 2>/dev/null)
-      _errors=$(awk -F '\t' '$3 == "error" {n++} END {print n+0}' "$_norm" 2>/dev/null)
-      sort -r "$_norm" | head -n "$_lim" > "$_sel"
+      _norm="$RUN_DIR/activity.snapshot.norm.$$"
+      _sorted="$RUN_DIR/activity.snapshot.sorted.$$"
+      _sel="$RUN_DIR/activity.snapshot.sel.$$"
+      _json="$RUN_DIR/activity.snapshot.json.$$"
+      if ! sec_activity_normalize "$_norm"; then
+        sec_activity_snapshot_fail normalize "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      if ! _total=$(awk 'END { print NR + 0 }' "$_norm" 2>/dev/null); then
+        sec_activity_snapshot_fail count-total "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      if ! _blocked=$(awk -F '\t' '$3 == "blocked" {n++} END {print n+0}' "$_norm" 2>/dev/null); then
+        sec_activity_snapshot_fail count-blocked "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      if ! _allowed=$(awk -F '\t' '$3 == "allowed" {n++} END {print n+0}' "$_norm" 2>/dev/null); then
+        sec_activity_snapshot_fail count-allowed "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      if ! _allowlisted=$(awk -F '\t' '$3 == "allowlisted" {n++} END {print n+0}' "$_norm" 2>/dev/null); then
+        sec_activity_snapshot_fail count-allowlisted "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      if ! _errors=$(awk -F '\t' '$3 == "error" {n++} END {print n+0}' "$_norm" 2>/dev/null); then
+        sec_activity_snapshot_fail count-errors "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      for _count in "$_total" "$_blocked" "$_allowed" "$_allowlisted" "$_errors"; do
+        case "$_count" in ''|*[!0-9]*)
+          sec_activity_snapshot_fail invalid-count "$_norm" "$_sorted" "$_sel" "$_json"
+          return 1
+          ;;
+        esac
+      done
+      _count_sum=$((_blocked + _allowed + _allowlisted + _errors))
+      if [ "$_count_sum" -ne "$_total" ]; then
+        sec_activity_snapshot_fail inconsistent-counts "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      if ! sort -r "$_norm" > "$_sorted"; then
+        sec_activity_snapshot_fail sort "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      if ! head -n "$_lim" "$_sorted" > "$_sel"; then
+        sec_activity_snapshot_fail select-events "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
       _enabled=false; [ "$(sec_query_mode)" != off ] && _enabled=true
-      printf '{"enabled":%s,"stats":{"available":true,"total":%s,"blocked":%s,"allowed":%s,"allowlisted":%s,"errors":%s},"events":[' \
-        "$_enabled" "${_total:-0}" "${_blocked:-0}" "${_allowed:-0}" "${_allowlisted:-0}" "${_errors:-0}"
-      _first=1
-      while IFS="$(printf '\t')" read -r _t _dom _state _detail _qtype _rcode _duration _server _relay; do
-        [ -n "$_dom" ] || continue
-        # La app necesita contadores rápidos. sec_event_category recorre las
-        # cachés completas con grep y esas listas pueden sumar millones de
-        # dominios; repetirlo por cada fila bloqueada deja la pantalla cargando.
-        # Se conserva la regla original en `rule`; las vistas detalladas siguen
-        # resolviendo categorías cuando hace falta.
-        _cat=""
-        [ "$_first" = 1 ] || printf ','
-        _first=0
-        printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
-          "$(json_kv time "$_t")" "$(json_kv domain "$_dom")" "$(json_kv status "$_state")" \
-          "$(json_kv rule "$_detail")" "$(json_kv category "$_cat")" "$(json_kv query_type "$_qtype")" \
-          "$(json_kv return_code "$_rcode")" "$(json_kv duration "$_duration")" \
-          "$(json_kv server "$_server")" "$(json_kv relay "$_relay")"
-      done < "$_sel"
-      printf ']}\n'
-      # La limpieza es secundaria: no debe convertir una respuesta JSON
-      # completa en fallo para la app si el sistema no permite borrar un tmp.
-      rm -f "$_norm" "$_sel" 2>/dev/null || :
+      if ! (
+        set -e
+        printf '{"enabled":%s,"stats":{"available":true,"total":%s,"blocked":%s,"allowed":%s,"allowlisted":%s,"errors":%s},"events":[' \
+          "$_enabled" "$_total" "$_blocked" "$_allowed" "$_allowlisted" "$_errors"
+        _first=1
+        while IFS="$(printf '\t')" read -r _t _dom _state _detail _qtype _rcode _duration _server _relay; do
+          [ -n "$_dom" ] || continue
+          # The quick snapshot preserves the rule and avoids searching large
+          # blocklist caches once per blocked row.
+          _cat=""
+          [ "$_first" = 1 ] || printf ','
+          _first=0
+          printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
+            "$(json_kv time "$_t")" "$(json_kv domain "$_dom")" "$(json_kv status "$_state")" \
+            "$(json_kv rule "$_detail")" "$(json_kv category "$_cat")" "$(json_kv query_type "$_qtype")" \
+            "$(json_kv return_code "$_rcode")" "$(json_kv duration "$_duration")" \
+            "$(json_kv server "$_server")" "$(json_kv relay "$_relay")"
+        done < "$_sel"
+        printf ']}\n'
+      ) > "$_json"; then
+        sec_activity_snapshot_fail serialize "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      if ! cat "$_json"; then
+        sec_activity_snapshot_fail write-response "$_norm" "$_sorted" "$_sel" "$_json"
+        return 1
+      fi
+      # Keep the complete response successful; cleanup errors go to manager.log.
+      sec_activity_snapshot_cleanup "$_norm" "$_sorted" "$_sel" "$_json"
       return 0
       ;;
     stats)

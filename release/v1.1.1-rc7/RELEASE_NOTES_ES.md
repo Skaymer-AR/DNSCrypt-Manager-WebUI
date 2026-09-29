@@ -5,7 +5,8 @@ Esta es una **pre-release candidata**. La versión estable publicada sigue siend
 ## Qué corrige
 
 - **Actividad aprovecha el conteo que el módulo ya entrega.** RC6 aceleró el snapshot, pero en algunos teléfonos el comando podía terminar con un código de error después de haber generado JSON válido. La app lo descartaba y mostraba el JSON entero en una tarjeta roja. RC7 trata como válida una respuesta completa con contadores y eventos, y el módulo ya no informa como fallo una limpieza temporal secundaria.
-- **Errores más claros.** Si la respuesta está incompleta o dañada, la app muestra una explicación breve y una opción para reintentar, sin volcar cientos de eventos en pantalla.
+- **Errores más claros.** La app exige el esquema completo de contadores y eventos. Si la respuesta está incompleta, dañada, mezclada con un diagnóstico o vence el tiempo límite, muestra una explicación breve y una opción para reintentar, sin volcar cientos de eventos en pantalla ni convertir datos faltantes en ceros.
+- **Limpieza diagnosticable.** Si el módulo no puede borrar un temporal después de generar la respuesta, conserva el resultado y registra el fallo en `manager.log`.
 - **Lectura rápida con listas grandes.** Conserva contadores, dominio, estado y regla sin recorrer las blocklists por cada fila. La fila tampoco repite el dominio como segundo motivo.
 
 ## Archivos
@@ -20,6 +21,6 @@ Actualizá el ZIP del módulo desde KernelSU/KernelSU Next y reiniciá. Después
 
 ## Verificación y alcance
 
-La candidata debe pasar las pruebas automáticas de sintaxis, CLI, seguridad, WebUI, compilación Android y auditoría del ZIP/binario ARM64. La instalación y prueba en el Edge 40 Pro siguen pendientes; no se considera validada en hardware hasta comprobar que Actividad carga los contadores en ese teléfono.
+La candidata debe pasar las pruebas automáticas de sintaxis, CLI, seguridad, WebUI, pruebas JVM de Actividad, compilación Android y auditoría del ZIP/binario ARM64. El workflow compara la firma del APK con la de RC6 e informa si Android permitirá instalarlo encima. La instalación y prueba en el Edge 40 Pro siguen pendientes; no se considera validada en hardware hasta comprobar que Actividad carga los contadores en ese teléfono.
 
 La futura simplificación de la WebUI para dejar allí principalmente las opciones avanzadas queda fuera de esta actualización.
