@@ -432,10 +432,13 @@ call_cli activity enable >/dev/null 2>&1 && grep -q 'DCM:query_activity BEGIN' "
 QLOG="$DNSCRYPT_TEST_DATA_DIR/security/query-activity/queries.tsv"
 ALOG="$DNSCRYPT_TEST_DATA_DIR/security/query-activity/allowed.tsv"
 _qa_ts="[$(date '+%Y-%m-%d %H:%M:%S')]"
+printf 'snapshot-marker.invalid\n' > "$CACHE/ads.list"
 printf '%s\t127.0.0.1\tmalone.example\tA\tNOERROR\t1ms\tcloudflare\t-\n' "$_qa_ts" > "$QLOG"
 printf '%s\t127.0.0.1\tclear.example\tA\tNOERROR\t2ms\tcloudflare\t-\n' "$_qa_ts" >> "$QLOG"
 printf '%s\t127.0.0.1\tallowed.example\tA\tNOERROR\t3ms\tcloudflare\t-\n' "$_qa_ts" >> "$QLOG"
+printf '%s\t127.0.0.1\tsnapshot-marker.invalid\tA\tNOERROR\t4ms\tcloudflare\t-\n' "$_qa_ts" >> "$QLOG"
 printf '%s\t127.0.0.1\tmalone.example\tmalone.example\n' "$_qa_ts" >> "$DNSCRYPT_TEST_DATA_DIR/security/events/blocked.log"
+printf '%s\t127.0.0.1\tsnapshot-marker.invalid\tsnapshot-marker.invalid\n' "$_qa_ts" >> "$DNSCRYPT_TEST_DATA_DIR/security/events/blocked.log"
 printf '%s\t127.0.0.1\tallowed.example\tallowed.example\n' "$_qa_ts" > "$ALOG"
 call_cap "$SCRATCH/g_activity.json" activity list --limit 20 --json
 json_ok "$SCRATCH/g_activity.json" && ok "G activity list --json valido" || bad "G activity list JSON invalido"
@@ -443,6 +446,7 @@ json_ok "$SCRATCH/g_activity.json" && ok "G activity list --json valido" || bad 
 const d=JSON.parse(require('fs').readFileSync('$SCRATCH/g_activity.json','utf8'));
 const s=new Set((d.events||[]).map(e=>e.status));
 for(const k of ['blocked','allowed','allowlisted']) if(!s.has(k)){console.error('falta estado '+k, [...s]);process.exit(1);}
+if(!d.events.some(e=>e.domain==='snapshot-marker.invalid' && e.category==='ads')){console.error('activity list dejo de resolver categorias');process.exit(1);}
 " && ok "G actividad distingue bloqueada, permitida y allowlist" || bad "G actividad no distingue estados"
 call_cap "$SCRATCH/g_activity_stats.json" activity stats --json
 json_ok "$SCRATCH/g_activity_stats.json" && ok "G activity stats --json valido" || bad "G activity stats JSON invalido"
@@ -456,6 +460,8 @@ const counts={blocked:0,allowed:0,allowlisted:0,error:0};
 for(const e of d.events) if(e.status in counts) counts[e.status]++;
 for(const k of Object.keys(counts)) if(counts[k] > d.stats[k]){console.error('filas exceden contador '+k);process.exit(1);}
 for(const k of ['blocked','allowed','allowlisted']) if(!d.events.some(e=>e.status===k)){console.error('faltan eventos '+k);process.exit(1);}
+const marker=d.events.find(e=>e.domain==='snapshot-marker.invalid');
+if(!marker || marker.status!=='blocked' || marker.rule!=='snapshot-marker.invalid' || marker.category!==''){console.error('el snapshot rapido debe conservar estado y regla sin recorrer categorias');process.exit(1);}
 " && ok "G contadores y eventos vienen de una respuesta coherente" || bad "G snapshot mezcla contadores/eventos"
 call_cli activity disable >/dev/null 2>&1 && ! grep -q 'DCM:query_activity BEGIN' "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml" \
   && ok "G activity disable retira query_log sin tocar listas" || bad "G activity disable no retiro query_log"

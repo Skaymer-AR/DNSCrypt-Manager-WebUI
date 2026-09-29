@@ -19,9 +19,9 @@ Aplicación nativa en español para manejar el módulo DNSCrypt desde el teléfo
 
 La interfaz usa Kotlin, Jetpack Compose y Material 3. El puente root ejecuta únicamente operaciones concretas y validadas del CLI `dnscrypt-manager`; no acepta comandos escritos libremente.
 
-Al iniciar, la app consulta primero el estado del módulo y carga la actividad local en segundo plano. Si KernelSU Next solicita acceso root, hay que aprobarlo; si una orden no responde, la app muestra un diagnóstico y permite reintentar.
+Al iniciar, la app consulta primero el estado del módulo y carga la actividad local en segundo plano. Si KernelSU Next solicita acceso root, hay que aprobarlo; si una orden no responde, la app muestra un diagnóstico y permite reintentar. La lectura de actividad tiene un límite de 30 segundos; si vence, el aviso permite volver a intentarlo.
 
-Actividad lee eventos y contadores juntos. Ante un error conserva los datos anteriores y los distingue de una lectura válida sin consultas. El diagnóstico ejecuta una prueba DNS real; si esa prueba falla, el módulo intenta restaurar el estado de red.
+Actividad lee eventos y contadores juntos. El camino rápido conserva dominio, estado y regla sin buscar cada fila en las listas, que pueden tener millones de entradas. Ante un error conserva los datos anteriores y los distingue de una lectura válida sin consultas. El diagnóstico ejecuta una prueba DNS real; si esa prueba falla, el módulo intenta restaurar el estado de red.
 
 ## Límites actuales
 
@@ -35,6 +35,6 @@ Actividad lee eventos y contadores juntos. Ante un error conserva los datos ante
 
 ## Build y evidencia
 
-El workflow `Build DNSCrypt Manager Android app` usa JDK 17, Gradle 8.9 y Android SDK 35. En cada PR compila el APK `debug` y ejecuta el gate completo del módulo. Al integrar esta candidata en `main`, publica una pre-release de GitHub con el APK Android 0.3.1, el ZIP del módulo v1.1.1-rc5 y sus SHA-256. Esta publicación sigue siendo candidata: la prueba física en el Edge 40 Pro todavía está pendiente y no se marca como versión estable. El certificado del APK debug puede cambiar entre ejecuciones; esta candidata no se actualiza encima del APK 0.3.0 entregado con el instalador estándar. Sus notas explican el cambio y las opciones de instalación.
+El workflow `Build DNSCrypt Manager Android app` usa JDK 17, Gradle 8.9 y Android SDK 35. En cada PR compila el APK `debug` y ejecuta el gate completo del módulo. Al integrar esta candidata en `main`, publica una pre-release de GitHub con el APK Android 0.3.2, el ZIP del módulo v1.1.1-rc6 y sus SHA-256. Esta publicación sigue siendo candidata: la prueba física del arreglo en el Edge 40 Pro todavía está pendiente y no se marca como versión estable. El certificado del APK debug puede cambiar entre ejecuciones; si Android no acepta la actualización por la firma, seguí las opciones de instalación de las notas de release.
 
 Para cada commit, confirmar que el build Android del workflow haya terminado correctamente. La instalación y la prueba física en el Edge 40 Pro siguen pendientes. El APK no actualiza el módulo: revisar su versión y SHA-256 por separado antes de instalar una candidata.

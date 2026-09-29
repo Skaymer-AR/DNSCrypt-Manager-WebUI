@@ -49,7 +49,7 @@ internal class RootShell(private val tempDirectory: File) {
         data class ActivitySnapshot(val limit: Int = 200) : Command {
             init { require(limit in 1..200) }
             override val args = listOf("activity", "snapshot", "--limit", limit.toString(), "--json")
-            override val timeoutSeconds = 60L
+            override val timeoutSeconds = 30L
         }
         data object ActivityEnable : Command { override val args = listOf("activity", "enable") }
         data object ActivityDisable : Command { override val args = listOf("activity", "disable") }
