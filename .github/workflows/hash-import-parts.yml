@@ -1,0 +1,41 @@
+name: Hash existing import parts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/hash-import-parts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Hash parts from publication branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin publish/previews-2026-07-17
+          mkdir -p /tmp/parts
+          : > /tmp/hashes.txt
+          for i in 00 01 02 03 04 05 06 07 08 09; do
+            p="import-assets/wip3gz-part-${i}"
+            if git cat-file -e "origin/publish/previews-2026-07-17:${p}" 2>/dev/null; then
+              git show "origin/publish/previews-2026-07-17:${p}" > "/tmp/parts/${i}"
+              wc -c "/tmp/parts/${i}" >> /tmp/hashes.txt
+              sha256sum "/tmp/parts/${i}" >> /tmp/hashes.txt
+            else
+              echo "missing ${p}" >> /tmp/hashes.txt
+            fi
+          done
+          cat /tmp/hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: import-part-hashes
+          path: /tmp/hashes.txt

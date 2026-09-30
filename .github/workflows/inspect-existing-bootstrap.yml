@@ -1,0 +1,59 @@
+name: Inspect existing bootstrap payload
+
+on:
+  push:
+    branches:
+      - publish/final-source-releases
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/inspect-existing-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and inspect existing payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin import-rc23-preview-20260717
+          rm -f /tmp/payload.b64 /tmp/payload.bin
+          for i in 00 01 02 03 04 05 06 07; do
+            git show "origin/import-rc23-preview-20260717:bootstrap-rc23/part-${i}.b64" >> /tmp/payload.b64
+          done
+          base64 --decode /tmp/payload.b64 > /tmp/payload.bin
+          echo '=== sizes ==='
+          wc -c /tmp/payload.b64 /tmp/payload.bin
+          echo '=== hashes ==='
+          sha256sum /tmp/payload.b64 /tmp/payload.bin
+          echo '=== type ==='
+          file /tmp/payload.bin
+          echo '=== archive listing ==='
+          if unzip -t /tmp/payload.bin >/tmp/unzip.log 2>&1; then
+            cat /tmp/unzip.log
+            unzip -l /tmp/payload.bin | head -80
+          elif tar -tzf /tmp/payload.bin >/tmp/tar.log 2>&1; then
+            head -80 /tmp/tar.log
+          elif git bundle verify /tmp/payload.bin >/tmp/bundle.log 2>&1; then
+            cat /tmp/bundle.log
+          else
+            echo 'Unknown or invalid payload'
+            xxd -l 128 /tmp/payload.bin
+            exit 1
+          fi
+      - name: Upload reconstructed payload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: existing-bootstrap-payload
+          path: /tmp/payload.bin
+          if-no-files-found: error
