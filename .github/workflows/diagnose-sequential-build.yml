@@ -1,0 +1,57 @@
+name: Diagnose sequential RC2.2 and v0.3 build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-sequential-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Capture sequential build logs
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/report /tmp/dcm-publish "$RUNNER_TEMP/releases"
+          cp tools/publish-parts/00-reconstruct.sh /tmp/dcm-publish/
+          cp tools/publish-parts/10-build-rc22.sh /tmp/dcm-publish/
+          cp tools/publish-parts/20-build-v03.sh /tmp/dcm-publish/
+          chmod 0755 /tmp/dcm-publish/*.sh
+
+          bash -x /tmp/dcm-publish/00-reconstruct.sh > /tmp/report/00.log 2>&1
+          rc0=$?
+          set -a; . "$GITHUB_ENV"; set +a
+
+          if [ "$rc0" -eq 0 ]; then
+            bash -x /tmp/dcm-publish/10-build-rc22.sh > /tmp/report/10.log 2>&1
+            rc10=$?
+            set -a; . "$GITHUB_ENV"; set +a
+          else
+            rc10=99
+          fi
+
+          if [ "$rc10" -eq 0 ]; then
+            bash -x /tmp/dcm-publish/20-build-v03.sh > /tmp/report/20.log 2>&1
+            rc20=$?
+          else
+            rc20=99
+          fi
+
+          printf 'reconstruct=%s\nrc22=%s\nv03=%s\n' "$rc0" "$rc10" "$rc20" > /tmp/report/status.txt
+          tail -180 /tmp/report/20.log 2>/dev/null || true
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sequential-build-diagnostic
+          path: /tmp/report
+          if-no-files-found: error

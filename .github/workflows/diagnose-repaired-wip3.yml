@@ -1,0 +1,97 @@
+name: Diagnose repaired WIP3 payload
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-repaired-wip3.yml'
+      - 'import-assets/repair-*.b64'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Assemble repaired payload and write report
+        shell: bash
+        run: |
+          set -u
+          mkdir -p /tmp/report
+          {
+            for f in \
+              import-assets/wip3gz-part-00 \
+              import-assets/wip3gz-part-01 \
+              import-assets/wip3gz-part-02 \
+              import-assets/repair-03-0.b64 \
+              import-assets/repair-03-1.b64 \
+              import-assets/repair-03-2.b64 \
+              import-assets/wip3gz-part-04 \
+              import-assets/repair-05-0.b64 \
+              import-assets/repair-05-1.b64 \
+              import-assets/repair-05-2.b64 \
+              import-assets/wip3gz-part-06 \
+              import-assets/repair-07-0.b64 \
+              import-assets/repair-07-1.b64 \
+              import-assets/repair-07-2.b64 \
+              import-assets/wip3gz-part-08 \
+              import-assets/wip3gz-part-09; do
+              wc -c "$f"
+              sha256sum "$f"
+            done
+          } > /tmp/report/parts.txt 2>&1
+
+          cat \
+            import-assets/wip3gz-part-00 \
+            import-assets/wip3gz-part-01 \
+            import-assets/wip3gz-part-02 \
+            import-assets/repair-03-0.b64 \
+            import-assets/repair-03-1.b64 \
+            import-assets/repair-03-2.b64 \
+            import-assets/wip3gz-part-04 \
+            import-assets/repair-05-0.b64 \
+            import-assets/repair-05-1.b64 \
+            import-assets/repair-05-2.b64 \
+            import-assets/wip3gz-part-06 \
+            import-assets/repair-07-0.b64 \
+            import-assets/repair-07-1.b64 \
+            import-assets/repair-07-2.b64 \
+            import-assets/wip3gz-part-08 \
+            import-assets/wip3gz-part-09 \
+            > /tmp/report/wip3.b64
+
+          {
+            echo '=== base64 ==='
+            wc -c /tmp/report/wip3.b64
+            sha256sum /tmp/report/wip3.b64
+            echo '=== decode ==='
+            if base64 --decode /tmp/report/wip3.b64 > /tmp/report/wip3.patch.gz; then
+              wc -c /tmp/report/wip3.patch.gz
+              sha256sum /tmp/report/wip3.patch.gz
+              file /tmp/report/wip3.patch.gz
+              if gzip -dc /tmp/report/wip3.patch.gz > /tmp/report/wip3.patch; then
+                wc -c /tmp/report/wip3.patch
+                sha256sum /tmp/report/wip3.patch
+                grep -c '^From ' /tmp/report/wip3.patch || true
+                head -3 /tmp/report/wip3.patch
+                tail -3 /tmp/report/wip3.patch
+              else
+                echo 'gzip decode failed'
+              fi
+            else
+              echo 'base64 decode failed'
+            fi
+          } > /tmp/report/result.txt 2>&1
+
+          cat /tmp/report/parts.txt
+          cat /tmp/report/result.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repaired-wip3-diagnostic
+          path: /tmp/report
+          if-no-files-found: error

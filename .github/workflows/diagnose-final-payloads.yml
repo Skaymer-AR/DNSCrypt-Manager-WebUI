@@ -1,0 +1,70 @@
+name: Diagnose final publication payloads
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-final-payloads.yml'
+      - 'import-assets/rc22-exact-2k-part-*.b64'
+      - 'import-assets/v03-exact-2k-part-*.b64'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Assemble exact payloads without blocking
+        shell: bash
+        run: |
+          set -u
+          mkdir -p /tmp/report
+          cat import-assets/repair-03-1-part-*.b64 > /tmp/report/repair-03-1.b64
+          cat \
+            import-assets/wip3gz-part-00 \
+            import-assets/wip3gz-part-01 \
+            import-assets/wip3gz-part-02 \
+            import-assets/repair-03-0.b64 \
+            /tmp/report/repair-03-1.b64 \
+            import-assets/repair-03-2.b64 \
+            import-assets/wip3gz-part-04 \
+            import-assets/repair-05-0.b64 \
+            import-assets/repair-05-1.b64 \
+            import-assets/repair-05-2.b64 \
+            import-assets/wip3gz-part-06 \
+            import-assets/repair-07-0.b64 \
+            import-assets/repair-07-1.b64 \
+            import-assets/repair-07-2.b64 \
+            import-assets/wip3gz-part-08 \
+            import-assets/wip3gz-part-09 > /tmp/report/wip3.b64
+          cat import-assets/rc22-exact-2k-part-*.b64 > /tmp/report/rc22.b64
+          cat import-assets/v03-exact-2k-part-*.b64 > /tmp/report/v03.b64
+
+          {
+            echo '=== encoded ==='
+            wc -c /tmp/report/*.b64
+            sha256sum /tmp/report/*.b64
+            echo '=== decoded ==='
+            base64 --decode /tmp/report/wip3.b64 > /tmp/report/wip3.patch.gz
+            gzip -dc /tmp/report/wip3.patch.gz > /tmp/report/wip3.patch
+            base64 --decode /tmp/report/rc22.b64 > /tmp/report/rc22.patch.gz
+            gzip -dc /tmp/report/rc22.patch.gz > /tmp/report/rc22.patch
+            base64 --decode /tmp/report/v03.b64 > /tmp/report/v03.patch.gz
+            gzip -dc /tmp/report/v03.patch.gz > /tmp/report/v03.patch
+            wc -c /tmp/report/*.patch /tmp/report/*.patch.gz
+            sha256sum /tmp/report/*.patch /tmp/report/*.patch.gz
+            grep -c '^From ' /tmp/report/wip3.patch
+            grep -c '^From ' /tmp/report/rc22.patch
+            grep -c '^From ' /tmp/report/v03.patch
+          } > /tmp/report/result.txt 2>&1 || true
+          cat /tmp/report/result.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final-exact-payload-diagnostic
+          path: /tmp/report
+          if-no-files-found: error
