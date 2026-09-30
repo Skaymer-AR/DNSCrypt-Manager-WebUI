@@ -1,15 +1,17 @@
 package ar.skaymer.dnscryptmanager
 
+import android.content.Context
 import org.json.JSONObject
 import java.net.InetAddress
 
 internal class DnsCryptRepository(
+    private val context: Context,
     private val shell: RootShell,
 ) {
     suspend fun loadSnapshot(): DashboardSnapshot {
         val statusResult = shell.run(RootShell.Command.Status)
         if (!statusResult.ok) {
-            throw RootBridgeException(statusResult.output.ifBlank { "No se pudo leer el estado del módulo." })
+            throw RootBridgeException(statusResult.output.ifBlank { context.getString(R.string.repo_module_state_error) })
         }
 
         val statusJson = JSONObject(statusResult.output)
@@ -38,7 +40,14 @@ internal class DnsCryptRepository(
 
     suspend fun loadActivitySnapshot(): ActivitySnapshotData {
         val result = shell.run(RootShell.Command.ActivitySnapshot(200))
-        return ActivitySnapshotParser.parse(result)
+        return ActivitySnapshotParser.parse(
+            result,
+            ActivitySnapshotMessages(
+                invalidSuccess = context.getString(R.string.activity_snapshot_invalid_success),
+                invalidFailure = context.getString(R.string.activity_snapshot_invalid_failure),
+                timedOut = context.getString(R.string.activity_snapshot_timed_out),
+            ),
+        )
     }
 
     suspend fun runDiagnostics(): List<DiagnosticCheck> {
@@ -46,56 +55,60 @@ internal class DnsCryptRepository(
         val status = snapshot.status
         val checks = mutableListOf(
             DiagnosticCheck(
-                "Root y módulo",
+                context.getString(R.string.diag_root_module),
                 if (status.moduleEnabled) "ok" else "attention",
-                if (status.moduleEnabled) "El módulo respondió y está habilitado (${status.version.ifBlank { "versión sin informar" }})."
-                else "El módulo respondió, pero figura deshabilitado. Activarlo es necesario para aplicar sus reglas.",
+                if (status.moduleEnabled) context.getString(R.string.diag_module_enabled, status.version.ifBlank { context.getString(R.string.common_not_available) })
+                else context.getString(R.string.diag_module_disabled),
             ),
             DiagnosticCheck(
-                "Proxy DNS",
+                context.getString(R.string.diag_proxy),
                 if (status.running && status.listening) "ok" else "attention",
-                if (status.running && status.listening) "dnscrypt-proxy está en marcha y escucha consultas."
-                else "El proxy no confirmó a la vez proceso activo y puerto de escucha.",
+                if (status.running && status.listening) context.getString(R.string.diag_proxy_running)
+                else context.getString(R.string.diag_proxy_not_ready),
             ),
             DiagnosticCheck(
-                "Redirección del sistema",
+                context.getString(R.string.diag_system_redirect),
                 if (status.redirectActive) "ok" else "info",
-                if (status.redirectActive) "La redirección DNS está activa."
-                else "Está apagada: el módulo no intercepta las consultas DNS del sistema. Esto no corta la conectividad.",
+                if (status.redirectActive) context.getString(R.string.diag_redirect_active)
+                else context.getString(R.string.diag_redirect_inactive),
             ),
         )
 
         val dnsResult = testDns()
         checks += DiagnosticCheck(
-            "Consulta DNS real",
+            context.getString(R.string.diag_real_dns),
             if (dnsResult.ok) "ok" else "attention",
-            if (dnsResult.ok) dnsResult.output.ifBlank { "La prueba de resolución terminó correctamente." }
-            else dnsResult.output.ifBlank { "La prueba de resolución no terminó correctamente; el módulo intentó restaurar la red." },
+            if (dnsResult.ok) dnsResult.output.ifBlank { context.getString(R.string.diag_dns_success) }
+            else dnsResult.output.ifBlank { context.getString(R.string.diag_dns_failed) },
         )
 
         val groups = try { loadCatalogGroups() } catch (_: Exception) { null }
         checks += if (groups == null) {
-            DiagnosticCheck("Listas DNS", "info", "No se pudo leer el catálogo. Podés reintentar desde la sección Listas.")
+            DiagnosticCheck(context.getString(R.string.diag_dns_lists), "info", context.getString(R.string.diag_catalog_read_failed))
         } else {
             val active = groups.sumOf { it.active }
             val total = groups.sumOf { it.count }
             DiagnosticCheck(
-                "Listas DNS",
+                context.getString(R.string.diag_dns_lists),
                 if (active > 0) "ok" else "info",
-                if (active > 0) "$active de $total fuentes están activas."
-                else "No hay fuentes activas: el catálogo no agrega bloqueos de dominios en este momento.",
+                if (active > 0) context.getString(R.string.diag_active_sources, active, total)
+                else context.getString(R.string.diag_no_sources),
             )
         }
 
         val firewall = loadFirewallData()
         val support = firewall.support
         checks += when {
-            support == null -> DiagnosticCheck("Firewall por app", "info", firewall.error ?: "No se pudo verificar el soporte del firewall.")
-            support.supported -> DiagnosticCheck("Firewall por app", "ok", "El teléfono confirmó soporte IPv4 e IPv6. El firewall se controla por separado del filtrado DNS.")
+            support == null -> DiagnosticCheck(context.getString(R.string.diag_firewall_app), "info", firewall.error ?: context.getString(R.string.vmodel_firewall_support_error))
+            support.supported -> DiagnosticCheck(context.getString(R.string.diag_firewall_app), "ok", context.getString(R.string.diag_firewall_supported))
             else -> DiagnosticCheck(
-                "Firewall por app",
+                context.getString(R.string.diag_firewall_app),
                 "unsupported",
-                "No se confirmaron ambos ganchos. No se aplican reglas por app. IPv4: ${if (support.ipv4Owner) "sí" else "no"}; IPv6: ${if (support.ipv6Owner) "sí" else "no"}.",
+                context.getString(
+                    R.string.diag_firewall_unsupported,
+                    context.getString(if (support.ipv4Owner) R.string.common_yes else R.string.common_no),
+                    context.getString(if (support.ipv6Owner) R.string.common_yes else R.string.common_no),
+                ),
             )
         }
         return checks
@@ -103,13 +116,13 @@ internal class DnsCryptRepository(
 
     suspend fun loadActivityStats(): ActivityStats {
         val result = shell.run(RootShell.Command.ActivityStats)
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudieron leer los contadores de actividad." })
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.activity_stats_read_error) })
         return parseStats(result.output)
     }
 
     suspend fun loadActivityEvents(): List<ActivityEvent> {
         val result = shell.run(RootShell.Command.ActivityList(200))
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo leer la lista de actividad." })
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.activity_list_read_error) })
         return parseEvents(result.output)
     }
 
@@ -128,9 +141,9 @@ internal class DnsCryptRepository(
         val profiles = profilesResult.takeIf { it.ok }
             ?.let { raw -> runCatching { parseProfiles(raw.output) }.getOrNull() }
         val errors = listOfNotNull(
-            supportResult.takeIf { support == null }?.output?.ifBlank { "No se pudo verificar el firewall." },
-            policiesResult.takeIf { blockedUids == null }?.output?.ifBlank { "No se pudieron leer las reglas guardadas." },
-            profilesResult.takeIf { profiles == null }?.output?.ifBlank { "No se pudieron leer los perfiles guardados. Actualizá el módulo." },
+            supportResult.takeIf { support == null }?.output?.ifBlank { context.getString(R.string.firewall_verify_error) },
+            policiesResult.takeIf { blockedUids == null }?.output?.ifBlank { context.getString(R.string.firewall_read_rules_error) },
+            profilesResult.takeIf { profiles == null }?.output?.ifBlank { context.getString(R.string.firewall_read_profiles_error) },
         ).distinct()
         return FirewallData(
             support = support,
@@ -169,7 +182,7 @@ internal class DnsCryptRepository(
 
     suspend fun loadConnections(): List<ConnectionEvent> {
         val result = shell.run(RootShell.Command.Connections)
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudieron leer las conexiones." })
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.connections_read_error) })
         return parseConnections(result.output)
     }
 
@@ -187,9 +200,9 @@ internal class DnsCryptRepository(
 
     suspend fun inspectBackup(path: String): BackupPreview {
         val result = shell.run(RootShell.Command.BackupInspect(path))
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo validar la copia." })
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.backup_validate_file_error) })
         val item = JSONObject(result.output)
-        if (!item.optBoolean("valid", false)) throw ModuleOperationException("El archivo no es una copia válida de DNSCrypt Manager.")
+        if (!item.optBoolean("valid", false)) throw ModuleOperationException(context.getString(R.string.repo_backup_invalid))
         return BackupPreview(
             entryCount = item.optInt("entry_count"),
             savedSourceCount = item.optInt("saved_source_count"),
@@ -205,7 +218,7 @@ internal class DnsCryptRepository(
 
     suspend fun loadCatalogGroups(): List<CatalogGroup> {
         val result = shell.run(RootShell.Command.CatalogGroups)
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo abrir el catálogo." })
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.catalog_open_error) })
         val groups = JSONObject(result.output).optJSONArray("groups") ?: return emptyList()
         return buildList(groups.length()) {
             for (index in 0 until groups.length()) {
@@ -223,7 +236,7 @@ internal class DnsCryptRepository(
 
     suspend fun loadCatalogGroup(group: String): List<CatalogEntry> {
         val result = shell.run(RootShell.Command.CatalogList(group))
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo leer esta categoría." })
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.catalog_category_read_error) })
         val entries = JSONObject(result.output).optJSONArray("entries") ?: return emptyList()
         return buildList(entries.length()) {
             for (index in 0 until entries.length()) {
@@ -253,7 +266,7 @@ internal class DnsCryptRepository(
 
     suspend fun loadDownloadProgress(): DownloadProgress {
         val result = shell.run(RootShell.Command.CatalogDownloadAllStatus)
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo consultar la descarga." })
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.download_progress_read_error) })
         val item = JSONObject(result.output)
         return DownloadProgress(
             state = item.optString("state", "idle"),
@@ -268,7 +281,7 @@ internal class DnsCryptRepository(
 
     suspend fun loadAllowlist(): List<String> {
         val result = shell.run(RootShell.Command.AllowlistList)
-        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { "No se pudo leer la lista de excepciones." })
+        if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.allowlist_read_error) })
         val domains = JSONObject(result.output).optJSONArray("domains") ?: return emptyList()
         return buildList(domains.length()) {
             for (index in 0 until domains.length()) {
@@ -436,13 +449,13 @@ internal class DnsCryptRepository(
     }.getOrNull()
 
     private fun connectionState(code: String): String = when (code.uppercase()) {
-        "01" -> "Conectada"
-        "02", "03" -> "Conectando"
-        "04", "05", "06" -> "Cerrando"
-        "08" -> "Cierre remoto"
-        "09", "0B" -> "Cierre en curso"
-        "07" -> "Cerrada"
-        else -> "Activa"
+        "01" -> context.getString(R.string.server_connected)
+        "02", "03" -> context.getString(R.string.server_connecting)
+        "04", "05", "06" -> context.getString(R.string.server_closing)
+        "08" -> context.getString(R.string.server_remote_close)
+        "09", "0B" -> context.getString(R.string.server_close_pending)
+        "07" -> context.getString(R.string.server_closed)
+        else -> context.getString(R.string.server_active)
     }
 }
 

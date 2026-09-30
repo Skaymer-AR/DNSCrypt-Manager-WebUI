@@ -14,15 +14,9 @@ import org.json.JSONTokener
  */
 internal object ActivitySnapshotParser {
     private const val MAX_EVENTS = 200
-    private const val INVALID_SUCCESS =
-        "El módulo devolvió una respuesta de Actividad incompleta o inválida. Reintentá y, si persiste, actualizá el módulo."
-    private const val INVALID_FAILURE =
-        "El módulo no completó una lectura válida de Actividad. Revisá que esté activo y reintentá."
-    private const val TIMED_OUT =
-        "La lectura de Actividad tardó demasiado. Revisá que el módulo esté activo y reintentá."
 
-    fun parse(result: RootShell.Result): ActivitySnapshotData {
-        if (result.timedOut) throw ModuleOperationException(TIMED_OUT)
+    fun parse(result: RootShell.Result, messages: ActivitySnapshotMessages): ActivitySnapshotData {
+        if (result.timedOut) throw ModuleOperationException(messages.timedOut)
 
         val root = try {
             val tokener = JSONTokener(result.output)
@@ -31,7 +25,7 @@ internal object ActivitySnapshotParser {
             require(tokener.nextClean() == '\u0000') { "trailing output after snapshot" }
             parsed
         } catch (_: Exception) {
-            throw ModuleOperationException(failureMessage(result))
+            throw ModuleOperationException(failureMessage(result, messages))
         }
 
         return try {
@@ -45,7 +39,7 @@ internal object ActivitySnapshotParser {
             validateSnapshot(stats, events)
             ActivitySnapshotData(enabled = enabled, stats = stats, events = events)
         } catch (_: Exception) {
-            throw ModuleOperationException(failureMessage(result))
+            throw ModuleOperationException(failureMessage(result, messages))
         }
     }
 
@@ -124,8 +118,8 @@ internal object ActivitySnapshotParser {
     private fun JSONObject.requiredString(key: String): String =
         opt(key) as? String ?: throw IllegalArgumentException("$key is missing or is not text")
 
-    private fun failureMessage(result: RootShell.Result): String {
-        val fallback = if (result.ok) INVALID_SUCCESS else INVALID_FAILURE
+    private fun failureMessage(result: RootShell.Result, messages: ActivitySnapshotMessages): String {
+        val fallback = if (result.ok) messages.invalidSuccess else messages.invalidFailure
         val firstLine = result.output.lineSequence().firstOrNull().orEmpty().trim()
         if (firstLine.isBlank() || firstLine.startsWith("{") || firstLine.startsWith("[") ||
             firstLine.contains('{') || firstLine.contains('[')
@@ -137,3 +131,9 @@ internal object ActivitySnapshotParser {
 
     private val EVENT_STATUSES = setOf("blocked", "allowed", "allowlisted", "error")
 }
+
+internal data class ActivitySnapshotMessages(
+    val invalidSuccess: String,
+    val invalidFailure: String,
+    val timedOut: String,
+)

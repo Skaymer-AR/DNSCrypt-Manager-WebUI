@@ -90,16 +90,27 @@ const DCM = (() => {
            typeof window.ksu.exec === 'function';
   }
 
+  function apiText(key, fallback) {
+    if (typeof I18N !== 'undefined' && I18N && typeof I18N.t === 'function') {
+      const translated = I18N.t(key);
+      if (translated && translated !== key) return translated;
+    }
+    return fallback;
+  }
+  function errorResult(key, fallback) {
+    return Promise.resolve({ errno: -1, stdout: '', stderr: apiText(key, fallback) });
+  }
+
   let seq = 0;
 
   function execWhitelisted(action) {
     const cmd = COMMANDS[action];
     if (!cmd) {
-      return Promise.resolve({ errno: -1, stdout: '', stderr: 'Accion no permitida: ' + action });
+      return errorResult('api.invalid_action', 'Action is not permitted.');
     }
     return new Promise((resolve) => {
       if (!available()) {
-        resolve({ errno: -1, stdout: '', stderr: 'API ksu no disponible en este entorno.' });
+        resolve({ errno: -1, stdout: '', stderr: apiText('api.unavailable', 'The KernelSU WebUI API is unavailable in this environment.') });
         return;
       }
       const cb = '__dcm_cb_' + Date.now() + '_' + (seq++);
@@ -115,7 +126,7 @@ const DCM = (() => {
         if (done) return;
         done = true;
         try { delete window[cb]; } catch (_) { window[cb] = undefined; }
-        resolve({ errno: -1, stdout: '', stderr: 'Tiempo de espera agotado (30 s).' });
+        resolve({ errno: -1, stdout: '', stderr: apiText('api.timeout', 'The request timed out.') });
       }, 30000);
       try {
         window.ksu.exec(cmd, JSON.stringify({}), cb);
@@ -149,7 +160,7 @@ const DCM = (() => {
 
   function runProvider(name) {
     const cmd = PROVIDER_COMMANDS[name];
-    if (!cmd) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Proveedor no reconocido: ' + name });
+    if (!cmd) return errorResult('api.invalid_provider', 'Unknown DNS provider.');
     return runRaw(cmd);
   }
 
@@ -164,7 +175,7 @@ const DCM = (() => {
 
   function runIpv6Mode(mode) {
     const cmd = IPV6_MODE_COMMANDS[mode];
-    if (!cmd) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Modo IPv6 no reconocido: ' + mode });
+    if (!cmd) return errorResult('api.invalid_ipv6', 'Unknown IPv6 mode.');
     return runRaw(cmd);
   }
 
@@ -193,7 +204,7 @@ const DCM = (() => {
     if (!NEXTDNS_ID_RE.test(clean)) {
       return Promise.resolve({
         errno: -1, stdout: '',
-        stderr: 'ID de NextDNS invalido: debe ser hexadecimal de 4 a 12 caracteres (ej: abcdef).'
+        stderr: apiText('validation.nextdns.format', 'Use 4 to 12 hexadecimal characters (e.g. abcdef).')
       });
     }
     return runRaw(CLI + ' nextdns ' + clean);
@@ -215,17 +226,17 @@ const DCM = (() => {
 
   function runProtection(cat, enable) {
     const cmd = PROTECTION_COMMANDS[(enable ? 'enable_' : 'disable_') + cat];
-    if (!cmd) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Categoria no reconocida: ' + cat });
+    if (!cmd) return errorResult('api.invalid_category', 'Unknown DNS protection category.');
     return runRaw(cmd);
   }
 
   /* Actualizar/rollback UNA categoria: cadena fija a partir de la lista blanca. */
   function runBlocklistUpdateCat(cat) {
-    if (CATEGORIES.indexOf(cat) < 0) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Categoria no reconocida: ' + cat });
+    if (CATEGORIES.indexOf(cat) < 0) return errorResult('api.invalid_category', 'Unknown DNS protection category.');
     return runRaw(CLI + ' blocklists update ' + cat);
   }
   function runBlocklistRollbackCat(cat) {
-    if (CATEGORIES.indexOf(cat) < 0) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Categoria no reconocida: ' + cat });
+    if (CATEGORIES.indexOf(cat) < 0) return errorResult('api.invalid_category', 'Unknown DNS protection category.');
     return runRaw(CLI + ' blocklists rollback ' + cat);
   }
 
@@ -248,8 +259,7 @@ const DCM = (() => {
   function domainInvalidResult(d) {
     return Promise.resolve({
       errno: -1, stdout: '',
-      stderr: 'Dominio invalido: "' + d + '". Formato: example.com o sub.example.com ' +
-              '(sin http://, sin barras, sin comodines, sin IP).'
+      stderr: apiText('validation.domain.format', 'Invalid domain. Use example.com or sub.example.com without a URL, IP, wildcards or paths.')
     });
   }
 
@@ -265,14 +275,14 @@ const DCM = (() => {
   }
   function runAllowlistSearch(domain) {
     const d = cleanDomain(domain).replace(/[^a-z0-9.-]/g, '');
-    if (!d) return Promise.resolve({ errno: -1, stdout: '', stderr: 'Termino de busqueda vacio.' });
+    if (!d) return errorResult('api.empty_search', 'Enter a search term.');
     return runRaw(CLI + ' allowlist search ' + d);
   }
   function runTempAllowAdd(domain, duration, reason) {
     const d = cleanDomain(domain);
     if (!DOMAIN_RE.test(d) || d.length > 253) return domainInvalidResult(domain);
     if (DURATIONS.indexOf(duration) < 0) {
-      return Promise.resolve({ errno: -1, stdout: '', stderr: 'Duracion no reconocida: ' + duration });
+      return errorResult('api.invalid_duration', 'Unknown temporary exception duration.');
     }
     let cmd = CLI + ' temporary-allow add ' + d + ' ' + duration + ' --origin webui';
     // Motivo OPCIONAL: colapsado a UNA sola palabra segura (sin espacios ni
@@ -299,7 +309,7 @@ const DCM = (() => {
   function runRawT(cmd, ms) {
     return new Promise((resolve) => {
       if (!available()) {
-        resolve({ errno: -1, stdout: '', stderr: 'API ksu no disponible en este entorno.' });
+        resolve({ errno: -1, stdout: '', stderr: apiText('api.unavailable', 'The KernelSU WebUI API is unavailable in this environment.') });
         return;
       }
       const cb = '__dcm_cb_' + Date.now() + '_' + (seq++);
@@ -314,7 +324,7 @@ const DCM = (() => {
         if (done) return;
         done = true;
         try { delete window[cb]; } catch (_) { window[cb] = undefined; }
-        resolve({ errno: -1, stdout: '', stderr: 'Tiempo de espera agotado.' });
+        resolve({ errno: -1, stdout: '', stderr: apiText('api.timeout', 'The request timed out.') });
       }, ms);
       try {
         window.ksu.exec(cmd, JSON.stringify({}), cb);
@@ -359,7 +369,7 @@ const DCM = (() => {
   // A2.5: diagnostico de una fuente. Id validado (allowlist de caracteres).
   function runSourceDoctor(id) {
     if (!/^[a-zA-Z0-9_-]+$/.test(String(id || ''))) {
-      return Promise.resolve({ errno: -1, stdout: '', stderr: 'id invalido' });
+      return errorResult('api.invalid_id', 'Invalid identifier.');
     }
     return runRawT(CLI + ' source doctor ' + id, 12000);
   }
@@ -436,20 +446,20 @@ const DCM = (() => {
   // service-control
   function runServiceControlListJson() { return runRawT(CLI + ' service-control status --all', 12000); }
   function runServiceControlStatus(id) {
-    if (!validId(id)) return argErr('id invalido');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid identifier.'));
     return runRawT(CLI + ' service-control status ' + shQuote(id), 10000);
   }
   function runServiceControlSet(id, mode) {
-    if (!validId(id)) return argErr('id invalido');
-    if (!validMode(mode)) return argErr('modo invalido');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid identifier.'));
+    if (!validMode(mode)) return argErr(apiText('api.invalid_mode', 'Invalid mode.'));
     return runRawT(CLI + ' service-control set ' + shQuote(id) + ' ' + shQuote(mode), 20000);
   }
   function runServiceControlVerify(id) {
-    if (!validId(id)) return argErr('id invalido');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid identifier.'));
     return runRawT(CLI + ' service-control verify ' + shQuote(id), 12000);
   }
   function runServiceControlInfo(id) {
-    if (!validId(id)) return argErr('id invalido');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid identifier.'));
     return runRawT(CLI + ' service-control info ' + shQuote(id), 8000);
   }
   // Anonymized DNSCrypt
@@ -457,13 +467,13 @@ const DCM = (() => {
   function runAnonymizedRelays() { return runRawT(CLI + ' anonymized relays', 8000); }
   function runAnonymizedResolvers() { return runRawT(CLI + ' anonymized resolvers', 8000); }
   function runAnonymizedTest(res, relays) {
-    if (!validResolver(res)) return argErr('resolver invalido');
-    if (!validRelays(relays)) return argErr('relays invalidos');
+    if (!validResolver(res)) return argErr(apiText('api.invalid_resolver', 'Invalid DNS resolver.'));
+    if (!validRelays(relays)) return argErr(apiText('api.invalid_relays', 'Invalid relay list.'));
     return runRawT(CLI + ' anonymized test ' + shQuote(res) + ' ' + shQuote(relays), 30000);
   }
   function runAnonymizedApply(res, relays) {
-    if (!validResolver(res)) return argErr('resolver invalido');
-    if (!validRelays(relays)) return argErr('relays invalidos');
+    if (!validResolver(res)) return argErr(apiText('api.invalid_resolver', 'Invalid DNS resolver.'));
+    if (!validRelays(relays)) return argErr(apiText('api.invalid_relays', 'Invalid relay list.'));
     return runRawT(CLI + ' anonymized apply ' + shQuote(res) + ' ' + shQuote(relays), 30000);
   }
   function runAnonymizedDisable() { return runRawT(CLI + ' anonymized disable', 15000); }
@@ -471,13 +481,13 @@ const DCM = (() => {
   // ODoH
   function runOdohStatus() { return runRawT(CLI + ' odoh status', 8000); }
   function runOdohTest(tgt, relay) {
-    if (tgt && !validStamp(tgt)) return argErr('stamp de target invalido');
-    if (relay && !validResolver(relay)) return argErr('relay invalido');
+    if (tgt && !validStamp(tgt)) return argErr(apiText('api.invalid_stamp', 'Invalid target DNS stamp.'));
+    if (relay && !validResolver(relay)) return argErr(apiText('api.invalid_resolver', 'Invalid DNS resolver.'));
     return runRawT(CLI + ' odoh test ' + shQuote(tgt || '') + ' ' + shQuote(relay || ''), 30000);
   }
   function runOdohApply(tgt, relay) {
-    if (!validStamp(tgt)) return argErr('stamp de target invalido');
-    if (relay && !validResolver(relay)) return argErr('relay invalido');
+    if (!validStamp(tgt)) return argErr(apiText('api.invalid_stamp', 'Invalid target DNS stamp.'));
+    if (relay && !validResolver(relay)) return argErr(apiText('api.invalid_resolver', 'Invalid DNS resolver.'));
     return runRawT(CLI + ' odoh apply ' + shQuote(tgt) + ' ' + shQuote(relay || ''), 30000);
   }
   function runOdohDisable() { return runRawT(CLI + ' odoh disable', 15000); }
@@ -522,7 +532,7 @@ const DCM = (() => {
   });
   function runCatalogGroupJson(group) {
     const suffix = CATALOG_GROUP_COMMANDS[group];
-    if (!suffix) return argErr('Grupo de catalogo no reconocido.');
+    if (!suffix) return argErr(apiText('api.invalid_group', 'Unknown catalog group.'));
     return runRawT(CLI + suffix, 45000);
   }
   // Compatibilidad para consumidores externos de la API anterior. La WebUI
@@ -530,15 +540,15 @@ const DCM = (() => {
   function runCatalogListJson() { return runRawT(CLI + ' catalog list --json', 45000); }
   function runServiceListJson() { return runRaw(CLI + ' service list --json'); }
   function runCatalogInfo(id) {
-    if (!validId(id)) return argErr('Identificador de fuente invalido.');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid source identifier.'));
     return runRaw(CLI + ' catalog info ' + shQuote(id));
   }
   function runCatalogEnable(id) {
-    if (!validId(id)) return argErr('Identificador de fuente invalido.');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid source identifier.'));
     return runRawT(CLI + ' catalog enable ' + shQuote(id), 180000);
   }
   function runCatalogDisable(id) {
-    if (!validId(id)) return argErr('Identificador de fuente invalido.');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid source identifier.'));
     return runRawT(CLI + ' catalog disable ' + shQuote(id), 180000);
   }
   function runCatalogUpdate() { return runRawT(CLI + ' catalog update enabled', 300000); }
@@ -548,16 +558,16 @@ const DCM = (() => {
   function runCatalogConflicts() { return runRaw(CLI + ' catalog conflicts'); }
 
   function runServiceSet(id, mode) {
-    if (!validId(id)) return argErr('Identificador de control invalido.');
-    if (SVC_MODES.indexOf(mode) < 0) return argErr('Modo invalido.');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid control identifier.'));
+    if (SVC_MODES.indexOf(mode) < 0) return argErr(apiText('api.invalid_mode', 'Invalid mode.'));
     return runRawT(CLI + ' service set ' + shQuote(id) + ' ' + shQuote(mode), 180000);
   }
 
   function runCustomAdd(url, name, category) {
     const u = String(url == null ? '' : url).trim();
-    if (!URL_RE.test(u)) return argErr('URL invalida. Debe ser https:// y sin caracteres peligrosos.');
+    if (!URL_RE.test(u)) return argErr(apiText('api.invalid_url', 'Enter a valid https:// URL.'));
     const qu = shQuote(u);
-    if (!qu) return argErr('URL invalida.');
+    if (!qu) return argErr(apiText('api.invalid_url', 'Enter a valid https:// URL.'));
     let cmd = CLI + ' catalog custom add ' + qu;
     const n = String(name == null ? '' : name).replace(/[^A-Za-z0-9 ._-]+/g, ' ').trim().slice(0, 60);
     if (n) cmd += ' --name ' + shQuote(n.replace(/\s+/g, '_'));
@@ -566,7 +576,7 @@ const DCM = (() => {
     return runRawT(cmd, 60000);
   }
   function runCustomRemove(id) {
-    if (!validId(id)) return argErr('Identificador de fuente invalido.');
+    if (!validId(id)) return argErr(apiText('api.invalid_id', 'Invalid source identifier.'));
     return runRawT(CLI + ' catalog custom remove ' + shQuote(id), 120000);
   }
 
@@ -577,12 +587,12 @@ const DCM = (() => {
   }
   function runBindhostsAnalyze(dir) {
     const qd = checkPath(dir);
-    if (!qd) return argErr('Ruta invalida. Debe ser absoluta y sin caracteres peligrosos.');
+    if (!qd) return argErr(apiText('api.invalid_path', 'Enter an absolute path without control characters.'));
     return runRawT(CLI + ' import-bindhosts ' + qd + ' --dry-run', 60000);
   }
   function runBindhostsImport(dir) {
     const qd = checkPath(dir);
-    if (!qd) return argErr('Ruta invalida. Debe ser absoluta y sin caracteres peligrosos.');
+    if (!qd) return argErr(apiText('api.invalid_path', 'Enter an absolute path without control characters.'));
     return runRawT(CLI + ' import-bindhosts ' + qd + ' --confirmed', 300000);
   }
 

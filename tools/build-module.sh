@@ -156,6 +156,10 @@ else
   bash "$ROOT/tests/smoke-test-catalog-download-all.sh" || fail "tests/smoke-test-catalog-download-all.sh fallo. No hay release con descarga global rota."
   echo "  --- tests/smoke-test-webui-args.cjs ---"
   node "$ROOT/tests/smoke-test-webui-args.cjs" || fail "tests/smoke-test-webui-args.cjs fallo (seguridad de argumentos)."
+  echo "  --- tests/smoke-test-i18n.sh ---"
+  bash "$ROOT/tests/smoke-test-i18n.sh" || fail "tests/smoke-test-i18n.sh fallo (traducciones WebUI)."
+  echo "  --- tests/smoke-test-webui-v030.cjs ---"
+  node "$ROOT/tests/smoke-test-webui-v030.cjs" || fail "tests/smoke-test-webui-v030.cjs fallo (idioma y navegación WebUI)."
 fi
 if [ "${DCM_SKIP_TESTS:-0}" = "1" ]; then
   echo "  NOTA: este empaquetado omitio las suites; deben aparecer aprobadas por separado en CI."
