@@ -1,0 +1,83 @@
+name: Verify live v0.3.0-RC1 release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-v030-release-live.yml'
+      - 'trigger-v030-checksum-fix.txt'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify public release, assets, checksum and downloaded ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/report
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=30" > /tmp/report/actions-runs.json || true
+          gh release view v0.3.0-rc1 --json url,isPrerelease,tagName,assets > /tmp/report/release.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/report/release.json').read_text(encoding='utf-8'))
+          assert data['tagName'] == 'v0.3.0-rc1'
+          assert data['isPrerelease'] is True
+          names = {asset['name'] for asset in data['assets']}
+          required = {
+              'DNSCrypt-Manager-v0.3.0-RC1.zip',
+              'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256',
+              'DNSCrypt-Manager-v0.3.0-RC1.patch',
+              'AUDIT_v0.3.0-RC1.md',
+              'TEST_RESULTS_v0.3.0-RC1.md',
+          }
+          assert required <= names, sorted(required - names)
+          print(data['url'])
+          PY
+
+          verified=0
+          for attempt in $(seq 1 20); do
+            rm -rf /tmp/release-check
+            mkdir -p /tmp/release-check
+            gh release download v0.3.0-rc1 \
+              -p 'DNSCrypt-Manager-v0.3.0-RC1.zip' \
+              -p 'DNSCrypt-Manager-v0.3.0-RC1.zip.sha256' \
+              -p 'AUDIT_v0.3.0-RC1.md' \
+              -p 'TEST_RESULTS_v0.3.0-RC1.md' \
+              -D /tmp/release-check
+            if (cd /tmp/release-check && sha256sum -c DNSCrypt-Manager-v0.3.0-RC1.zip.sha256) > /tmp/report/checksum.txt 2>&1; then
+              verified=1
+              break
+            fi
+            sleep 15
+          done
+          test "$verified" -eq 1
+
+          grep -Eq '^[0-9a-f]{64}  DNSCrypt-Manager-v0\.3\.0-RC1\.zip$' /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip.sha256
+          unzip -tq /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip | tee /tmp/report/unzip.txt
+          unzip -p /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip module.prop | tr -d '\r' | tee /tmp/report/module.prop
+          grep -qx 'id=dnscrypt_manager' /tmp/report/module.prop
+          grep -qx 'version=v0.3.0-RC1' /tmp/report/module.prop
+          grep -qx 'versionCode=300' /tmp/report/module.prop
+          grep -qx 'author=Skaymer AR' /tmp/report/module.prop
+          sha256sum /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip | tee /tmp/report/zip.sha256
+          cp /tmp/release-check/DNSCrypt-Manager-v0.3.0-RC1.zip.sha256 /tmp/report/
+          cp /tmp/release-check/AUDIT_v0.3.0-RC1.md /tmp/report/
+          cp /tmp/release-check/TEST_RESULTS_v0.3.0-RC1.md /tmp/report/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v030-live-release-verification
+          path: /tmp/report
+          if-no-files-found: warn
