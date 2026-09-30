@@ -510,6 +510,41 @@ for(const k of ['blocked','allowed','allowlisted']) if(!d.events.some(e=>e.statu
 const marker=d.events.find(e=>e.domain==='snapshot-marker.invalid');
 if(!marker || marker.status!=='blocked' || marker.rule!=='snapshot-marker.invalid' || marker.category!==''){console.error('el snapshot rapido debe conservar estado y regla sin recorrer categorias');process.exit(1);}
 " && ok "G contadores y eventos vienen de una respuesta coherente" || bad "G snapshot mezcla contadores/eventos"
+
+# La app pide hasta 200 filas. Serializarlas no debe lanzar un pipeline de
+# sed/awk por cada campo: ese costo podía agotar los 30 s del root bridge.
+cp "$QLOG" "$SCRATCH/g_snapshot_queries.before"
+cp "$ALOG" "$SCRATCH/g_snapshot_allowlist.before"
+cp "$DNSCRYPT_TEST_DATA_DIR/security/events/blocked.log" "$SCRATCH/g_snapshot_events.before"
+awk -v ts="$_qa_ts" 'BEGIN {
+  for (i = 1; i <= 200; i++) {
+    domain = sprintf("quick-%03d.example", i)
+    if (i == 1) domain = "quoted\"slash\\marker.example"
+    if (i == 2) domain = "control" sprintf("%c", 1) "marker.example"
+    printf "%s\t127.0.0.1\t%s\tA\tNOERROR\t%dms\tcloudflare\t-\n", ts, domain, i
+  }
+}' > "$QLOG"
+: > "$ALOG"
+: > "$DNSCRYPT_TEST_DATA_DIR/security/events/blocked.log"
+_snapshot_start=$SECONDS
+call_cap "$SCRATCH/g_activity_snapshot_200.json" activity snapshot --limit 200 --json \
+  && ok "G snapshot serializa 200 eventos" || bad "G snapshot de 200 eventos fallo"
+_snapshot_elapsed=$((SECONDS - _snapshot_start))
+json_ok "$SCRATCH/g_activity_snapshot_200.json" \
+  && ok "G snapshot de 200 eventos conserva JSON valido" || bad "G snapshot de 200 eventos invalido"
+[ "$_snapshot_elapsed" -le 10 ] \
+  && ok "G snapshot de 200 eventos termina en menos de 10 s" \
+  || bad "G snapshot de 200 eventos excedio 10 s (${_snapshot_elapsed}s)"
+ACTIVITY_EXPECTED_ESCAPED_DOMAIN='quoted"slash\marker.example' "$NODE_BIN" -e "
+const d=JSON.parse(require('fs').readFileSync('$SCRATCH/g_activity_snapshot_200.json','utf8'));
+if(d.stats.total!==200 || d.stats.allowed!==200 || d.events.length!==200){console.error('snapshot incompleto', d.stats, d.events.length);process.exit(1);}
+if(!d.events.some(e=>e.domain===process.env.ACTIVITY_EXPECTED_ESCAPED_DOMAIN)){console.error('escape JSON incorrecto');process.exit(1);}
+if(!d.events.some(e=>e.domain==='control\x01marker.example')){console.error('control JSON incorrecto');process.exit(1);}
+" && ok "G snapshot escapa comillas y barras sin perder filas" || bad "G snapshot rompio campos JSON escapados"
+cat "$SCRATCH/g_snapshot_queries.before" > "$QLOG"
+cat "$SCRATCH/g_snapshot_allowlist.before" > "$ALOG"
+cat "$SCRATCH/g_snapshot_events.before" > "$DNSCRYPT_TEST_DATA_DIR/security/events/blocked.log"
+chmod 0600 "$QLOG" "$ALOG" "$DNSCRYPT_TEST_DATA_DIR/security/events/blocked.log"
 call_cli activity disable >/dev/null 2>&1 && ! grep -q 'DCM:query_activity BEGIN' "$DNSCRYPT_TEST_DATA_DIR/config/dnscrypt-proxy.toml" \
   && ok "G activity disable retira query_log sin tocar listas" || bad "G activity disable no retiro query_log"
 call_cli set-flag query_max 10001 >/dev/null 2>&1; [ $? -ne 0 ] && ok "G query_max fuera de rango rechazado" || bad "G query_max invalido aceptado"
