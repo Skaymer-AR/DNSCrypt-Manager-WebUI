@@ -1834,26 +1834,39 @@ cmd_activity() {
         return 1
       fi
       _enabled=false; [ "$(sec_query_mode)" != off ] && _enabled=true
-      if ! (
-        set -e
-        printf '{"enabled":%s,"stats":{"available":true,"total":%s,"blocked":%s,"allowed":%s,"allowlisted":%s,"errors":%s},"events":[' \
-          "$_enabled" "$_total" "$_blocked" "$_allowed" "$_allowlisted" "$_errors"
-        _first=1
-        while IFS="$(printf '\t')" read -r _t _dom _state _detail _qtype _rcode _duration _server _relay; do
-          [ -n "$_dom" ] || continue
-          # The quick snapshot preserves the rule and avoids searching large
-          # blocklist caches once per blocked row.
-          _cat=""
-          [ "$_first" = 1 ] || printf ','
-          _first=0
-          printf '{%s,%s,%s,%s,%s,%s,%s,%s,%s,%s}' \
-            "$(json_kv time "$_t")" "$(json_kv domain "$_dom")" "$(json_kv status "$_state")" \
-            "$(json_kv rule "$_detail")" "$(json_kv category "$_cat")" "$(json_kv query_type "$_qtype")" \
-            "$(json_kv return_code "$_rcode")" "$(json_kv duration "$_duration")" \
-            "$(json_kv server "$_server")" "$(json_kv relay "$_relay")"
-        done < "$_sel"
-        printf ']}\n'
-      ) > "$_json"; then
+      if ! awk -F '\t' \
+        -v enabled="$_enabled" -v total="$_total" -v blocked="$_blocked" \
+        -v allowed="$_allowed" -v allowlisted="$_allowlisted" -v errors="$_errors" '
+        function json_value(value, result, i, char, code) {
+          result = ""
+          for (i = 1; i <= length(value); i++) {
+            char = substr(value, i, 1)
+            if (char == "\\") result = result "\\\\"
+            else if (char == "\"") result = result "\\\""
+            else if (char == "\t") result = result "\\t"
+            else if (char == "\n") result = result "\\n"
+            else if (char == "\r") continue
+            else if ((code = index(control_chars, char)) > 0) result = result sprintf("\\u%04x", code)
+            else result = result char
+          }
+          return result
+        }
+        BEGIN {
+          for (i = 1; i < 32; i++) control_chars = control_chars sprintf("%c", i)
+          printf "{\"enabled\":%s,\"stats\":{\"available\":true,\"total\":%s,\"blocked\":%s,\"allowed\":%s,\"allowlisted\":%s,\"errors\":%s},\"events\":[", \
+            enabled, total, blocked, allowed, allowlisted, errors
+        }
+        {
+          if ($2 == "") next
+          if (seen++) printf ","
+          # Una pasada escapa todos los campos; el camino rapido conserva la
+          # regla y no busca en las caches de blocklists por evento.
+          printf "{\"time\":\"%s\",\"domain\":\"%s\",\"status\":\"%s\",\"rule\":\"%s\",\"category\":\"\",\"query_type\":\"%s\",\"return_code\":\"%s\",\"duration\":\"%s\",\"server\":\"%s\",\"relay\":\"%s\"}", \
+            json_value($1), json_value($2), json_value($3), json_value($4), \
+            json_value($5), json_value($6), json_value($7), json_value($8), json_value($9)
+        }
+        END { print "]}" }
+      ' "$_sel" > "$_json"; then
         sec_activity_snapshot_fail serialize "$_norm" "$_sorted" "$_sel" "$_json"
         return 1
       fi

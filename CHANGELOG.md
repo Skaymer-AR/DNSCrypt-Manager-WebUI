@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.1.1-rc8 — evitar el timeout al cargar Actividad (candidata)
+
+- Serializa el snapshot acotado en una sola pasada de `awk`, en vez de lanzar
+  varios procesos por cada campo de cada evento. Conserva esquema, contadores,
+  motivo del bloqueo y el camino rápido sin búsquedas en listas grandes.
+- Agrega una regresión con 200 eventos que comprueba JSON válido, caracteres
+  escapados y serialización en menos de 10 segundos. Android también exige la
+  ventana completa de eventos y rechaza un JSON válido pero parcial.
+- La app sube a 0.3.4 (versionCode 7) y el módulo a v1.1.1-rc8
+  (versionCode 11018). Sigue siendo candidata hasta probarla en el Edge 40 Pro.
+
 ## v1.1.1-rc7 — mostrar snapshots válidos de Actividad (candidata)
 
 - El módulo termina la lectura rápida con código cero aunque falle la limpieza

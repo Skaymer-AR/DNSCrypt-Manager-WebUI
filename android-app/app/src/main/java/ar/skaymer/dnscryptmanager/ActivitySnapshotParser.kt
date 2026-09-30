@@ -101,7 +101,7 @@ internal object ActivitySnapshotParser {
         require(stats.total.toLong() == stats.blocked.toLong() + stats.allowed + stats.allowlisted + stats.errors) {
             "activity counters do not add up"
         }
-        require(events.size <= stats.total) { "more events than recorded queries" }
+        require(events.size == minOf(stats.total, MAX_EVENTS)) { "activity event window is incomplete" }
         require(events.count { it.status == "blocked" } <= stats.blocked)
         require(events.count { it.status == "allowed" } <= stats.allowed)
         require(events.count { it.status == "allowlisted" } <= stats.allowlisted)
