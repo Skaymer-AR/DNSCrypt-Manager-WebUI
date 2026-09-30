@@ -45,7 +45,7 @@ class ActivitySnapshotParserTest {
 
     @Test
     fun rejectsMissingCountersAndDoesNotInventZeroValues() {
-        val missingCounter = VALID_RESPONSE.replace("\"errors\":2", "\"other\":2")
+        val missingCounter = VALID_RESPONSE.replace("\"errors\":0", "\"other\":0")
         assertInvalid(missingCounter)
     }
 
