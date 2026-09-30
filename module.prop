@@ -1,6 +1,6 @@
 id=dnscrypt_manager
 name=DNSCrypt Manager
-version=v1.2.0-rc1
-versionCode=12001
+version=v1.2.0-rc2
+versionCode=12002
 author=Skaymer AR
 description=dnscrypt-proxy system service with optional DNS redirection, local Activity, blocklist catalog, safe recovery, and English/Spanish WebUI. Servicio DNSCrypt con redireccion opcional, actividad local, catalogo de listas y recuperacion segura. KernelSU/KernelSU Next/APatch/Magisk.

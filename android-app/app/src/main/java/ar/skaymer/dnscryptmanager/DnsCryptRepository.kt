@@ -40,14 +40,12 @@ internal class DnsCryptRepository(
 
     suspend fun loadActivitySnapshot(): ActivitySnapshotData {
         val result = shell.run(RootShell.Command.ActivitySnapshot(200))
-        return ActivitySnapshotParser.parse(
-            result,
-            ActivitySnapshotMessages(
-                invalidSuccess = context.getString(R.string.activity_snapshot_invalid_success),
-                invalidFailure = context.getString(R.string.activity_snapshot_invalid_failure),
-                timedOut = context.getString(R.string.activity_snapshot_timed_out),
-            ),
+        val messages = ActivitySnapshotMessages(
+            invalidSuccess = context.getString(R.string.activity_snapshot_invalid_success),
+            invalidFailure = context.getString(R.string.activity_snapshot_invalid_failure),
+            timedOut = context.getString(R.string.activity_snapshot_timed_out),
         )
+        return parseOffMain { ActivitySnapshotParser.parse(result, messages) }
     }
 
     suspend fun runDiagnostics(): List<DiagnosticCheck> {
@@ -117,13 +115,13 @@ internal class DnsCryptRepository(
     suspend fun loadActivityStats(): ActivityStats {
         val result = shell.run(RootShell.Command.ActivityStats)
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.activity_stats_read_error) })
-        return parseStats(result.output)
+        return parseOffMain { parseStats(result.output) }
     }
 
     suspend fun loadActivityEvents(): List<ActivityEvent> {
         val result = shell.run(RootShell.Command.ActivityList(200))
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.activity_list_read_error) })
-        return parseEvents(result.output)
+        return parseOffMain { parseEvents(result.output) }
     }
 
     suspend fun loadFirewallData(): FirewallData {
@@ -183,7 +181,7 @@ internal class DnsCryptRepository(
     suspend fun loadConnections(): List<ConnectionEvent> {
         val result = shell.run(RootShell.Command.Connections)
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.connections_read_error) })
-        return parseConnections(result.output)
+        return parseOffMain { parseConnections(result.output) }
     }
 
     suspend fun setActivityRetention(days: Int, maxEntries: Int): RootShell.Result {
@@ -219,17 +217,19 @@ internal class DnsCryptRepository(
     suspend fun loadCatalogGroups(): List<CatalogGroup> {
         val result = shell.run(RootShell.Command.CatalogGroups)
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.catalog_open_error) })
-        val groups = JSONObject(result.output).optJSONArray("groups") ?: return emptyList()
-        return buildList(groups.length()) {
-            for (index in 0 until groups.length()) {
-                val item = groups.optJSONObject(index) ?: continue
-                add(
-                    CatalogGroup(
-                        key = item.optString("key"),
-                        count = item.optInt("count"),
-                        active = item.optInt("active"),
-                    ),
-                )
+        return parseOffMain {
+            val groups = JSONObject(result.output).optJSONArray("groups") ?: return@parseOffMain emptyList()
+            buildList(groups.length()) {
+                for (index in 0 until groups.length()) {
+                    val item = groups.optJSONObject(index) ?: continue
+                    add(
+                        CatalogGroup(
+                            key = item.optString("key"),
+                            count = item.optInt("count"),
+                            active = item.optInt("active"),
+                        ),
+                    )
+                }
             }
         }
     }
@@ -237,29 +237,31 @@ internal class DnsCryptRepository(
     suspend fun loadCatalogGroup(group: String): List<CatalogEntry> {
         val result = shell.run(RootShell.Command.CatalogList(group))
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.catalog_category_read_error) })
-        val entries = JSONObject(result.output).optJSONArray("entries") ?: return emptyList()
-        return buildList(entries.length()) {
-            for (index in 0 until entries.length()) {
-                val item = entries.optJSONObject(index) ?: continue
-                add(
-                    CatalogEntry(
-                        id = item.optString("id"),
-                        name = item.optString("name"),
-                        sourceName = item.optString("source_name"),
-                        sourceGroup = item.optString("source_group"),
-                        subgroup = item.optString("source_subgroup"),
-                        categories = item.optString("categories"),
-                        aggressiveness = item.optString("aggressiveness"),
-                        license = item.optString("license"),
-                        upstreamStatus = item.optString("upstream_status"),
-                        runtimeStatus = item.optString("runtime_status"),
-                        recommended = item.optBoolean("recommended", false),
-                        archived = item.optBoolean("archived", false),
-                        enabled = item.optBoolean("enabled", false),
-                        activationBlocked = item.optBoolean("activation_blocked", false),
-                        domainCount = item.optString("valid_domains", "-"),
-                    ),
-                )
+        return parseOffMain {
+            val entries = JSONObject(result.output).optJSONArray("entries") ?: return@parseOffMain emptyList()
+            buildList(entries.length()) {
+                for (index in 0 until entries.length()) {
+                    val item = entries.optJSONObject(index) ?: continue
+                    add(
+                        CatalogEntry(
+                            id = item.optString("id"),
+                            name = item.optString("name"),
+                            sourceName = item.optString("source_name"),
+                            sourceGroup = item.optString("source_group"),
+                            subgroup = item.optString("source_subgroup"),
+                            categories = item.optString("categories"),
+                            aggressiveness = item.optString("aggressiveness"),
+                            license = item.optString("license"),
+                            upstreamStatus = item.optString("upstream_status"),
+                            runtimeStatus = item.optString("runtime_status"),
+                            recommended = item.optBoolean("recommended", false),
+                            archived = item.optBoolean("archived", false),
+                            enabled = item.optBoolean("enabled", false),
+                            activationBlocked = item.optBoolean("activation_blocked", false),
+                            domainCount = item.optString("valid_domains", "-"),
+                        ),
+                    )
+                }
             }
         }
     }
@@ -267,26 +269,30 @@ internal class DnsCryptRepository(
     suspend fun loadDownloadProgress(): DownloadProgress {
         val result = shell.run(RootShell.Command.CatalogDownloadAllStatus)
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.download_progress_read_error) })
-        val item = JSONObject(result.output)
-        return DownloadProgress(
-            state = item.optString("state", "idle"),
-            done = item.optInt("done"),
-            total = item.optInt("total"),
-            success = item.optInt("success"),
-            failed = item.optInt("failed"),
-            skipped = item.optInt("skipped"),
-            current = item.optString("current"),
-        )
+        return parseOffMain {
+            val item = JSONObject(result.output)
+            DownloadProgress(
+                state = item.optString("state", "idle"),
+                done = item.optInt("done"),
+                total = item.optInt("total"),
+                success = item.optInt("success"),
+                failed = item.optInt("failed"),
+                skipped = item.optInt("skipped"),
+                current = item.optString("current"),
+            )
+        }
     }
 
     suspend fun loadAllowlist(): List<String> {
         val result = shell.run(RootShell.Command.AllowlistList)
         if (!result.ok) throw ModuleOperationException(result.output.ifBlank { context.getString(R.string.allowlist_read_error) })
-        val domains = JSONObject(result.output).optJSONArray("domains") ?: return emptyList()
-        return buildList(domains.length()) {
-            for (index in 0 until domains.length()) {
-                val domain = domains.optString(index).trim()
-                if (domain.isNotBlank()) add(domain)
+        return parseOffMain {
+            val domains = JSONObject(result.output).optJSONArray("domains") ?: return@parseOffMain emptyList()
+            buildList(domains.length()) {
+                for (index in 0 until domains.length()) {
+                    val domain = domains.optString(index).trim()
+                    if (domain.isNotBlank()) add(domain)
+                }
             }
         }
     }

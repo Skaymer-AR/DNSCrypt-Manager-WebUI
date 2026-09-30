@@ -126,10 +126,25 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
         }
     }
 
+    fun refreshLists() {
+        refreshCatalog()
+        refreshDownloadProgress()
+    }
+
     fun refreshDownloadProgress() {
+        if (_state.value.downloadProgressLoading) return
+        _state.value = _state.value.copy(downloadProgressLoading = true)
         viewModelScope.launch {
-            runCatching { repository.loadDownloadProgress() }
-                .onSuccess { _state.value = _state.value.copy(downloadProgress = it) }
+            try {
+                val progress = repository.loadDownloadProgress()
+                _state.value = _state.value.copy(downloadProgress = progress, downloadProgressLoaded = true)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Leave the cached value visible; a later screen entry can retry.
+            } finally {
+                _state.value = _state.value.copy(downloadProgressLoading = false)
+            }
         }
     }
 
@@ -248,7 +263,10 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
         success = app.getString(R.string.vmodel_download_started),
         operation = { repository.startDownloadAll() },
         afterSuccess = {
-            _state.value = _state.value.copy(downloadProgress = repository.loadDownloadProgress())
+            _state.value = _state.value.copy(
+                downloadProgress = repository.loadDownloadProgress(),
+                downloadProgressLoaded = true,
+            )
         },
     )
 
