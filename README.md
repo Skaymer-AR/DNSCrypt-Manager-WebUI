@@ -10,10 +10,13 @@ Compatible con **KernelSU**, **KernelSU Next**, **APatch** (WebUI completa) y **
 
 ## Estado del proyecto
 
-**v1.1.0 es la versión estable actual.** Amplía v1.0.0 con un catálogo de fuentes
-de bloqueo DNS auditables, descargables y reversibles. La base DNSCrypt estable se
-conserva; Anonymized DNSCrypt y ODoH siguen fuera de la interfaz pública hasta contar
-con validación suficiente.
+**v1.1.0 sigue siendo la versión estable.** La última candidata publicada es
+v1.1.1-rc8; la Big Update 1.2.0-rc1 agrega traducciones en español e inglés para
+la aplicación y la WebUI, además de corregir el cierre de Actividad al desplazar
+registros repetidos. La candidata seguirá como pre-release hasta la prueba física
+pendiente en el Motorola Edge 40 Pro. Amplía v1.0.0 con un catálogo de fuentes
+de bloqueo DNS auditables, descargables y reversibles. Anonymized DNSCrypt y ODoH
+siguen fuera de la interfaz pública hasta contar con validación suficiente.
 
 Incluye:
 

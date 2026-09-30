@@ -14,25 +14,6 @@
  */
 'use strict';
 
-/* Estructura minima para traduccion futura: un solo objeto con los textos
- * que arma el propio JS (los textos estaticos del HTML se traducen aparte,
- * el dia que se agregue selector de idioma). */
-const STR = {
-  running: 'Corriendo', stopped: 'Detenido',
-  listeningYes: 'Escuchando', listeningNo: 'Sin escuchar',
-  redirectOn: 'Activa', redirectOff: 'Inactiva',
-  disabledBanner: 'Modulo DESHABILITADO (modo seguro). Toca "Habilitar" para reactivarlo.',
-  noKsu: 'Esta WebUI necesita KernelSU, KernelSU Next o APatch. ' +
-         'En Magisk no hay WebUI nativa: usa el boton de Accion del modulo ' +
-         'o la CLI (su -c dnscrypt-manager help).',
-  confirmRedirectApply: 'Esto va a redirigir el DNS del sistema hacia dnscrypt-proxy. ¿Continuar?',
-  confirmRedirectRemove: '¿Quitar la redireccion DNS? El trafico volvera al DNS normal del sistema.',
-  confirmPanic: 'PANIC va a detener todo, quitar la redireccion, restaurar tu DNS normal y ' +
-                'DESHABILITAR el modulo hasta que lo reactives. ¿Continuar?',
-  confirmLogsClear: '¿Borrar todos los logs? Esta accion no se puede deshacer.',
-  timeout: 'Tiempo de espera agotado. Reintenta en unos segundos.'
-};
-
 let POLL_MS = 4000;
 let pollTimer = null;
 let busy = false; // evita acciones superpuestas mientras hay una en curso
@@ -171,9 +152,9 @@ async function doSimple(action, okMsg) {
 }
 
 function wireServiceButtons() {
-  const bStart = $('btnStart'); if (bStart) bStart.addEventListener('click', () => doSimple('start', 'Servicio iniciado.'));
-  const bStop = $('btnStop'); if (bStop) bStop.addEventListener('click', () => doSimple('stop', 'Servicio detenido.'));
-  const bRestart = $('btnRestart'); if (bRestart) bRestart.addEventListener('click', () => doSimple('restart', 'Servicio reiniciado.'));
+  const bStart = $('btnStart'); if (bStart) bStart.addEventListener('click', () => doSimple('start', tr('ui.service.started')));
+  const bStop = $('btnStop'); if (bStop) bStop.addEventListener('click', () => doSimple('stop', tr('ui.service.stopped')));
+  const bRestart = $('btnRestart'); if (bRestart) bRestart.addEventListener('click', () => doSimple('restart', tr('ui.service.restarted')));
   const bEnable = $('btnEnable');
   if (bEnable) bEnable.addEventListener('click', async () => {
     if (busy) return;
@@ -409,24 +390,11 @@ function wirePanic() {
  *  auditoria de fugas, eventos, privacidad. Todo textContent (sin innerHTML
  *  con datos); botones bloqueados via setBusy durante cada operacion.
  * ======================================================================== */
-const SEC_STR = {
-  catSub: {
-    malware: 'Sitios que distribuyen software malicioso.',
-    phishing: 'Paginas que roban credenciales haciendose pasar por otras.',
-    scams: 'Dominios de estafas conocidas.',
-    trackers: 'Rastreadores de actividad (puede afectar analitica).',
-    ads: 'Publicidad (puede romper apps o paginas).',
-    cryptomining: 'Mineria de criptomonedas en el navegador.'
-  },
-  confirmProfileStrict: 'El perfil Estricto activa fail-closed: si DNSCrypt deja de funcionar, ' +
-    'podes quedarte sin DNS hasta restaurar la red (PANIC siempre la restaura). ¿Aplicar Estricto?',
-  confirmEventsClear: '¿Borrar todo el historial de eventos bloqueados?',
-  confirmAllowClear: '¿Vaciar la allowlist por completo?'
-};
+const SECURITY_CATEGORIES = new Set(['malware', 'phishing', 'scams', 'trackers', 'ads', 'cryptomining']);
 
 /* Muestra un error de backend concreto: comando + codigo + mensaje. */
 function backendError(res, cmdLabel) {
-  const msg = (res.stderr || res.stdout || '').trim() || 'sin detalle';
+  const msg = (res.stderr || res.stdout || '').trim() || tr('common.no_detail');
   return (cmdLabel ? cmdLabel + ': ' : '') + msg + ' (rc=' + res.errno + ')';
 }
 
@@ -454,7 +422,7 @@ async function refreshProtection() {
     sub.className = 'tl-sub';
     const dom = (info.domains != null ? info.domains : 0);
     const st = info.status || 'sin_lista';
-    sub.textContent = (SEC_STR.catSub[cat] ? tr('protection.desc.' + cat) : '') + ' · ' + dom + ' dominios (' + st + ')';
+    sub.textContent = (SECURITY_CATEGORIES.has(cat) ? tr('protection.desc.' + cat) : '') + ' · ' + dom + ' dominios (' + st + ')';
     left.appendChild(name); left.appendChild(sub);
     const lab = document.createElement('label');
     lab.className = 'switch';
@@ -826,11 +794,13 @@ async function refreshEvents() {
     head.textContent = (e.time || '') + '  ' + (e.domain || '');
     const meta = document.createElement('div');
     meta.className = 'tl-sub';
-    meta.textContent = 'categoria: ' + (e.category || '-') + ' · regla: ' + (e.rule || '-') +
-      (e.list ? ' · lista: ' + e.list : '') + (e.allowed_now ? ' · permitido ahora' : '');
+    meta.textContent = trf('ev.meta.category', {value: e.category || '-'}) + ' · ' +
+      trf('ev.meta.rule', {value: e.rule || '-'}) +
+      (e.list ? ' · ' + trf('ev.meta.list', {value: e.list}) : '') +
+      (e.allowed_now ? ' · ' + tr('ev.meta.allowed_now') : '');
     const acts = document.createElement('div');
     acts.className = 'event-actions';
-    [['5m', 'Permitir 5m'], ['1h', 'Permitir 1h']].forEach(([dur, label]) => {
+    [['5m', tr('ev.allow.5m')], ['1h', tr('ev.allow.1h')]].forEach(([dur, label]) => {
       const b = document.createElement('button');
       b.textContent = label;
       b.addEventListener('click', async () => {
@@ -912,10 +882,11 @@ function wireEvents() {
       const r = await DCM.run('eventsStats');
       const d = safeParse(r.stdout);
       if (d) {
-        setText('eventsStats', 'Total ' + d.total + ' · malware ' + d.malware + ' · phishing ' + d.phishing +
-          ' · estafas ' + d.scams + ' · rastreadores ' + d.trackers + ' · ads ' + d.ads +
-          ' · cripto ' + d.cryptomining + ' · top: ' + (d.top_domain || '-') +
-          ' · listas: ' + (d.lists_last_update || '-'));
+        setText('eventsStats', trf('ev.stats.summary', {
+          total: d.total, malware: d.malware, phishing: d.phishing, scams: d.scams,
+          trackers: d.trackers, ads: d.ads, crypto: d.cryptomining,
+          top: d.top_domain || '-', lists: d.lists_last_update || '-'
+        }));
       } else { setText('eventsStats', (r.stdout || r.stderr || '').trim()); }
     } finally { setBusy(false); }
   });
@@ -2024,8 +1995,8 @@ function initBackend() {
       // La CLI existe pero no es ejecutable desde el contexto WebUI: en KernelSU
       // Next suele ser Hybrid Mount apagado. Mensaje claro, no rc=127.
       const b = $('ksuBanner');
-      const msg = (typeof I18N !== 'undefined' && I18N.t) ? I18N.t('env.cli.unresolved') : '';
-      if (b) { b.textContent = msg || 'No se pudo acceder a la CLI del modulo. Si usas KernelSU Next, activa Hybrid Mount, reinicia y vuelve a abrir la interfaz.'; b.classList.remove('hidden'); }
+      const msg = tr('env.cli.unresolved');
+      if (b) { b.textContent = msg === 'env.cli.unresolved' ? 'The module CLI is unavailable. Check root access and reopen the interface.' : msg; b.classList.remove('hidden'); }
       // Igual mostramos el estado del entorno si se puede (usa comando fijo, no la CLI resuelta).
       if (typeof refreshEnvironmentCard === 'function') { try { refreshEnvironmentCard(); } catch (_) {} }
       return;

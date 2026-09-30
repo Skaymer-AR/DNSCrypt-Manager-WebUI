@@ -101,9 +101,27 @@ const I18N = require('../webroot/js/i18n.js');
   console.log('== i18n ==');
   // antes de cargar: t devuelve la clave
   if (I18N.t('nav.status') === 'nav.status') ok('t() sin cargar devuelve la clave'); else bad('t sin cargar');
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: { languages: ['en-US'], language: 'en-US' }
+  });
   await I18N.init();
   if (I18N.current() === 'en') ok('idioma por defecto = en'); else bad('default en', I18N.current());
   if (I18N.t('nav.status') === 'Status') ok('EN: nav.status = Status'); else bad('EN nav.status', I18N.t('nav.status'));
+  delete store.dcm_lang;
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: { languages: ['es-AR', 'en-US'], language: 'es-AR' }
+  });
+  await I18N.init();
+  if (I18N.current() === 'es' && I18N.t('nav.status') === 'Estado') ok('sin preferencia: init respeta Español del teléfono');
+  else bad('selección automática Español', I18N.current());
+  store.dcm_lang = 'en';
+  await I18N.init();
+  if (I18N.current() === 'en') ok('init prioriza el idioma guardado sobre el teléfono');
+  else bad('prioridad de idioma guardado', I18N.current());
+  if (I18N.resolveInitialLanguage(null, ['fr-FR']) === 'en') ok('idioma no compatible cae en inglés');
+  else bad('fallback de idioma no compatible', I18N.resolveInitialLanguage(null, ['fr-FR']));
   await I18N.setLang('es');
   if (I18N.t('nav.status') === 'Estado') ok('ES: nav.status = Estado (cambio en caliente)'); else bad('ES nav.status', I18N.t('nav.status'));
   if (I18N.t('clave.inexistente') === 'clave.inexistente') ok('clave inexistente -> devuelve la clave'); else bad('clave inexistente');
@@ -115,6 +133,7 @@ const I18N = require('../webroot/js/i18n.js');
   // idioma no soportado -> fallback en
   await I18N.setLang('fr');
   if (I18N.current() === 'en') ok('idioma no soportado -> fallback en'); else bad('fallback idioma', I18N.current());
+  delete global.navigator;
 
   console.log('\nResumen webui-v030: ' + PASS + ' OK, ' + FAIL + ' FAIL');
   process.exit(FAIL === 0 ? 0 : 1);

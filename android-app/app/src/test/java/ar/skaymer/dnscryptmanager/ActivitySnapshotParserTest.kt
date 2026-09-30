@@ -10,7 +10,7 @@ import org.junit.Test
 class ActivitySnapshotParserTest {
     @Test
     fun acceptsCompleteSnapshotWithSuccessfulExit() {
-        val snapshot = ActivitySnapshotParser.parse(RootShell.Result(0, VALID_RESPONSE))
+        val snapshot = ActivitySnapshotParser.parse(RootShell.Result(0, VALID_RESPONSE), SPANISH_MESSAGES)
 
         assertTrue(snapshot.enabled)
         assertTrue(snapshot.stats.available)
@@ -23,7 +23,7 @@ class ActivitySnapshotParserTest {
 
     @Test
     fun acceptsCompleteSnapshotWhenCleanupReturnsNonZeroAfterJson() {
-        val snapshot = ActivitySnapshotParser.parse(RootShell.Result(1, largeSnapshotResponse()))
+        val snapshot = ActivitySnapshotParser.parse(RootShell.Result(1, largeSnapshotResponse()), SPANISH_MESSAGES)
 
         assertEquals(7_482, snapshot.stats.total)
         assertEquals(200, snapshot.events.size)
@@ -31,7 +31,7 @@ class ActivitySnapshotParserTest {
 
     @Test
     fun acceptsTheFullTwoHundredEventWindowForLargeCounters() {
-        val snapshot = ActivitySnapshotParser.parse(RootShell.Result(0, largeSnapshotResponse()))
+        val snapshot = ActivitySnapshotParser.parse(RootShell.Result(0, largeSnapshotResponse()), SPANISH_MESSAGES)
 
         assertEquals(7_482, snapshot.stats.total)
         assertEquals(200, snapshot.events.size)
@@ -82,12 +82,30 @@ class ActivitySnapshotParserTest {
         assertInvalid(VALID_RESPONSE, timedOut = true)
     }
 
+    @Test
+    fun parserErrorsUseTheSelectedLanguage() {
+        val englishMessages = ActivitySnapshotMessages(
+            invalidSuccess = "The module returned an incomplete or invalid Activity response.",
+            invalidFailure = "The module could not complete a valid Activity read.",
+            timedOut = "Reading Activity took too long.",
+        )
+        val error = try {
+            ActivitySnapshotParser.parse(RootShell.Result(1, VALID_RESPONSE, timedOut = true), englishMessages)
+            throw AssertionError("Timed out snapshot was accepted")
+        } catch (expected: ModuleOperationException) {
+            expected
+        }
+
+        assertEquals("Reading Activity took too long.", error.message)
+    }
+
     private fun assertInvalid(
         output: String,
         timedOut: Boolean = false,
+        messages: ActivitySnapshotMessages = SPANISH_MESSAGES,
     ) {
         val error = try {
-            ActivitySnapshotParser.parse(RootShell.Result(1, output, timedOut))
+            ActivitySnapshotParser.parse(RootShell.Result(1, output, timedOut), messages)
             throw AssertionError("Invalid snapshot was accepted")
         } catch (expected: ModuleOperationException) {
             expected
@@ -128,6 +146,11 @@ class ActivitySnapshotParserTest {
     }
 
     private companion object {
+        val SPANISH_MESSAGES = ActivitySnapshotMessages(
+            invalidSuccess = "El módulo devolvió una respuesta de Actividad incompleta o inválida. Reintentá y, si persiste, actualizá el módulo.",
+            invalidFailure = "El módulo no completó una lectura válida de Actividad. Revisá que esté activo y reintentá.",
+            timedOut = "La lectura de Actividad tardó demasiado. Revisá que el módulo esté activo y reintentá.",
+        )
         val VALID_RESPONSE = """{"enabled":true,"stats":{"available":true,"total":2,"blocked":1,"allowed":1,"allowlisted":0,"errors":0},"events":[{"time":"[2026-09-29 18:00:00]","domain":"tracker.example","status":"blocked","rule":"tracker.example","category":"","query_type":"A","return_code":"NOERROR","duration":"1ms","server":"cloudflare","relay":"-"},{"time":"[2026-09-29 17:59:59]","domain":"clear.example","status":"allowed","rule":"","category":"","query_type":"AAAA","return_code":"NOERROR","duration":"2ms","server":"cloudflare","relay":"-"}]}"""
     }
 }

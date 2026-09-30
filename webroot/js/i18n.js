@@ -1,10 +1,4 @@
-/* webroot/js/i18n.js  —  DNSCrypt Manager v0.3.0-RC1
- *
- * i18n minimalista y seguro para la WebUI. English es el idioma por defecto y
- * el fallback; el usuario puede elegir Español y la elección se persiste. No
- * depende del idioma del sistema. Solo texto visible; nunca traduce ids,
- * comandos, claves JSON, dominios ni URLs. DOM seguro: textContent, sin eval.
- */
+/* webroot/js/i18n.js — Spanish and English WebUI localization. */
 const I18N = (() => {
   const SUPPORTED = ['en', 'es'];
   const DEFAULT = 'en';
@@ -56,6 +50,15 @@ const I18N = (() => {
   function current() { return lang; }
   function supported() { return SUPPORTED.slice(); }
 
+  function resolveInitialLanguage(stored, browserLanguages) {
+    if (SUPPORTED.indexOf(stored) >= 0) return stored;
+    for (const locale of browserLanguages || []) {
+      const baseCode = String(locale || '').toLowerCase().split(/[-_]/, 1)[0];
+      if (SUPPORTED.indexOf(baseCode) >= 0) return baseCode;
+    }
+    return DEFAULT;
+  }
+
   // Cambia de idioma en caliente, persiste y reaplica.
   async function setLang(code) {
     if (SUPPORTED.indexOf(code) < 0) code = DEFAULT;
@@ -70,16 +73,19 @@ const I18N = (() => {
     apply(document);
   }
 
-  // Inicializa: carga EN como base/fallback, luego el idioma elegido (o EN).
+  // Initialize EN as the fallback, then respect a saved choice or the device language.
   async function init() {
     base = (await fetchDict(DEFAULT)) || {};
     const stored = safeStoreGet();
-    const chosen = (stored && SUPPORTED.indexOf(stored) >= 0) ? stored : DEFAULT;
+    const browserLanguages = typeof navigator !== 'undefined'
+      ? (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language])
+      : [];
+    const chosen = resolveInitialLanguage(stored, browserLanguages);
     await setLang(chosen);
     return lang;
   }
 
-  return { init, setLang, t, apply, current, supported };
+  return { init, setLang, t, apply, current, supported, resolveInitialLanguage };
 })();
 
 if (typeof module !== 'undefined' && module.exports) { module.exports = I18N; }

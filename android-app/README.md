@@ -1,6 +1,6 @@
 # DNSCrypt Manager para Android
 
-Aplicación nativa en español para manejar el módulo DNSCrypt desde el teléfono. La primera adaptación apunta al Motorola Edge 40 Pro (`rtwo`, Android 16); compatibilidad con otros equipos queda para una etapa posterior.
+Aplicación nativa en español e inglés para manejar el módulo DNSCrypt desde el teléfono. Sigue el idioma del sistema; Android 13 o posterior permite elegir el idioma por aplicación. La primera adaptación apunta al Motorola Edge 40 Pro (`rtwo`, Android 16); compatibilidad con otros equipos queda para una etapa posterior.
 
 ## Qué se puede hacer
 
@@ -35,6 +35,6 @@ Actividad lee eventos y contadores juntos. El camino rápido conserva dominio, e
 
 ## Build y evidencia
 
-El workflow `Build DNSCrypt Manager Android app` usa JDK 17, Gradle 8.9 y Android SDK 35. En cada PR compila el APK `debug`, ejecuta las pruebas JVM de Actividad y el gate del módulo, y compara el certificado del APK con RC7. Al integrar esta candidata en `main`, publica una pre-release de GitHub con el APK Android 0.3.4, el ZIP del módulo v1.1.1-rc8 y sus SHA-256. Esta publicación sigue siendo candidata: la prueba física del arreglo en el Edge 40 Pro todavía está pendiente y no se marca como versión estable. El resultado exacto de compatibilidad de firma queda en el resumen del workflow; si Android no acepta la actualización por la firma, seguí las opciones de instalación de las notas de release.
+El workflow `Build DNSCrypt Manager Android app` usa JDK 17, Gradle 8.9 y Android SDK 35. En cada PR compila el APK `debug`, ejecuta las pruebas JVM de Actividad y el gate del módulo, y compara el certificado con el APK publicado más reciente. Al integrar la candidata, publica una pre-release con el APK Android 0.4.0, el ZIP del módulo v1.2.0-rc1 y sus SHA-256. La prueba física del nuevo arreglo en el Edge 40 Pro sigue pendiente; CI no equivale a una prueba en el teléfono y esta candidata no se marca como estable. El resultado de compatibilidad de firma queda en el resumen del workflow; si Android no acepta la actualización por la firma, las notas de release explican que habrá que desinstalar solo la app antes de instalar el APK nuevo.
 
 Para cada commit, confirmar que el build Android del workflow haya terminado correctamente. La instalación y la prueba física en el Edge 40 Pro siguen pendientes. El APK no actualiza el módulo: revisar su versión y SHA-256 por separado antes de instalar una candidata.

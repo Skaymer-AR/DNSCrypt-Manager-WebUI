@@ -4,7 +4,7 @@
 # Verifica el sistema i18n (EN/ES) de la WebUI v0.3.0-RC1:
 #  - JSON valido; conjuntos de claves identicos (sin faltantes ni extra);
 #  - placeholders compatibles por clave ({x} y %s);
-#  - toda referencia data-i18n* del HTML apunta a una clave existente;
+#  - referencias data-i18n* del HTML y llamadas literales tr()/trf() de JavaScript apuntan a claves existentes;
 #  - sin claves huerfanas (definidas y nunca usadas) — advertencia dura.
 ##############################################################################
 set -u
@@ -43,13 +43,20 @@ js = ""
 for f in glob.glob(os.path.join(webroot, "js", "*.js")):
     js += open(f, encoding="utf-8").read()
 used = set(refs)
-used |= set(re.findall(r"\bt\(\s*['\"]([^'\"]+)['\"]", js))
+literal_js_keys = set(re.findall(r"\btrf?\(\s*['\"]([^'\"]+)['\"]", js))
+dynamic_prefixes = set(re.findall(r"\btrf?\(\s*['\"]([^'\"]+)['\"]\s*\+", js))
+used |= {key for key in literal_js_keys if not key.endswith('.')}
+for prefix in dynamic_prefixes:
+    used |= {prefix + category for category in ('malware', 'phishing', 'scams', 'trackers', 'ads', 'cryptomining')}
 used |= set(re.findall(r"I18N\.t\(\s*['\"]([^'\"]+)['\"]", js))
+missing_js = used - ek
+if missing_js: fails.append("referencias JS sin clave: " + ", ".join(sorted(missing_js)))
 orphan = ek - used
 print("missing=%d" % len(missing))
 print("extra=%d" % len(extra))
 print("ph=%d" % len(ph_mismatch))
 print("dangling=%d" % len(dangling))
+print("js_missing=%d" % len(missing_js))
 print("orphan=%d" % len(orphan))
 for f in fails: print("FAIL::" + f)
 if orphan: print("WARN::claves aun no usadas en UI (%d): %s" % (len(orphan), ", ".join(sorted(list(orphan))[:8]) + (" ..." if len(orphan)>8 else "")))
@@ -59,6 +66,7 @@ grep -E '^(FAIL|WARN)::' /tmp/i18n.out | sed 's/^FAIL::/  [detalle] /; s/^WARN::
 if grep -q "^missing=0" /tmp/i18n.out && grep -q "^extra=0" /tmp/i18n.out; then ok "EN y ES tienen el mismo conjunto de claves"; else bad "conjuntos de claves difieren"; fi
 grep -q "^ph=0" /tmp/i18n.out && ok "placeholders compatibles por clave" || bad "placeholders incompatibles"
 grep -q "^dangling=0" /tmp/i18n.out && ok "toda referencia data-i18n del HTML existe" || bad "referencias data-i18n colgantes"
+grep -q "^js_missing=0" /tmp/i18n.out && ok "toda referencia literal de traducción en JavaScript existe" || bad "referencias JS colgantes"
 rm -f /tmp/i18n.out
 echo ""
 echo "Resumen i18n: $PASS OK, $FAILN FAIL"

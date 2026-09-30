@@ -19,8 +19,10 @@ const mockWindow = {
 };
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'webroot', 'js', 'api.js'), 'utf8');
-const factory = new Function('window', 'setTimeout', 'clearTimeout', 'JSON', 'Date', src + '\n; return DCM;');
-const DCM = factory(mockWindow, setTimeout, clearTimeout, JSON, Date);
+const en = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'webroot/i18n/en.json'), 'utf8'));
+const es = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'webroot/i18n/es.json'), 'utf8'));
+const factory = new Function('window', 'setTimeout', 'clearTimeout', 'JSON', 'Date', 'I18N', src + '\n; return DCM;');
+const DCM = factory(mockWindow, setTimeout, clearTimeout, JSON, Date, { t: (key) => en[key] || key });
 
 let pass = 0, fail = 0;
 function ok(name) { pass++; console.log('  OK   ' + name); }
@@ -29,7 +31,7 @@ function bad(name, extra) { fail++; console.log('  FAIL ' + name + (extra ? ' ::
 async function rej(name, thunk) {
   lastCmd = null;
   const r = await thunk();
-  if (r.errno === -1 && /inval/i.test(r.stderr) && lastCmd === null) ok(name);
+  if (r.errno === -1 && r.stderr.trim() && lastCmd === null) ok(name);
   else bad(name, 'errno=' + r.errno + ' stderr=' + JSON.stringify(r.stderr) + ' cmd=' + JSON.stringify(lastCmd));
 }
 async function acc(name, thunk, mustContain) {
@@ -54,6 +56,14 @@ function noUnquotedMeta(cmd) {
   await rej('id muy largo', () => DCM.runCatalogEnable('a'.repeat(65)));
   await rej('id vacio', () => DCM.runCatalogEnable(''));
   await rej('mayusculas', () => DCM.runCatalogEnable('BadID'));
+
+  const spanishDCM = factory(mockWindow, setTimeout, clearTimeout, JSON, Date, { t: (key) => es[key] || key });
+  const enError = await DCM.runNextdns('bad');
+  const esError = await spanishDCM.runNextdns('bad');
+  if (enError.stderr === en['validation.nextdns.format']) ok('errores de API se muestran en inglés');
+  else bad('error API inglés', enError.stderr);
+  if (esError.stderr === es['validation.nextdns.format']) ok('errores de API se muestran en español');
+  else bad('error API español', esError.stderr);
 
   console.log('== ID valido (comillado) ==');
   await acc('id valido', () => DCM.runCatalogEnable('hagezi_multi_pro'), "catalog enable 'hagezi_multi_pro'");

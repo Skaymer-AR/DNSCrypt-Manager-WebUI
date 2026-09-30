@@ -80,7 +80,7 @@
     </div>
 
     <div class="field">
-      <label for="nextdnsId">NextDNS — Configuration ID</label>
+      <label for="nextdnsId" data-i18n="ui.nextdns.config_id">NextDNS — Configuration ID</label>
       <input type="text" id="nextdnsId" data-i18n-ph="ui.nextdns.placeholder" placeholder="ej: abcdef" maxlength="12" autocapitalize="off" autocorrect="off" spellcheck="false">
       <div class="err" id="nextdnsError"></div>
     </div>
@@ -163,12 +163,12 @@
       <p class="hint" data-i18n="cat.download.hint">Descarga y valida las fuentes compatibles en segundo plano, hasta 4 a la vez según el espacio disponible. No activa listas nuevas ni cambia los bloqueos actuales; conserva 512 MiB libres. Las fuentes que requieren revisión técnica se informan como omitidas.</p>
       <div id="catDownloadStatus" class="hint" aria-live="polite"></div>
     </div>
-    <div id="catResults" class="catalog-groups hint" aria-live="polite">Loading categories…</div>
+    <div id="catResults" class="catalog-groups hint" aria-live="polite" data-i18n="cat.loading.metadata">Loading categories…</div>
     <div class="btn-row" style="margin:12px 0 8px;">
-      <button id="btnCatAddSelected" class="primary" disabled>Apply changes (0)</button>
+      <button id="btnCatAddSelected" class="primary" disabled data-i18n="cat.apply.initial">Apply changes</button>
       <button id="btnCatClearSelection" class="small" disabled data-i18n="cat.apply.clear">Limpiar selección</button>
     </div>
-    <div id="catSelectionStatus" class="hint" aria-live="polite">No sources selected.</div>
+    <div id="catSelectionStatus" class="hint" aria-live="polite" data-i18n="cat.apply.none">No sources selected.</div>
     <div id="catApplyStatus" class="hint" aria-live="polite"></div>
     <details class="catalog-options">
       <summary data-i18n="cat.options.title">Actualizar, compilar y otras opciones</summary>
@@ -356,7 +356,7 @@
   </section>
 
 <details class="card ui-advanced-only">
-    <summary>Logs</summary>
+    <summary data-i18n="ui.logs.title">Logs</summary>
     <div class="btn-row" style="margin-bottom:12px;">
       <button id="btnLogs" class="small" data-i18n="ui.logs.show">Ver logs recientes</button>
       <button id="btnLogsClear" class="small danger" data-i18n="ui.logs.clear">Borrar logs</button>

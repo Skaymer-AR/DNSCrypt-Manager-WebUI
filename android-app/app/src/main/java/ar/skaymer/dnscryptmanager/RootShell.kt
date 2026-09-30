@@ -1,5 +1,6 @@
 package ar.skaymer.dnscryptmanager
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -12,7 +13,7 @@ import java.util.concurrent.TimeUnit
  * Puente root cerrado a operaciones concretas del CLI del módulo.
  * No acepta comandos libres ni construye shell con texto escrito por el usuario.
  */
-internal class RootShell(private val tempDirectory: File) {
+internal class RootShell(private val context: Context, private val tempDirectory: File) {
     data class Result(
         val exitCode: Int,
         val output: String,
@@ -189,13 +190,13 @@ internal class RootShell(private val tempDirectory: File) {
             else -> null
         }
         if (artifactPath != null && !isAppCacheArtifact(artifactPath)) {
-            return@withContext Result(2, "La ruta de la copia no pertenece al caché privado de la app.")
+            return@withContext Result(2, context.getString(R.string.root_backup_path_invalid))
         }
         val script = buildScript(command.args)
         val outputFile = try {
             File.createTempFile("dcm-root-", ".out", tempDirectory)
         } catch (error: Exception) {
-            return@withContext Result(126, error.message ?: "No se pudo crear el archivo temporal de respuesta.")
+            return@withContext Result(126, error.message ?: context.getString(R.string.root_temp_create_failed))
         }
         val process = try {
             ProcessBuilder("su", "-c", script)
@@ -204,7 +205,7 @@ internal class RootShell(private val tempDirectory: File) {
                 .start()
         } catch (error: Exception) {
             outputFile.delete()
-            return@withContext Result(127, error.message ?: "No se pudo iniciar su")
+            return@withContext Result(127, error.message ?: context.getString(R.string.root_shell_start_failed))
         }
         runCatching { process.outputStream.close() }
         try {
@@ -215,14 +216,14 @@ internal class RootShell(private val tempDirectory: File) {
                 val partialOutput = readOutput(outputFile)
                 return@withContext Result(
                     -1,
-                    listOf(partialOutput.orEmpty(), "El comando tardó demasiado. Revisá el permiso root y que el módulo esté activo.")
+                    listOf(partialOutput.orEmpty(), context.getString(R.string.root_command_timed_out))
                         .filter { it.isNotBlank() }
                         .joinToString("\n"),
                     timedOut = true,
                 )
             }
             if (outputFile.length() > MAX_OUTPUT_BYTES) {
-                return@withContext Result(-1, "La respuesta del módulo superó el límite de lectura seguro.")
+                return@withContext Result(-1, context.getString(R.string.root_output_too_large))
             }
             Result(process.exitValue(), readOutput(outputFile))
         } catch (cancelled: CancellationException) {
@@ -231,19 +232,19 @@ internal class RootShell(private val tempDirectory: File) {
         } catch (interrupted: InterruptedException) {
             process.destroyForcibly()
             currentCoroutineContext().ensureActive()
-            Result(-1, "La ejecución root se interrumpió antes de responder.", timedOut = true)
+            Result(-1, context.getString(R.string.root_command_interrupted), timedOut = true)
         } catch (error: Exception) {
             process.destroyForcibly()
-            Result(-1, error.message ?: "No se pudo leer la respuesta del módulo.")
+            Result(-1, error.message ?: context.getString(R.string.root_output_read_failed))
         } finally {
             outputFile.delete()
         }
     }
 
     private fun readOutput(file: File): String {
-        if (file.length() > MAX_OUTPUT_BYTES) return "La respuesta del módulo superó el límite de lectura seguro."
+        if (file.length() > MAX_OUTPUT_BYTES) return context.getString(R.string.root_output_too_large)
         return runCatching { file.readText(Charsets.UTF_8).trim() }
-            .getOrElse { "No se pudo leer la respuesta del módulo: ${it.message.orEmpty()}" }
+            .getOrElse { context.getString(R.string.root_output_read_error, it.message.orEmpty()) }
     }
 
     private fun buildScript(args: List<String>): String {
