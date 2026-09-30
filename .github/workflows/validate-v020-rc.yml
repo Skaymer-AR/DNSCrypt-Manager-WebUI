@@ -1,4 +1,4 @@
-name: Validate DNSCrypt Manager v1.2.0 RC2 candidate
+name: Validate DNSCrypt Manager v1.2.0 stable package
 
 on:
   pull_request:
@@ -19,10 +19,10 @@ jobs:
     env:
       DNSCRYPT_VERSION: '2.1.17'
       DNSCRYPT_ASSET_SHA256: '85601b3398c7013ca0d102c075d0f46ccb9c5b6b84001be6f15992019560f572'
-      RC_ZIP: '/tmp/DNSCrypt-Manager-v1.2.0-rc2.zip'
+      MODULE_ZIP: '/tmp/DNSCrypt-Manager-v1.2.0.zip'
 
     steps:
-      - name: Checkout pull request
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -104,39 +104,39 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Build clean RC package
+      - name: Build clean v1.2.0 package
         shell: bash
         run: |
           set -euo pipefail
-          DCM_SKIP_TESTS=1 DCM_OUTPUT="$RC_ZIP" bash tools/build-module.sh
-          sha256sum "$RC_ZIP" > "${RC_ZIP}.sha256"
+          DCM_SKIP_TESTS=1 DCM_OUTPUT="$MODULE_ZIP" bash tools/build-module.sh
+          sha256sum "$MODULE_ZIP" > "${MODULE_ZIP}.sha256"
 
       - name: Audit generated ZIP
         shell: bash
         run: |
           set -euo pipefail
-          unzip -tq "$RC_ZIP"
-          unzip -Z1 "$RC_ZIP" | sed 's#^\./##' > /tmp/rc-entries.txt
-          grep -qx 'module.prop' /tmp/rc-entries.txt
-          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'version=v1.2.0-rc2'
-          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'versionCode=12002'
-          unzip -p "$RC_ZIP" module.prop | tr -d '\r' | grep -qx 'author=Skaymer AR'
-          if grep -Eq '^(tests|tools|dist|fixtures|bootstrap)/|(^|/)COLOCAR_BINARIO_AQUI\.md$|(^|/)__pycache__(/|$)|(^|/)\.git(/|$)' /tmp/rc-entries.txt; then
-            echo 'Development artifacts or placeholders leaked into the RC ZIP:' >&2
-            grep -E '^(tests|tools|dist|fixtures|bootstrap)/|(^|/)COLOCAR_BINARIO_AQUI\.md$|(^|/)__pycache__(/|$)|(^|/)\.git(/|$)' /tmp/rc-entries.txt >&2
+          unzip -tq "$MODULE_ZIP"
+          unzip -Z1 "$MODULE_ZIP" | sed 's#^\./##' > /tmp/release-entries.txt
+          grep -qx 'module.prop' /tmp/release-entries.txt
+          unzip -p "$MODULE_ZIP" module.prop | tr -d '\r' | grep -qx 'version=v1.2.0'
+          unzip -p "$MODULE_ZIP" module.prop | tr -d '\r' | grep -qx 'versionCode=12003'
+          unzip -p "$MODULE_ZIP" module.prop | tr -d '\r' | grep -qx 'author=Skaymer AR'
+          if grep -Eq '^(tests|tools|dist|fixtures|bootstrap)/|(^|/)COLOCAR_BINARIO_AQUI\.md$|(^|/)__pycache__(/|$)|(^|/)\.git(/|$)' /tmp/release-entries.txt; then
+            echo 'Development artifacts or placeholders leaked into the release ZIP:' >&2
+            grep -E '^(tests|tools|dist|fixtures|bootstrap)/|(^|/)COLOCAR_BINARIO_AQUI\.md$|(^|/)__pycache__(/|$)|(^|/)\.git(/|$)' /tmp/release-entries.txt >&2
             exit 1
           fi
-          unzip -p "$RC_ZIP" bin/arm64/dnscrypt-proxy | sha256sum | \
+          unzip -p "$MODULE_ZIP" bin/arm64/dnscrypt-proxy | sha256sum | \
             grep -q '^940b650911cfa55cbc0544a9025ceb866101590a88031a90a7e1ca05f5781cbc '
-          cat "${RC_ZIP}.sha256"
+          cat "${MODULE_ZIP}.sha256"
 
-      - name: Upload verified RC artifact
+      - name: Upload verified v1.2.0 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DNSCrypt-Manager-v1.2.0-rc2-validated
+          name: DNSCrypt-Manager-v1.2.0-validated
           path: |
-            /tmp/DNSCrypt-Manager-v1.2.0-rc2.zip
-            /tmp/DNSCrypt-Manager-v1.2.0-rc2.zip.sha256
+            /tmp/DNSCrypt-Manager-v1.2.0.zip
+            /tmp/DNSCrypt-Manager-v1.2.0.zip.sha256
           if-no-files-found: error
           retention-days: 30
 
