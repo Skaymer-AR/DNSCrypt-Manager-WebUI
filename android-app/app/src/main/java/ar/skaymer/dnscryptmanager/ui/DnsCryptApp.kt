@@ -1211,6 +1211,7 @@ private fun ListsScreen(
     var allowDomain by rememberSaveable { mutableStateOf("") }
     var allowError by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingRemoval by remember { mutableStateOf<String?>(null) }
+    val invalidDomainMessage = appText(R.string.allowlist_invalid_domain)
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
         ScreenHeader(
@@ -1250,7 +1251,7 @@ private fun ListsScreen(
                 onAdd = {
                     val normalized = allowDomain.trim().lowercase(Locale.ROOT)
                     if (!validDomainForForm(normalized)) {
-                        allowError = appText(R.string.allowlist_invalid_domain)
+                        allowError = invalidDomainMessage
                     } else {
                         onAddAllowlist(normalized)
                         allowDomain = ""
