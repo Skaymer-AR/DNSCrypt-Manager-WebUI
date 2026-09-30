@@ -150,6 +150,8 @@ data class DnsCryptUiState(
     val catalogLoading: Boolean = false,
     val catalogLoaded: Boolean = false,
     val downloadProgress: DownloadProgress = DownloadProgress(),
+    val downloadProgressLoading: Boolean = false,
+    val downloadProgressLoaded: Boolean = false,
     val allowlist: List<String> = emptyList(),
     val allowlistLoading: Boolean = false,
     val firewall: FirewallSupport? = null,

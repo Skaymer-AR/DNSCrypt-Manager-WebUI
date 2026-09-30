@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.2.0-rc2 — navegación más fluida (candidata)
+
+- Evita releer el catálogo y el progreso cada vez que se vuelve a Listas; los
+  datos ya cargados aparecen al instante y se actualizan con el botón de recarga.
+- Mueve el parseo de snapshots, catálogo, progreso y allowlist fuera del hilo de
+  interfaz y evita consultas solapadas de progreso.
+- Ajustes compone solo las secciones visibles mediante una lista perezosa; el
+  filtro del catálogo se calcula una vez por cambio de búsqueda o selección.
+- La app sube a 0.4.1 (versionCode 9) y el módulo a v1.2.0-rc2
+  (versionCode 12002). Sigue como pre-release hasta probarla físicamente en el
+  Motorola Edge 40 Pro; la estable sigue siendo v1.1.0.
+
 ## v1.1.1-rc8 — evitar el timeout al cargar Actividad (candidata)
 
 - Serializa el snapshot acotado en una sola pasada de `awk`, en vez de lanzar

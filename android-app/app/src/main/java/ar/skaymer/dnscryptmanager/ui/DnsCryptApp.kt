@@ -135,8 +135,9 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
     LaunchedEffect(currentTab) {
         when (currentTab) {
             Tab.LISTS -> {
-                if (state.catalogGroups.isEmpty()) viewModel.loadCatalog() else viewModel.refreshCatalog()
-                viewModel.refreshDownloadProgress()
+                val loadPlan = listsEntryLoadPlan(state.catalogLoaded, state.downloadProgressLoaded)
+                if (loadPlan.catalog) viewModel.loadCatalog()
+                if (loadPlan.downloadProgress) viewModel.refreshDownloadProgress()
             }
             Tab.FIREWALL -> viewModel.refreshFirewall()
             Tab.ACTIVITY -> viewModel.loadAllowlist()
@@ -210,7 +211,7 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
                 )
                 Tab.LISTS -> ListsScreen(
                     state = state,
-                    onRefresh = viewModel::refreshCatalog,
+                    onRefresh = viewModel::refreshLists,
                     onSelectGroup = { viewModel.loadCatalogGroup(it) },
                     onSetEnabled = viewModel::setCatalogEnabled,
                     onStartDownloadAll = viewModel::startDownloadAll,
@@ -1327,6 +1328,9 @@ private fun ColumnScope.CatalogPanel(
     onRefreshProgress: () -> Unit,
 ) {
     val context = LocalContext.current
+    val filteredEntries = remember(state.catalogEntries, search, recommendedOnly, activeOnly, context) {
+        state.catalogEntries.filter { matchesCatalog(context, it, search, recommendedOnly, activeOnly) }
+    }
     Column(Modifier.weight(1f).padding(top = 8.dp)) {
         DownloadAllCard(state, onRequestDownloadAll, onRefreshProgress)
         Spacer(Modifier.height(10.dp))
@@ -1386,20 +1390,20 @@ private fun ColumnScope.CatalogPanel(
             Spacer(Modifier.weight(1f))
             FilterChip(selected = activeOnly, onClick = { onActiveOnly(!activeOnly) }, label = { Text(appText(R.string.catalog_active)) })
             Spacer(Modifier.weight(1f))
-            Text(appText(R.string.catalog_source_count, state.catalogEntries.count { matchesCatalog(context, it, search, recommendedOnly, activeOnly) }), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(appText(R.string.catalog_source_count, filteredEntries.size), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
         when {
             state.catalogLoading -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             !state.catalogLoaded -> EmptyState(appText(R.string.catalog_open_failed), appText(R.string.catalog_retry))
-            state.catalogEntries.none { matchesCatalog(context, it, search, recommendedOnly, activeOnly) } -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            filteredEntries.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 EmptyState(appText(R.string.catalog_no_results), appText(R.string.catalog_try_other))
             }
             else -> LazyColumn(
                 modifier = Modifier.weight(1f).padding(top = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(9.dp),
             ) {
-                items(state.catalogEntries.filter { matchesCatalog(context, it, search, recommendedOnly, activeOnly) }, key = { it.id }) { entry ->
+                items(filteredEntries, key = { it.id }) { entry ->
                     CatalogEntryCard(entry, state.busyAction != null) { enabled -> onRequestToggle(entry, enabled) }
                 }
             }
@@ -1427,9 +1431,11 @@ private fun DownloadAllCard(state: DnsCryptUiState, onStart: () -> Unit, onRefre
                     )
                 }
                 if (progress.running) {
-                    IconButton(onClick = onRefresh) { Icon(Icons.Outlined.Refresh, contentDescription = appText(R.string.download_refresh_accessibility)) }
+                    IconButton(onClick = onRefresh, enabled = !state.downloadProgressLoading) { Icon(Icons.Outlined.Refresh, contentDescription = appText(R.string.download_refresh_accessibility)) }
+                } else if (state.downloadProgressLoading) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {
-                    OutlinedButton(onClick = onStart, enabled = state.busyAction == null) { Text(appText(R.string.download_prepare)) }
+                    OutlinedButton(onClick = onStart, enabled = state.busyAction == null && !state.downloadProgressLoading) { Text(appText(R.string.download_prepare)) }
                 }
             }
             if (progress.running) {
@@ -1585,123 +1591,141 @@ private fun SettingsScreen(
     val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(onBackupInspect)
     }
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 12.dp),
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp),
     ) {
-        ScreenHeader(appText(R.string.nav_settings), appText(R.string.settings_subtitle), onRefresh, state.loading || state.busyAction != null)
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Dns, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(9.dp))
-                    Column {
-                        Text(appText(R.string.dns_server), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(appText(R.string.settings_current_server, resolverLabel(snapshot.status.server)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        item(key = "settings-header") {
+            ScreenHeader(appText(R.string.nav_settings), appText(R.string.settings_subtitle), onRefresh, state.loading || state.busyAction != null)
+        }
+        item(key = "settings-provider") {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Dns, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(9.dp))
+                        Column {
+                            Text(appText(R.string.dns_server), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(appText(R.string.settings_current_server, resolverLabel(snapshot.status.server)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Text(appText(R.string.settings_provider_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    listOf(
+                        listOf("cloudflare" to appText(R.string.provider_cloudflare), "quad9" to appText(R.string.provider_quad9)),
+                        listOf("adguard" to appText(R.string.provider_adguard), "mullvad" to appText(R.string.provider_mullvad)),
+                    ).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { (key, label) ->
+                                FilterChip(
+                                    selected = current == key,
+                                    onClick = { if (current != key) pendingProvider = key },
+                                    label = { Text(label) },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = state.busyAction == null,
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    Text(appText(R.string.provider_nextdns), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(appText(R.string.settings_nextdns_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = nextDnsId,
+                            onValueChange = { nextDnsId = it.filter(Char::isLetterOrDigit).take(12) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text(appText(R.string.settings_nextdns_id)) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        OutlinedButton(
+                            onClick = { pendingNextDns = true },
+                            enabled = state.busyAction == null && nextDnsId.matches(Regex("^[0-9a-fA-F]{4,12}$")),
+                        ) { Text(appText(R.string.common_apply)) }
                     }
                 }
-                Text(appText(R.string.settings_provider_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                listOf(
-                    listOf("cloudflare" to appText(R.string.provider_cloudflare), "quad9" to appText(R.string.provider_quad9)),
-                    listOf("adguard" to appText(R.string.provider_adguard), "mullvad" to appText(R.string.provider_mullvad)),
-                ).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { (key, label) ->
+            }
+        }
+        item(key = "settings-retention") {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(appText(R.string.settings_activity_retention), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(appText(R.string.settings_retention_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(1, 3, 7).forEach { days ->
                             FilterChip(
-                                selected = current == key,
-                                onClick = { if (current != key) pendingProvider = key },
-                                label = { Text(label) },
-                                modifier = Modifier.weight(1f),
+                                selected = snapshot.activityRetentionDays == days,
+                                onClick = { onSetRetention(days, snapshot.activityMaxEntries) },
+                                label = { Text(appText(if (days == 1) R.string.duration_day else R.string.duration_days, days)) },
+                                enabled = state.busyAction == null,
+                            )
+                        }
+                    }
+                    Text(appText(R.string.settings_max_queries), style = MaterialTheme.typography.labelLarge)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(50, 500, 1_000, 2_000, 5_000, 10_000).forEach { entries ->
+                            FilterChip(
+                                selected = snapshot.activityMaxEntries == entries,
+                                onClick = { onSetRetention(snapshot.activityRetentionDays, entries) },
+                                label = { Text(entries.toString()) },
                                 enabled = state.busyAction == null,
                             )
                         }
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                Text(appText(R.string.provider_nextdns), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(appText(R.string.settings_nextdns_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = nextDnsId,
-                        onValueChange = { nextDnsId = it.filter(Char::isLetterOrDigit).take(12) },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        label = { Text(appText(R.string.settings_nextdns_id)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                        shape = RoundedCornerShape(16.dp),
-                    )
-                    OutlinedButton(
-                        onClick = { pendingNextDns = true },
-                        enabled = state.busyAction == null && nextDnsId.matches(Regex("^[0-9a-fA-F]{4,12}$")),
-                    ) { Text(appText(R.string.common_apply)) }
-                }
             }
         }
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text(appText(R.string.settings_activity_retention), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(appText(R.string.settings_retention_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(1, 3, 7).forEach { days ->
-                        FilterChip(
-                            selected = snapshot.activityRetentionDays == days,
-                            onClick = { onSetRetention(days, snapshot.activityMaxEntries) },
-                            label = { Text(appText(if (days == 1) R.string.duration_day else R.string.duration_days, days)) },
-                            enabled = state.busyAction == null,
-                        )
+        item(key = "settings-backup") {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(appText(R.string.settings_backup), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(appText(R.string.settings_backup_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { exportBackup.launch("dnscrypt-manager-backup.tar.gz") }, enabled = state.busyAction == null, modifier = Modifier.weight(1f)) { Text(appText(R.string.backup_create)) }
+                        OutlinedButton(onClick = { importBackup.launch(arrayOf("application/gzip", "application/x-gzip", "application/octet-stream")) }, enabled = state.busyAction == null, modifier = Modifier.weight(1f)) { Text(appText(R.string.backup_restore)) }
                     }
-                }
-                Text(appText(R.string.settings_max_queries), style = MaterialTheme.typography.labelLarge)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(50, 500, 1_000, 2_000, 5_000, 10_000).forEach { entries ->
-                        FilterChip(
-                            selected = snapshot.activityMaxEntries == entries,
-                            onClick = { onSetRetention(snapshot.activityRetentionDays, entries) },
-                            label = { Text(entries.toString()) },
-                            enabled = state.busyAction == null,
-                        )
+                    if (state.busyAction == appText(R.string.vmodel_backup_validate_action)) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text(appText(R.string.backup_validating), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    Text(appText(R.string.backup_nextdns_privacy), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
                 }
             }
         }
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(appText(R.string.settings_backup), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(appText(R.string.settings_backup_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { exportBackup.launch("dnscrypt-manager-backup.tar.gz") }, enabled = state.busyAction == null, modifier = Modifier.weight(1f)) { Text(appText(R.string.backup_create)) }
-                    OutlinedButton(onClick = { importBackup.launch(arrayOf("application/gzip", "application/x-gzip", "application/octet-stream")) }, enabled = state.busyAction == null, modifier = Modifier.weight(1f)) { Text(appText(R.string.backup_restore)) }
+        item(key = "settings-activity") {
+            QuietCard(
+                Icons.Outlined.History,
+                appText(R.string.settings_activity_title),
+                if (snapshot.status.activityEnabled) appText(R.string.settings_activity_on) else appText(R.string.settings_activity_off),
+            )
+        }
+        item(key = "settings-connections") {
+            QuietCard(
+                Icons.Outlined.Info,
+                appText(R.string.settings_connections_title),
+                appText(R.string.settings_connections_help),
+            )
+        }
+        item(key = "settings-language") {
+            QuietCard(
+                Icons.Outlined.Info,
+                appText(R.string.settings_language_title),
+                appText(R.string.settings_language_help),
+            )
+        }
+        item(key = "settings-module-version") {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(appText(R.string.settings_module_version), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(snapshot.status.version.ifBlank { appText(R.string.common_not_available) }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(appText(R.string.settings_webui_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (state.busyAction == appText(R.string.vmodel_backup_validate_action)) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text(appText(R.string.backup_validating), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(appText(R.string.backup_nextdns_privacy), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
             }
         }
-        QuietCard(
-            Icons.Outlined.History,
-            appText(R.string.settings_activity_title),
-            if (snapshot.status.activityEnabled) appText(R.string.settings_activity_on) else appText(R.string.settings_activity_off),
-        )
-        QuietCard(
-            Icons.Outlined.Info,
-            appText(R.string.settings_connections_title),
-            appText(R.string.settings_connections_help),
-        )
-        QuietCard(
-            Icons.Outlined.Info,
-            appText(R.string.settings_language_title),
-            appText(R.string.settings_language_help),
-        )
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(appText(R.string.settings_module_version), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(snapshot.status.version.ifBlank { appText(R.string.common_not_available) }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(appText(R.string.settings_webui_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        item(key = "settings-privacy") {
+            Text(appText(R.string.settings_privacy), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(appText(R.string.settings_privacy), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     pendingProvider?.let { key ->
         val label = resolverLabel(key)
