@@ -25,16 +25,16 @@ Actividad lee eventos y contadores juntos. El camino rápido conserva dominio, e
 
 ## Límites actuales
 
-- La actividad es de consultas DNS. No muestra conexiones TCP/UDP completas ni identifica de forma confiable qué aplicación originó cada consulta.
+- La actividad es de consultas DNS. No muestra conexiones TCP/UDP completas ni identifica de forma confiable qué aplicación originó cada consulta. `Error` significa que el resolver devolvió un código DNS distinto de `NOERROR`; el código concreto se conserva como `return_code` en el JSON exportado. Tocar una fila permite o quita una excepción; la app Android todavía no ofrece un bloqueo manual de un dominio desde Actividad. Para bloquear desde la app, activá en Listas una fuente que incluya el dominio.
 - El firewall bloquea toda la red de una app seleccionada; no filtra dominios ni identifica qué app originó una consulta DNS. Solo se habilita con soporte confirmado para IPv4 e IPv6.
 - Para mostrar el selector local, Android permite consultar los paquetes instalados. La lista y sus nombres se procesan en el teléfono y no se envían a un servidor.
 - Los perfiles de seguridad, el rollback de listas y la validación avanzada siguen disponibles en la WebUI del módulo; todavía no tienen controles nativos propios.
 - Cambiar resolver reinicia `dnscrypt-proxy` y puede pausar la conectividad unos segundos.
 - El diagnóstico no identifica qué aplicación inició cada consulta DNS; el firewall sigue siendo un control de tráfico completo por app.
-- Compilar el APK no prueba que funcione en el Motorola. La primera instalación física debe comprobar permiso root, lectura del módulo, actividad, catálogo, allowlist, firewall por Wi‑Fi y datos, cambio de resolver y conectividad por hotspot.
+- La confirmación física disponible cubre la carga de Actividad y la navegación por Listas y Ajustes en el Motorola Edge 40 Pro. No representa una validación exhaustiva del permiso root, firewall, cambio de resolver, hotspot ni otros dispositivos.
 
 ## Build y evidencia
 
-El workflow `Build DNSCrypt Manager Android app` usa JDK 17, Gradle 8.9 y Android SDK 35. En cada PR compila el APK `debug`, ejecuta las pruebas JVM y el gate del módulo, y compara el certificado con el APK Android 0.4.0 de RC1. Al integrar esta candidata, publica una pre-release con el APK Android 0.4.1, el ZIP del módulo v1.2.0-rc2 y sus SHA-256. La prueba física de la navegación en el Edge 40 Pro sigue pendiente; CI no equivale a una prueba en el teléfono y esta candidata no se marca como estable. El resultado de compatibilidad de firma queda en el resumen del workflow; si Android no acepta la actualización por la firma, habrá que desinstalar solo la app antes de instalar el APK nuevo.
+La versión estable v1.2.0 incluye Android 0.4.2 (versionCode 10) y módulo v1.2.0 (versionCode 12003). El workflow usa JDK 17, Gradle 8.9 y Android SDK 35; en cada PR ejecuta pruebas JVM, compila el APK `debug`, corre los gates del módulo, valida las traducciones y compara el certificado del APK con el publicado en RC2. GitHub Actions informa si se puede instalar como actualización. Si Android rechaza la firma, hay que desinstalar solo la app antes de instalar el APK; eso borra los datos privados de la app, pero no el módulo ni su configuración. El usuario confirmó en el Motorola Edge 40 Pro la carga de Actividad y la fluidez de Listas y Ajustes; CI y ese reporte no son una validación exhaustiva de todos los escenarios ni de otros dispositivos.
 
-Para cada commit, confirmar que el build Android del workflow haya terminado correctamente. La instalación y la prueba física en el Edge 40 Pro siguen pendientes. El APK no actualiza el módulo: revisar su versión y SHA-256 por separado antes de instalar una candidata.
+El APK no actualiza el módulo: instalá el APK y el ZIP por separado y verificá los SHA-256 de los dos archivos.

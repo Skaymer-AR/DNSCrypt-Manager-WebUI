@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.0 — Big Update estable
+
+- Consolida la corrección de Actividad: snapshot completo en una pasada,
+  contadores y eventos consistentes, desplazamiento fluido y clasificación
+  rápida sin buscar cada dominio en listas grandes.
+- La navegación de Listas conserva los datos cargados y evita releer el
+  catálogo en cada visita. Ajustes carga sus secciones de forma perezosa; el
+  parseo y las consultas de progreso no bloquean la interfaz.
+- La app Android y la WebUI conservan sus interfaces en español e inglés.
+- App Android 0.4.2 (versionCode 10) y módulo v1.2.0 (versionCode 12003).
+- El usuario confirmó en su Motorola Edge 40 Pro que Actividad carga y que
+  Listas y Ajustes vuelven a abrir con fluidez. La validación física comunicada
+  cubre esos recorridos; no implica una prueba exhaustiva de cada función o
+  dispositivo.
+
 ## v1.2.0-rc2 — navegación más fluida (candidata)
 
 - Evita releer el catálogo y el progreso cada vez que se vuelve a Listas; los

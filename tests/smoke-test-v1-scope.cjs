@@ -34,10 +34,9 @@ console.log('== 3) sin tarjeta heredada de controles de servicio ==');
 (html.indexOf('scToggle')>=0)?ok('"Privacidad por servicio" (service-control real) conservada'):bad('falta la seccion real');
 
 console.log('== 4) version estable ==');
-// La rama de trabajo conserva el alcance estable, pero usa un versionCode
-// separado para que KernelSU no confunda el ZIP de prueba con v1.0.0.
-(/^(version=v1\.0\.0|version=v1\.1\.0|version=v1\.1\.0-rc[1-9][0-9]*)$/m.test(prop))?ok('module.prop version estable/rc de trabajo'):bad('version',prop.match(/version=.*/));
-(/^(versionCode=10000|versionCode=11010|versionCode=110[0-9]{2,})$/m.test(prop))?ok('module.prop versionCode estable/rc de trabajo'):bad('versionCode');
+// Acepta las líneas estables publicadas y las candidatas v1.x.x del módulo.
+(/^(version=v1\.0\.0|version=v1\.1\.0|version=v1\.1\.0-rc[1-9][0-9]*|version=v1\.2\.0(-rc[1-9][0-9]*)?)$/m.test(prop))?ok('module.prop version estable/rc'):bad('version',prop.match(/version=.*/));
+(/^(versionCode=10000|versionCode=110[0-9]{2,}|versionCode=120[0-9]{2,})$/m.test(prop))?ok('module.prop versionCode estable/rc de trabajo'):bad('versionCode');
 (en['app.testing']===undefined && html.indexOf('testingBar')<0)?ok('sin texto "esta version continua en pruebas"'):bad('texto de pruebas presente');
 (/EN PRUEBAS|primera version estable sera/i.test(cust)===false)?ok('instalador sin leyenda de pruebas'):bad('instalador con leyenda');
 

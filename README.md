@@ -10,12 +10,15 @@ Compatible con **KernelSU**, **KernelSU Next**, **APatch** (WebUI completa) y **
 
 ## Estado del proyecto
 
-**v1.1.0 sigue siendo la versión estable.** La candidata v1.2.0-rc2 mejora la
-navegación por Listas y Ajustes, y conserva las traducciones español/inglés y la
-corrección de Actividad de RC1. Seguirá como pre-release hasta la prueba física
-pendiente en el Motorola Edge 40 Pro. Amplía v1.0.0 con un catálogo de fuentes
-de bloqueo DNS auditables, descargables y reversibles. Anonymized DNSCrypt y ODoH
-siguen fuera de la interfaz pública hasta contar con validación suficiente.
+**v1.2.0 es la versión estable actual.** La app 0.4.2 y el módulo v1.2.0
+consolidan la lectura rápida y el desplazamiento de Actividad, y la navegación
+ágil por Listas y Ajustes. La interfaz Android y la WebUI están disponibles en
+español e inglés. El usuario confirmó en su Motorola Edge 40 Pro que Actividad
+carga y que Listas y Ajustes volvieron a abrir con fluidez; esto no equivale a
+una validación exhaustiva de todas las funciones o dispositivos. Amplía v1.0.0
+con un catálogo de fuentes de bloqueo DNS auditables, descargables y reversibles.
+Anonymized DNSCrypt y ODoH siguen fuera de la interfaz pública hasta contar con
+validación suficiente.
 
 Incluye:
 
@@ -138,8 +141,10 @@ pérdida de Wi‑Fi, red móvil ni conectividad.
 El módulo instalable se publica en la sección **Releases** del repositorio:
 
 ```text
-DNSCrypt-Manager-v1.1.0.zip
-DNSCrypt-Manager-v1.1.0.zip.sha256
+DNSCrypt-Manager-v1.2.0.zip
+DNSCrypt-Manager-v1.2.0.zip.sha256
+DNSCrypt-Manager-Android-v0.4.2-debug.apk
+DNSCrypt-Manager-Android-v0.4.2-debug.apk.sha256
 ```
 
 Verificá siempre el ZIP con el archivo `.sha256` que acompaña a la misma release. El workflow de publicación reconstruye el módulo desde el código fuente, descarga y valida el binario oficial ARM64 de `dnscrypt-proxy` y genera un checksum nuevo para ese build exacto.

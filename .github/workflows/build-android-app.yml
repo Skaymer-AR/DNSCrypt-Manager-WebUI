@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-module-candidate:
+  build-module-release:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -31,9 +31,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             zip unzip binutils file iproute2 nodejs python3 ca-certificates
 
-      - name: Run module gate and package candidate
+      - name: Run module gate and package stable release
         env:
-          DCM_OUTPUT: ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0-rc2.zip
+          DCM_OUTPUT: ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0.zip
         shell: bash
         run: |
           set -euo pipefail
@@ -41,18 +41,18 @@ jobs:
           test -s "$DCM_OUTPUT"
           unzip -tq "$DCM_OUTPUT"
           unzip -p "$DCM_OUTPUT" module.prop | tr -d '\r' > "$RUNNER_TEMP/module.prop"
-          grep -qx 'version=v1.2.0-rc2' "$RUNNER_TEMP/module.prop"
-          grep -qx 'versionCode=12002' "$RUNNER_TEMP/module.prop"
+          grep -qx 'version=v1.2.0' "$RUNNER_TEMP/module.prop"
+          grep -qx 'versionCode=12003' "$RUNNER_TEMP/module.prop"
           module_zip="$(basename "$DCM_OUTPUT")"
           (cd "$(dirname "$DCM_OUTPUT")" && sha256sum "$module_zip" > "$module_zip.sha256")
 
-      - name: Upload module candidate
+      - name: Upload module release package
         uses: actions/upload-artifact@v4
         with:
-          name: DNSCrypt-Manager-v1.2.0-rc2-candidate
+          name: DNSCrypt-Manager-v1.2.0-release
           path: |
-            ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0-rc2.zip
-            ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0-rc2.zip.sha256
+            ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0.zip
+            ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0.zip.sha256
             ${{ runner.temp }}/build-module.log
           if-no-files-found: error
           retention-days: 14
@@ -94,10 +94,10 @@ jobs:
           set -euo pipefail
           apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           candidate="android-app/app/build/outputs/apk/debug/app-debug.apk"
-          previous="$RUNNER_TEMP/previous-DNSCrypt-Manager-Android-v0.4.0-debug.apk"
+          previous="$RUNNER_TEMP/previous-DNSCrypt-Manager-Android-v0.4.1-debug.apk"
           curl --fail --location --retry 3 --silent --show-error \
             --output "$previous" \
-            "https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/download/v1.2.0-rc1/DNSCrypt-Manager-Android-v0.4.0-debug.apk"
+            "https://github.com/Skaymer-AR/DNSCrypt-Manager-WebUI/releases/download/v1.2.0-rc2/DNSCrypt-Manager-Android-v0.4.1-debug.apk"
           candidate_cert="$("$apksigner" verify --print-certs "$candidate" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr 'A-F' 'a-f')"
           previous_cert="$("$apksigner" verify --print-certs "$previous" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr 'A-F' 'a-f')"
           test -n "$candidate_cert"
@@ -105,8 +105,8 @@ jobs:
           {
             echo "### Android APK signing compatibility"
             echo
-            echo "- Previous release APK: \`v1.2.0-rc1\`"
-            echo "- Candidate SHA-256 certificate: \`$candidate_cert\`"
+            echo "- Previous release APK: \`v1.2.0-rc2\`"
+            echo "- Stable candidate SHA-256 certificate: \`$candidate_cert\`"
             echo "- Previous SHA-256 certificate: \`$previous_cert\`"
             if [ "$candidate_cert" = "$previous_cert" ]; then
               echo "- Can install over the previous APK without removing it: **yes**"
@@ -115,9 +115,9 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$candidate_cert" = "$previous_cert" ]; then
-            echo "The candidate APK can update the last published APK in place."
+            echo "The stable APK can update the last published APK in place."
           else
-            echo "::warning::The candidate APK uses a different signing certificate. Install it after uninstalling the old app."
+            echo "::warning::The stable APK uses a different signing certificate. Install it after uninstalling the old app."
           fi
 
       - name: Verify and hash APK
@@ -142,7 +142,7 @@ jobs:
 
   publish-big-update:
     needs:
-      - build-module-candidate
+      - build-module-release
       - build-debug-apk
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Skaymer-AR/DNSCrypt-Manager-WebUI'
     permissions:
@@ -156,7 +156,7 @@ jobs:
       - name: Download verified module ZIP
         uses: actions/download-artifact@v4
         with:
-          name: DNSCrypt-Manager-v1.2.0-rc2-candidate
+          name: DNSCrypt-Manager-v1.2.0-release
           path: ${{ runner.temp }}/module
 
       - name: Download Android APK
@@ -172,40 +172,40 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$ASSETS"
-          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.2.0-rc2.zip" "$ASSETS/"
-          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.2.0-rc2.zip.sha256" "$ASSETS/"
-          cp "$RUNNER_TEMP/android/app-debug.apk" "$ASSETS/DNSCrypt-Manager-Android-v0.4.1-debug.apk"
-          cp release/v1.2.0-rc2/RELEASE_NOTES_ES.md "$ASSETS/"
-          cp release/v1.2.0-rc2/RELEASE_NOTES_EN.md "$ASSETS/"
+          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.2.0.zip" "$ASSETS/"
+          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.2.0.zip.sha256" "$ASSETS/"
+          cp "$RUNNER_TEMP/android/app-debug.apk" "$ASSETS/DNSCrypt-Manager-Android-v0.4.2-debug.apk"
+          cp release/v1.2.0/RELEASE_NOTES_ES.md "$ASSETS/"
+          cp release/v1.2.0/RELEASE_NOTES_EN.md "$ASSETS/"
 
-          unzip -tq "$ASSETS/DNSCrypt-Manager-v1.2.0-rc2.zip"
-          unzip -p "$ASSETS/DNSCrypt-Manager-v1.2.0-rc2.zip" module.prop | tr -d '\r' > "$RUNNER_TEMP/release-module.prop"
-          grep -qx 'version=v1.2.0-rc2' "$RUNNER_TEMP/release-module.prop"
-          grep -qx 'versionCode=12002' "$RUNNER_TEMP/release-module.prop"
-          grep -Eq '^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*9[[:space:]]*$' android-app/app/build.gradle.kts
-          grep -Eq '^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"0[.]4[.]1"[[:space:]]*$' android-app/app/build.gradle.kts
-          test -s "$ASSETS/DNSCrypt-Manager-Android-v0.4.1-debug.apk"
-          (cd "$ASSETS" && sha256sum DNSCrypt-Manager-Android-v0.4.1-debug.apk > DNSCrypt-Manager-Android-v0.4.1-debug.apk.sha256)
-          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-v1.2.0-rc2.zip.sha256)
-          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-Android-v0.4.1-debug.apk.sha256)
-          test -s release/v1.2.0-rc2/RELEASE_NOTES.md
+          unzip -tq "$ASSETS/DNSCrypt-Manager-v1.2.0.zip"
+          unzip -p "$ASSETS/DNSCrypt-Manager-v1.2.0.zip" module.prop | tr -d '\r' > "$RUNNER_TEMP/release-module.prop"
+          grep -qx 'version=v1.2.0' "$RUNNER_TEMP/release-module.prop"
+          grep -qx 'versionCode=12003' "$RUNNER_TEMP/release-module.prop"
+          grep -Eq '^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*10[[:space:]]*$' android-app/app/build.gradle.kts
+          grep -Eq '^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"0[.]4[.]2"[[:space:]]*$' android-app/app/build.gradle.kts
+          test -s "$ASSETS/DNSCrypt-Manager-Android-v0.4.2-debug.apk"
+          (cd "$ASSETS" && sha256sum DNSCrypt-Manager-Android-v0.4.2-debug.apk > DNSCrypt-Manager-Android-v0.4.2-debug.apk.sha256)
+          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-v1.2.0.zip.sha256)
+          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-Android-v0.4.2-debug.apk.sha256)
+          test -s release/v1.2.0/RELEASE_NOTES.md
           test -s "$ASSETS/RELEASE_NOTES_ES.md"
           test -s "$ASSETS/RELEASE_NOTES_EN.md"
 
-      - name: Publish GitHub prerelease
+      - name: Publish GitHub stable release
         env:
           GH_TOKEN: ${{ github.token }}
           ASSETS: ${{ runner.temp }}/release-assets
         shell: bash
         run: |
           set -euo pipefail
-          TAG='v1.2.0-rc2'
+          TAG='v1.2.0'
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "La pre-release $TAG ya existe; se actualizan las notas sin cambiar sus binarios."
+            echo "La release $TAG ya existe; se actualizan las notas sin cambiar sus binarios."
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --title 'DNSCrypt Manager Big Update 1.2.0 RC2 — Android 0.4.1' \
-              --notes-file release/v1.2.0-rc2/RELEASE_NOTES.md
+              --title 'DNSCrypt Manager Big Update 1.2.0 — Android 0.4.2' \
+              --notes-file release/v1.2.0/RELEASE_NOTES.md
             exit 0
           fi
           if git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
@@ -215,6 +215,5 @@ jobs:
           gh release create "$TAG" "$ASSETS"/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DNSCrypt Manager Big Update 1.2.0 RC2 — Android 0.4.1' \
-            --notes-file release/v1.2.0-rc2/RELEASE_NOTES.md \
-            --prerelease
+            --title 'DNSCrypt Manager Big Update 1.2.0 — Android 0.4.2' \
+            --notes-file release/v1.2.0/RELEASE_NOTES.md
