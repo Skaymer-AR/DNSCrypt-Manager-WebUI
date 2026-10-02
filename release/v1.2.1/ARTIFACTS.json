@@ -1,0 +1,34 @@
+{
+  "files": [
+    {
+      "name": "DNSCrypt-Manager-Android-v0.4.3-debug.apk",
+      "bytes": 57172245,
+      "sha256": "bd8c2eec410cd47209c240c287a1b3fa3be4f2d19127251e2b0d9dd43d318276"
+    },
+    {
+      "name": "DNSCrypt-Manager-v1.2.1.zip",
+      "bytes": 4941564,
+      "sha256": "3c3951ab102f9b3ad4422bf864d897ab3a11dee4cdcb38583d8ff409996b05a0"
+    }
+  ],
+  "apk_certificate_sha256": "65ce7b7af5b971d4898330ea2481d9210b21d1517dc5230075a0a6e73083da26",
+  "previous_apk_certificate_sha256": "899d611b5a3a9c7b0dddaa8a1d6706c1ef3eb2e58d640f4a103694c4c9331313",
+  "can_update_previous_apk_in_place": false,
+  "jdk": 17,
+  "gradle": "8.9",
+  "compile_sdk": 35,
+  "functional_tests_run": false,
+  "physical_device_test_run": false,
+  "release": {
+    "tag": "v1.2.1",
+    "status": "stable",
+    "preserves_previously_delivered_binaries": true
+  },
+  "user_report": {
+    "date": "2026-10-02",
+    "reported_testing_delivery": true,
+    "requested_stable_release": true,
+    "performance_timings_provided": false,
+    "exhaustive_coverage_reported": false
+  }
+}

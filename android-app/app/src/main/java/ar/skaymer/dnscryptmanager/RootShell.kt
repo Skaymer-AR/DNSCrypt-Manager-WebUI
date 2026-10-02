@@ -167,6 +167,11 @@ internal class RootShell(private val context: Context, private val tempDirectory
             override val args = listOf("allowlist", "remove", domain.lowercase())
             override val timeoutSeconds = 45L
         }
+        data class DomainRule(val domain: String, val allow: Boolean) : Command {
+            init { require(validDomain(domain)) }
+            override val args = listOf("catalog", "domain-rule", if (allow) "allow" else "block", domain.lowercase())
+            override val timeoutSeconds = 600L
+        }
 
         data class SetProvider(val provider: String) : Command {
             init { require(provider in PROVIDERS) }

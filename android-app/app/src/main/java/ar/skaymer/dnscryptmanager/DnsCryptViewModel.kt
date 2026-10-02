@@ -284,6 +284,17 @@ internal class DnsCryptViewModel(application: Application) : AndroidViewModel(ap
         afterSuccess = { _state.value = _state.value.copy(allowlist = repository.loadAllowlist()) },
     )
 
+    fun setDomainRule(domain: String, allow: Boolean) = runAction(
+        action = app.getString(if (allow) R.string.vmodel_domain_allow_action else R.string.vmodel_domain_block_action),
+        success = app.getString(if (allow) R.string.vmodel_domain_allowed else R.string.vmodel_domain_blocked),
+        operation = { repository.setDomainRule(domain, allow) },
+        afterSuccess = {
+            _state.value = _state.value.copy(allowlist = repository.loadAllowlist(), allowlistLoaded = true)
+            refreshSnapshot()
+        },
+        afterFailure = { refreshSnapshot() },
+    )
+
     fun setProvider(provider: String, nextDnsId: String = "") = runAction(
         action = app.getString(R.string.vmodel_provider_action),
         success = app.getString(R.string.vmodel_provider_done),

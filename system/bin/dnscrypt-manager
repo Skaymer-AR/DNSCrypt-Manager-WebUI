@@ -1396,6 +1396,7 @@ DNSCrypt Manager - comandos
   Catalogo de listas (v0.2.0-RC2):
     catalog list [--json][--search S][--category C][--maintainer M][--enabled][--recommended][--archived]
     catalog info <id> | enable <id> | disable <id>
+    catalog domain-rule {allow|block} <dom>   (permiso manual o bloqueo manual)
     catalog group <enable|disable> <Security|Privacy|ParentalControl|dcm|RethinkUnassigned>
     catalog update [id|enabled|all] | download-all --confirmed
     catalog download-all status --json | compile

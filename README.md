@@ -10,15 +10,19 @@ Compatible con **KernelSU**, **KernelSU Next**, **APatch** (WebUI completa) y **
 
 ## Estado del proyecto
 
-**v1.2.0 es la versión estable actual.** La app 0.4.2 y el módulo v1.2.0
-consolidan la lectura rápida y el desplazamiento de Actividad, y la navegación
-ágil por Listas y Ajustes. La interfaz Android y la WebUI están disponibles en
-español e inglés. El usuario confirmó en su Motorola Edge 40 Pro que Actividad
-carga y que Listas y Ajustes volvieron a abrir con fluidez; esto no equivale a
-una validación exhaustiva de todas las funciones o dispositivos. Amplía v1.0.0
-con un catálogo de fuentes de bloqueo DNS auditables, descargables y reversibles.
+**v1.2.1 es la versión estable actual.** La app 0.4.3 y el módulo v1.2.1
+agregan el escudo verde menta y la selección Permitir/Bloquear al tocar un
+dominio en Actividad. El usuario informó que probó esta entrega y solicitó
+publicarla como estable. Se mantienen la lectura rápida de Actividad y la
+navegación por Listas y Ajustes de la versión anterior. La interfaz Android y
+la WebUI están disponibles en español e inglés. La confirmación del usuario
+no representa una validación exhaustiva de todas las funciones o dispositivos.
+Amplía v1.0.0 con un catálogo de fuentes de bloqueo DNS auditables,
+descargables y reversibles.
 Anonymized DNSCrypt y ODoH siguen fuera de la interfaz pública hasta contar con
 validación suficiente.
+
+Instalá el APK y el ZIP del módulo por separado para usar las reglas manuales de Actividad.
 
 Incluye:
 
@@ -124,6 +128,8 @@ su -c 'dnscrypt-manager catalog update enabled'           # actualiza fuentes ac
 su -c 'dnscrypt-manager catalog disable hagezi_multi_pro'
 su -c 'dnscrypt-manager catalog rollback hagezi_multi_pro'
 su -c 'dnscrypt-manager allowlist add example.org'
+su -c 'dnscrypt-manager catalog domain-rule allow example.org'
+su -c 'dnscrypt-manager catalog domain-rule block ads.example'
 su -c 'dnscrypt-manager catalog manifest'
 ```
 
@@ -141,10 +147,10 @@ pérdida de Wi‑Fi, red móvil ni conectividad.
 El módulo instalable se publica en la sección **Releases** del repositorio:
 
 ```text
-DNSCrypt-Manager-v1.2.0.zip
-DNSCrypt-Manager-v1.2.0.zip.sha256
-DNSCrypt-Manager-Android-v0.4.2-debug.apk
-DNSCrypt-Manager-Android-v0.4.2-debug.apk.sha256
+DNSCrypt-Manager-v1.2.1.zip
+DNSCrypt-Manager-v1.2.1.zip.sha256
+DNSCrypt-Manager-Android-v0.4.3-debug.apk
+DNSCrypt-Manager-Android-v0.4.3-debug.apk.sha256
 ```
 
 Verificá siempre el ZIP con el archivo `.sha256` que acompaña a la misma release. El workflow de publicación reconstruye el módulo desde el código fuente, descarga y valida el binario oficial ARM64 de `dnscrypt-proxy` y genera un checksum nuevo para ese build exacto.
@@ -158,7 +164,7 @@ Verificá siempre el ZIP con el archivo `.sha256` que acompaña a la misma relea
 
 ## Instalación
 
-1. Descargá `DNSCrypt-Manager-release.zip` desde **Releases**.
+1. Descargá `DNSCrypt-Manager-v1.2.1.zip` desde **Releases**.
 2. Instalalo desde KernelSU, APatch o Magisk.
 3. Reiniciá el dispositivo.
 4. Abrí la WebUI y ejecutá **Probar DNS**.

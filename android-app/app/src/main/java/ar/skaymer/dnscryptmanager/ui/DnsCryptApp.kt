@@ -46,6 +46,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -192,12 +193,7 @@ internal fun DnsCryptApp(viewModel: DnsCryptViewModel = viewModel()) {
                     connectionMode = connectionMode,
                     onConnectionModeChange = { connectionMode = it },
                     onRefreshConnections = viewModel::refreshConnections,
-                    allowlistedDomains = state.allowlist.toSet(),
-                    allowlistReady = state.allowlistLoaded,
-                    onToggleDomain = { domain ->
-                        if (domain.lowercase(Locale.ROOT) in state.allowlist.map { it.lowercase(Locale.ROOT) }.toSet()) viewModel.removeAllowlist(domain)
-                        else viewModel.addAllowlist(domain)
-                    },
+                    onSetDomainRule = viewModel::setDomainRule,
                 )
                 Tab.FIREWALL -> FirewallScreen(
                     state = state,
@@ -580,9 +576,7 @@ private fun ActivityScreen(
     connectionMode: Boolean,
     onConnectionModeChange: (Boolean) -> Unit,
     onRefreshConnections: () -> Unit,
-    allowlistedDomains: Set<String>,
-    allowlistReady: Boolean,
-    onToggleDomain: (String) -> Unit,
+    onSetDomainRule: (String, Boolean) -> Unit,
 ) {
     val snapshot = state.snapshot ?: return
     val context = LocalContext.current
@@ -723,7 +717,7 @@ private fun ActivityScreen(
                 ActivityRow(
                     it,
                     onClick = { selectedEvent = it },
-                    enabled = allowlistReady && state.busyAction == null && validDomainForForm(it.domain.lowercase(Locale.ROOT)),
+                    enabled = state.busyAction == null && validDomainForForm(it.domain.lowercase(Locale.ROOT)),
                 )
             } }
         }
@@ -745,13 +739,11 @@ private fun ActivityScreen(
         )
     }
     selectedEvent?.let { event ->
-        val isAllowlisted = event.domain.lowercase(Locale.ROOT) in allowlistedDomains.map { it.lowercase(Locale.ROOT) }.toSet()
-        ConfirmDialog(
-            title = if (isAllowlisted) appText(R.string.activity_remove_exception_title) else appText(R.string.activity_allow_domain_title, event.domain),
-            body = if (isAllowlisted) appText(R.string.activity_remove_exception_body, event.domain) else appText(R.string.activity_allow_domain_body, event.domain),
-            confirm = if (isAllowlisted) appText(R.string.activity_remove_exception) else appText(R.string.activity_allow_domain),
+        DomainActionDialog(
+            domain = event.domain,
             onDismiss = { selectedEvent = null },
-            onConfirm = { selectedEvent = null; onToggleDomain(event.domain) },
+            onAllow = { selectedEvent = null; onSetDomainRule(event.domain, true) },
+            onBlock = { selectedEvent = null; onSetDomainRule(event.domain, false) },
         )
     }
 }
@@ -1832,6 +1824,43 @@ private fun ConfirmDialog(
         text = { Text(body) },
         confirmButton = { Button(onClick = onConfirm) { Text(confirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(appText(R.string.common_back)) } },
+        containerColor = MaterialTheme.colorScheme.surface,
+    )
+}
+
+@Composable
+private fun DomainActionDialog(
+    domain: String,
+    onDismiss: () -> Unit,
+    onAllow: () -> Unit,
+    onBlock: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(appText(R.string.activity_domain_action_title, domain)) },
+        text = { Text(appText(R.string.activity_domain_action_body)) },
+        confirmButton = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                OutlinedButton(onClick = onAllow, modifier = Modifier.fillMaxWidth()) {
+                    Text(appText(R.string.activity_domain_allow))
+                }
+                Button(
+                    onClick = onBlock,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
+                    Text(appText(R.string.activity_domain_block))
+                }
+                TextButton(onClick = onDismiss) { Text(appText(R.string.common_back)) }
+            }
+        },
         containerColor = MaterialTheme.colorScheme.surface,
     )
 }

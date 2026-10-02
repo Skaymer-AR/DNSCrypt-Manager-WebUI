@@ -314,6 +314,9 @@ internal class DnsCryptRepository(
 
     suspend fun removeAllowlist(domain: String): RootShell.Result = shell.run(RootShell.Command.AllowlistRemove(domain))
 
+    suspend fun setDomainRule(domain: String, allow: Boolean): RootShell.Result =
+        shell.run(RootShell.Command.DomainRule(domain, allow))
+
     suspend fun setProvider(provider: String, nextDnsId: String = ""): RootShell.Result {
         val configured = if (provider == "nextdns") {
             shell.run(RootShell.Command.SetNextDns(nextDnsId))

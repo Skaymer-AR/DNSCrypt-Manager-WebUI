@@ -1793,6 +1793,144 @@ cat_group_apply() {
   echo "OK: categoría actualizada; $_cga_changed fuentes modificadas, $_cga_skipped omitidas por no estar preparadas o ser incompatibles."
 }
 
+cat_domain_rule_apply() (
+  _cdr_action="$1"
+  _cdr_domain=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
+  case "$_cdr_action" in
+    allow|block) : ;;
+    *) echo "Uso: dnscrypt-manager catalog domain-rule {allow|block} <dom>" >&2; return 2 ;;
+  esac
+  sec_valid_domain "$_cdr_domain" || {
+    echo "ERROR: dominio invalido: '$2' (usa un dominio sin URL, IP ni comodines)" >&2
+    return 1
+  }
+  cat_init_dirs || return 1
+  sec_init_dirs || return 1
+
+  _cdr_backup_dir="$RUN_DIR/domain-rule-backup.$$"
+  (umask 077; mkdir "$_cdr_backup_dir") || {
+    echo "ERROR: no se pudieron preparar las reglas del dominio." >&2
+    return 1
+  }
+  _cdr_allow_next="$ALLOWLIST_FILE.next.$$"
+  _cdr_block_next="$CAT_BLACKLIST.next.$$"
+  _cdr_exception_next="$EXCEPTIONS_FILE.next.$$"
+  _cdr_restore=0
+  _cdr_allow_present=0
+  _cdr_exception_present=0
+  _cdr_lock_held=0
+
+  cat_domain_rule_restore_inputs() {
+    if [ "$_cdr_allow_present" = "1" ]; then
+      cp "$_cdr_backup_dir/allowlist" "$ALLOWLIST_FILE.restore.$$" &&
+        chmod 0600 "$ALLOWLIST_FILE.restore.$$" &&
+        mv -f "$ALLOWLIST_FILE.restore.$$" "$ALLOWLIST_FILE" ||
+        log_msg "catalog domain-rule: allowlist rollback failed"
+    else
+      rm -f "$ALLOWLIST_FILE" "$ALLOWLIST_FILE.restore.$$"
+    fi
+    cp "$_cdr_backup_dir/blacklist" "$CAT_BLACKLIST.restore.$$" &&
+      chmod 0600 "$CAT_BLACKLIST.restore.$$" &&
+      mv -f "$CAT_BLACKLIST.restore.$$" "$CAT_BLACKLIST" ||
+      log_msg "catalog domain-rule: blacklist rollback failed"
+    if [ "$_cdr_exception_present" = "1" ]; then
+      cp "$_cdr_backup_dir/exceptions" "$EXCEPTIONS_FILE.restore.$$" &&
+        chmod 0600 "$EXCEPTIONS_FILE.restore.$$" &&
+        mv -f "$EXCEPTIONS_FILE.restore.$$" "$EXCEPTIONS_FILE" ||
+        log_msg "catalog domain-rule: exception rollback failed"
+    else
+      rm -f "$EXCEPTIONS_FILE" "$EXCEPTIONS_FILE.restore.$$"
+    fi
+  }
+  cat_domain_rule_cleanup() {
+    [ "$_cdr_restore" = "1" ] && cat_domain_rule_restore_inputs
+    rm -f "$_cdr_allow_next" "$_cdr_block_next" "$_cdr_exception_next" \
+      "$ALLOWLIST_FILE.restore.$$" "$CAT_BLACKLIST.restore.$$" "$EXCEPTIONS_FILE.restore.$$"
+    rm -rf "$_cdr_backup_dir"
+    [ "$_cdr_lock_held" = "1" ] && rm -rf "$CAT_COMPILE_LOCK"
+  }
+  trap 'cat_domain_rule_cleanup' 0
+  trap 'exit 1' HUP INT TERM
+
+  if cat_download_all_running; then
+    echo "ERROR: esperá a que termine la descarga global antes de aplicar la regla." >&2
+    return 1
+  fi
+  if ! mkdir "$CAT_COMPILE_LOCK" 2>/dev/null; then
+    if _cat_lock_live; then
+      echo "ERROR: ya se están aplicando listas DNS; reintentá cuando termine." >&2
+      return 1
+    fi
+    rm -rf "$CAT_COMPILE_LOCK" 2>/dev/null
+    mkdir "$CAT_COMPILE_LOCK" 2>/dev/null || {
+      echo "ERROR: no se pudo reservar la actualización de listas DNS." >&2
+      return 1
+    }
+  fi
+  _cdr_lock_held=1
+  printf '%s\n' "$$" > "$CAT_COMPILE_LOCK/pid" || return 1
+  sec_now > "$CAT_COMPILE_LOCK/started" || return 1
+  _cdr_free=$(cat_free_kb)
+  if [ "$_cdr_free" -lt "$CAT_MIN_FREE_KB" ] 2>/dev/null; then
+    echo "ERROR: no hay suficiente espacio libre para aplicar la regla DNS." >&2
+    return 1
+  fi
+
+  if [ -f "$ALLOWLIST_FILE" ]; then
+    cp "$ALLOWLIST_FILE" "$_cdr_backup_dir/allowlist" || {
+      echo "ERROR: no se pudieron guardar los permisos anteriores." >&2
+      return 1
+    }
+    _cdr_allow_present=1
+  else
+    : > "$_cdr_backup_dir/allowlist" || return 1
+  fi
+  cp "$CAT_BLACKLIST" "$_cdr_backup_dir/blacklist" || {
+      echo "ERROR: no se pudieron guardar las reglas anteriores." >&2
+      return 1
+    }
+  if [ -f "$EXCEPTIONS_FILE" ]; then
+    cp "$EXCEPTIONS_FILE" "$_cdr_backup_dir/exceptions" || {
+      echo "ERROR: no se pudieron guardar las reglas temporales anteriores." >&2
+      return 1
+    }
+    _cdr_exception_present=1
+  else
+    : > "$_cdr_backup_dir/exceptions" || return 1
+  fi
+  _cdr_restore=1
+
+  if [ "$_cdr_action" = "allow" ]; then
+    { cat "$_cdr_backup_dir/allowlist"; printf '%s\n' "$_cdr_domain"; } | sort -u > "$_cdr_allow_next" || return 1
+    awk -v d="$_cdr_domain" '$0 != d { print }' "$_cdr_backup_dir/blacklist" > "$_cdr_block_next" || return 1
+  else
+    awk -v d="$_cdr_domain" '$0 != d { print }' "$_cdr_backup_dir/allowlist" > "$_cdr_allow_next" || return 1
+    { cat "$_cdr_backup_dir/blacklist"; printf '%s\n' "$_cdr_domain"; } | sort -u > "$_cdr_block_next" || return 1
+    if [ "$_cdr_exception_present" = "1" ]; then
+      awk -F '\t' -v d="$_cdr_domain" '$1 != d { print }' "$_cdr_backup_dir/exceptions" > "$_cdr_exception_next" || return 1
+      chmod 0600 "$_cdr_exception_next" || return 1
+    fi
+  fi
+  chmod 0600 "$_cdr_allow_next" "$_cdr_block_next" || return 1
+  mv -f "$_cdr_allow_next" "$ALLOWLIST_FILE" || return 1
+  mv -f "$_cdr_block_next" "$CAT_BLACKLIST" || return 1
+  if [ "$_cdr_action" = "block" ] && [ "$_cdr_exception_present" = "1" ]; then
+    mv -f "$_cdr_exception_next" "$EXCEPTIONS_FILE" || return 1
+  fi
+  sec_regen_and_reload || {
+    echo "ERROR: no se pudo aplicar la regla DNS; se restauraron las reglas anteriores." >&2
+    return 1
+  }
+
+  _cdr_restore=0
+  if [ "$_cdr_action" = "allow" ]; then
+    echo "OK: dominio $_cdr_domain permitido por vos."
+  else
+    echo "OK: dominio $_cdr_domain bloqueado manualmente."
+  fi
+  log_msg "catalog domain-rule $_cdr_action $_cdr_domain"
+)
+
 cmd_catalog() {
   cat_init_dirs
   _sub="${1:-list}"; shift 2>/dev/null
@@ -2059,6 +2197,14 @@ cmd_catalog() {
       echo "  last_success    = $(srcst_field "$_id" 4)" ;;
     test) cat_test_source "$1" ;;
 
+    domain-rule)
+      _action="$1"; _domain="$2"
+      [ -n "$_action" ] && [ -n "$_domain" ] || {
+        echo "Uso: dnscrypt-manager catalog domain-rule {allow|block} <dom>" >&2
+        return 2
+      }
+      cat_domain_rule_apply "$_action" "$_domain" ;;
+
     custom)
       _cs="$1"; shift 2>/dev/null
       case "$_cs" in
@@ -2076,7 +2222,7 @@ cmd_catalog() {
       esac ;;
 
     *)
-      echo "Uso: dnscrypt-manager catalog {list ...|info <id>|enable <id>|disable <id>|group <enable|disable> <categoria>|update [id|enabled|all]|download-all --confirmed|download-all status --json|rollback <id>|manifest|provenance|compile|conflicts|metrics|test|custom ...|sync}" >&2
+      echo "Uso: dnscrypt-manager catalog {list ...|info <id>|enable <id>|disable <id>|group <enable|disable> <categoria>|update [id|enabled|all]|download-all --confirmed|download-all status --json|rollback <id>|manifest|provenance|compile|conflicts|metrics|test|custom ...|domain-rule {allow|block} <dom>|sync}" >&2
       return 1 ;;
   esac
 }

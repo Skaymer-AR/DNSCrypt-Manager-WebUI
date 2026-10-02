@@ -33,7 +33,7 @@ jobs:
 
       - name: Run module gate and package stable release
         env:
-          DCM_OUTPUT: ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0.zip
+          DCM_OUTPUT: ${{ runner.temp }}/DNSCrypt-Manager-v1.2.1.zip
         shell: bash
         run: |
           set -euo pipefail
@@ -41,18 +41,18 @@ jobs:
           test -s "$DCM_OUTPUT"
           unzip -tq "$DCM_OUTPUT"
           unzip -p "$DCM_OUTPUT" module.prop | tr -d '\r' > "$RUNNER_TEMP/module.prop"
-          grep -qx 'version=v1.2.0' "$RUNNER_TEMP/module.prop"
-          grep -qx 'versionCode=12003' "$RUNNER_TEMP/module.prop"
+          grep -qx 'version=v1.2.1' "$RUNNER_TEMP/module.prop"
+          grep -qx 'versionCode=12004' "$RUNNER_TEMP/module.prop"
           module_zip="$(basename "$DCM_OUTPUT")"
           (cd "$(dirname "$DCM_OUTPUT")" && sha256sum "$module_zip" > "$module_zip.sha256")
 
       - name: Upload module release package
         uses: actions/upload-artifact@v4
         with:
-          name: DNSCrypt-Manager-v1.2.0-release
+          name: DNSCrypt-Manager-v1.2.1-release
           path: |
-            ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0.zip
-            ${{ runner.temp }}/DNSCrypt-Manager-v1.2.0.zip.sha256
+            ${{ runner.temp }}/DNSCrypt-Manager-v1.2.1.zip
+            ${{ runner.temp }}/DNSCrypt-Manager-v1.2.1.zip.sha256
             ${{ runner.temp }}/build-module.log
           if-no-files-found: error
           retention-days: 14
@@ -156,7 +156,7 @@ jobs:
       - name: Download verified module ZIP
         uses: actions/download-artifact@v4
         with:
-          name: DNSCrypt-Manager-v1.2.0-release
+          name: DNSCrypt-Manager-v1.2.1-release
           path: ${{ runner.temp }}/module
 
       - name: Download Android APK
@@ -172,23 +172,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$ASSETS"
-          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.2.0.zip" "$ASSETS/"
-          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.2.0.zip.sha256" "$ASSETS/"
-          cp "$RUNNER_TEMP/android/app-debug.apk" "$ASSETS/DNSCrypt-Manager-Android-v0.4.2-debug.apk"
-          cp release/v1.2.0/RELEASE_NOTES_ES.md "$ASSETS/"
-          cp release/v1.2.0/RELEASE_NOTES_EN.md "$ASSETS/"
+          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.2.1.zip" "$ASSETS/"
+          cp "$RUNNER_TEMP/module/DNSCrypt-Manager-v1.2.1.zip.sha256" "$ASSETS/"
+          cp "$RUNNER_TEMP/android/app-debug.apk" "$ASSETS/DNSCrypt-Manager-Android-v0.4.3-debug.apk"
+          cp release/v1.2.1/RELEASE_NOTES_ES.md "$ASSETS/"
+          cp release/v1.2.1/RELEASE_NOTES_EN.md "$ASSETS/"
 
-          unzip -tq "$ASSETS/DNSCrypt-Manager-v1.2.0.zip"
-          unzip -p "$ASSETS/DNSCrypt-Manager-v1.2.0.zip" module.prop | tr -d '\r' > "$RUNNER_TEMP/release-module.prop"
-          grep -qx 'version=v1.2.0' "$RUNNER_TEMP/release-module.prop"
-          grep -qx 'versionCode=12003' "$RUNNER_TEMP/release-module.prop"
-          grep -Eq '^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*10[[:space:]]*$' android-app/app/build.gradle.kts
-          grep -Eq '^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"0[.]4[.]2"[[:space:]]*$' android-app/app/build.gradle.kts
-          test -s "$ASSETS/DNSCrypt-Manager-Android-v0.4.2-debug.apk"
-          (cd "$ASSETS" && sha256sum DNSCrypt-Manager-Android-v0.4.2-debug.apk > DNSCrypt-Manager-Android-v0.4.2-debug.apk.sha256)
-          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-v1.2.0.zip.sha256)
-          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-Android-v0.4.2-debug.apk.sha256)
-          test -s release/v1.2.0/RELEASE_NOTES.md
+          unzip -tq "$ASSETS/DNSCrypt-Manager-v1.2.1.zip"
+          unzip -p "$ASSETS/DNSCrypt-Manager-v1.2.1.zip" module.prop | tr -d '\r' > "$RUNNER_TEMP/release-module.prop"
+          grep -qx 'version=v1.2.1' "$RUNNER_TEMP/release-module.prop"
+          grep -qx 'versionCode=12004' "$RUNNER_TEMP/release-module.prop"
+          grep -Eq '^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*11[[:space:]]*$' android-app/app/build.gradle.kts
+          grep -Eq '^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"0[.]4[.]3"[[:space:]]*$' android-app/app/build.gradle.kts
+          test -s "$ASSETS/DNSCrypt-Manager-Android-v0.4.3-debug.apk"
+          (cd "$ASSETS" && sha256sum DNSCrypt-Manager-Android-v0.4.3-debug.apk > DNSCrypt-Manager-Android-v0.4.3-debug.apk.sha256)
+          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-v1.2.1.zip.sha256)
+          (cd "$ASSETS" && sha256sum -c DNSCrypt-Manager-Android-v0.4.3-debug.apk.sha256)
+          test -s release/v1.2.1/RELEASE_NOTES.md
           test -s "$ASSETS/RELEASE_NOTES_ES.md"
           test -s "$ASSETS/RELEASE_NOTES_EN.md"
 
@@ -199,13 +199,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG='v1.2.0'
+          TAG='v1.2.1'
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "La release $TAG ya existe; se actualizan las notas sin cambiar sus binarios."
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --title 'DNSCrypt Manager Big Update 1.2.0 — Android 0.4.2' \
-              --notes-file release/v1.2.0/RELEASE_NOTES.md
+              --title 'DNSCrypt Manager Big Update 1.2.1 — Android 0.4.3' \
+              --notes-file release/v1.2.1/RELEASE_NOTES.md
             exit 0
           fi
           if git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
@@ -215,5 +215,5 @@ jobs:
           gh release create "$TAG" "$ASSETS"/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DNSCrypt Manager Big Update 1.2.0 — Android 0.4.2' \
-            --notes-file release/v1.2.0/RELEASE_NOTES.md
+            --title 'DNSCrypt Manager Big Update 1.2.1 — Android 0.4.3' \
+            --notes-file release/v1.2.1/RELEASE_NOTES.md

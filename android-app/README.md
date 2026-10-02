@@ -13,7 +13,7 @@ Aplicación nativa en español e inglés para manejar el módulo DNSCrypt desde 
 - Activar o desactivar una fuente con confirmación antes de cambiar el filtrado.
 - Activar de una vez las fuentes ya preparadas de una categoría; lo que no tenga caché queda apagado y no se descarga en segundo plano.
 - Preparar las cachés de todas las fuentes sin activarlas automáticamente y ver el progreso.
-- Agregar o quitar dominios de la allowlist.
+- Agregar o quitar dominios de la allowlist, o elegir desde Actividad entre permitir o bloquear manualmente un dominio.
 - Elegir Cloudflare, Quad9, AdGuard, Mullvad o un perfil NextDNS y reiniciar el proxy para aplicar el cambio.
 - Revisar qué contiene una copia antes de restaurarla. La actividad DNS no se incluye.
 
@@ -25,7 +25,7 @@ Actividad lee eventos y contadores juntos. El camino rápido conserva dominio, e
 
 ## Límites actuales
 
-- La actividad es de consultas DNS. No muestra conexiones TCP/UDP completas ni identifica de forma confiable qué aplicación originó cada consulta. `Error` significa que el resolver devolvió un código DNS distinto de `NOERROR`; el código concreto se conserva como `return_code` en el JSON exportado. Tocar una fila permite o quita una excepción; la app Android todavía no ofrece un bloqueo manual de un dominio desde Actividad. Para bloquear desde la app, activá en Listas una fuente que incluya el dominio.
+- La actividad es de consultas DNS. No muestra conexiones TCP/UDP completas ni identifica de forma confiable qué aplicación originó cada consulta. `Error` significa que el resolver devolvió un código DNS distinto de `NOERROR`; el código concreto se conserva como `return_code` en el JSON exportado. Tocar una fila permite elegir entre permitir el dominio o bloquearlo manualmente.
 - El firewall bloquea toda la red de una app seleccionada; no filtra dominios ni identifica qué app originó una consulta DNS. Solo se habilita con soporte confirmado para IPv4 e IPv6.
 - Para mostrar el selector local, Android permite consultar los paquetes instalados. La lista y sus nombres se procesan en el teléfono y no se envían a un servidor.
 - Los perfiles de seguridad, el rollback de listas y la validación avanzada siguen disponibles en la WebUI del módulo; todavía no tienen controles nativos propios.
@@ -35,6 +35,8 @@ Actividad lee eventos y contadores juntos. El camino rápido conserva dominio, e
 
 ## Build y evidencia
 
-La versión estable v1.2.0 incluye Android 0.4.2 (versionCode 10) y módulo v1.2.0 (versionCode 12003). El workflow usa JDK 17, Gradle 8.9 y Android SDK 35; en cada PR ejecuta pruebas JVM, compila el APK `debug`, corre los gates del módulo, valida las traducciones y compara el certificado del APK con el publicado en RC2. GitHub Actions informa si se puede instalar como actualización. Si Android rechaza la firma, hay que desinstalar solo la app antes de instalar el APK; eso borra los datos privados de la app, pero no el módulo ni su configuración. El usuario confirmó en el Motorola Edge 40 Pro la carga de Actividad y la fluidez de Listas y Ajustes; CI y ese reporte no son una validación exhaustiva de todos los escenarios ni de otros dispositivos.
+La versión estable Android 0.4.3 (versionCode 11) y módulo v1.2.1 (versionCode 12004) agrega el escudo verde menta como icono y las reglas manuales Permitir/Bloquear desde Actividad. Bloquear quita el permiso permanente y la excepción temporal del mismo dominio. Permitir quita su bloqueo manual. Si falla la aplicación de la regla, el módulo restaura las entradas anteriores. El usuario informó que probó la entrega y solicitó publicarla como estable.
 
-El APK no actualiza el módulo: instalá el APK y el ZIP por separado y verificá los SHA-256 de los dos archivos.
+La entrega v1.2.1 se compiló con JDK 17, Gradle 8.9 y Android SDK 35. Se comprobaron compilación, firma y alineación del APK, sintaxis de los scripts modificados e integridad y estructura del ZIP; no se ejecutaron pruebas funcionales automáticas durante esa compilación. La publicación conserva exactamente los archivos entregados al usuario. La firma del APK 0.4.3 difiere de la del APK 0.4.2 anterior: para pasar desde ese APK hay que desinstalar solo la app. Esto borra los datos privados de la app y conserva el módulo y su configuración DNS. El workflow de GitHub sigue disponible para las comprobaciones automáticas de cambios futuros.
+
+El APK no actualiza el módulo: instalá el APK y el ZIP actualizado por separado. Permitir o bloquear manualmente desde Actividad requiere que el módulo incluya el comando catalog domain-rule. Verificá los SHA-256 de los dos archivos.
