@@ -3,7 +3,8 @@
 # tools/build-module.sh
 #
 # Empaqueta el modulo instalable en:
-#   /home/claude/DNSCrypt-Manager-release.zip
+#   <repositorio>/dist/DNSCrypt-Manager-release.zip
+# DCM_OUTPUT permite elegir otra ruta de salida.
 #
 # Rechaza el empaquetado (exit != 0, SIN generar el ZIP) si:
 #   1. Falta el binario bin/arm64/dnscrypt-proxy, o esta vacio.
@@ -25,7 +26,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$(pwd)"
-OUTPUT="${DCM_OUTPUT:-/home/claude/DNSCrypt-Manager-release.zip}"
+OUTPUT="${DCM_OUTPUT:-$ROOT/dist/DNSCrypt-Manager-release.zip}"
 
 fail() { echo "" >&2; echo "ABORTADO: $*" >&2; exit 1; }
 step() { echo ""; echo "=== $* ==="; }
@@ -236,6 +237,7 @@ find "$STAGE" -maxdepth 2 -name '*.rc2bak' -delete 2>/dev/null
 find "$STAGE" -name 'COLOCAR_BINARIO_AQUI.md' -delete 2>/dev/null
 find "$STAGE" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
 
+mkdir -p "$(dirname "$OUTPUT")" || fail "no se pudo crear el directorio de salida"
 rm -f "$OUTPUT"
 ( cd "$STAGE" && zip -r -X "$OUTPUT" . -x '.*' -x '.ziplog' >"$ZIP_LOG" 2>&1 )
 ZRC=$?

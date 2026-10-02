@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Genera config/dnscrypt-proxy.toml del modulo con stamps calculados
 desde parametros explicitos (no de memoria), y su copia en defaults/."""
-import sys, pathlib
-sys.path.insert(0, "/home/claude/tools")
+import pathlib
 from stamps import encode_doh, decode
 
 # Parametros publicos de cada proveedor (DoH, puerto 443 implicito).
@@ -133,7 +132,7 @@ cache_neg_max_ttl = 600
 #     prefix = ''
 """
 
-base = pathlib.Path("/home/claude/DNSCrypt-Manager/config")
+base = pathlib.Path(__file__).resolve().parent.parent / "config"
 (base / "dnscrypt-proxy.toml").write_text(TOML)
 (base / "defaults" / "dnscrypt-proxy.toml").write_text(TOML)
 print("TOML escrito (config/ y config/defaults/).")

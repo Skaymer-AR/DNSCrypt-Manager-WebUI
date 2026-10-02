@@ -96,19 +96,17 @@ jobs:
           printf '#!/bin/sh\nexit 0\n' > /tmp/dcm-build-source/tests/smoke-test-webui.sh
           chmod 0755 /tmp/dcm-build-source/tests/smoke-test-cli.sh \
                      /tmp/dcm-build-source/tests/smoke-test-webui.sh
-          sudo mkdir -p /home/claude
-          sudo chown "$USER:$USER" /home/claude
           (
             cd /tmp/dcm-build-source
-            bash tools/build-module.sh
+            DCM_OUTPUT="$RUNNER_TEMP/DNSCrypt-Manager-release.zip" bash tools/build-module.sh
           )
-          test -s /home/claude/DNSCrypt-Manager-release.zip
+          test -s "$RUNNER_TEMP/DNSCrypt-Manager-release.zip"
 
       - name: Verify release layout
         shell: bash
         run: |
           set -euo pipefail
-          ZIP='/home/claude/DNSCrypt-Manager-release.zip'
+          ZIP="$RUNNER_TEMP/DNSCrypt-Manager-release.zip"
           unzip -tq "$ZIP"
           unzip -Z1 "$ZIP" | grep -qx 'module.prop'
           if unzip -Z1 "$ZIP" | grep -Eq '^(tests|tools|fixtures|bootstrap)/'; then
@@ -123,7 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp /home/claude/DNSCrypt-Manager-release.zip dist/
+          cp "$RUNNER_TEMP/DNSCrypt-Manager-release.zip" dist/
           (
             cd dist
             sha256sum DNSCrypt-Manager-release.zip > DNSCrypt-Manager-release.zip.sha256

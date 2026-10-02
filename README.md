@@ -252,4 +252,6 @@ Puntos clave:
 
 **Skaymer AR**
 
-Proyecto creado y mantenido por Skaymer AR.
+Proyecto creado y mantenido por [Skaymer AR](https://github.com/Skaymer-AR).
+La idea, la dirección funcional, las decisiones de producto y las pruebas en
+dispositivo están a cargo de Skaymer AR.

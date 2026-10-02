@@ -73,14 +73,12 @@ jobs:
           printf '#!/bin/sh\nexit 0\n' > /tmp/dcm-build-source/tests/smoke-test-webui.sh
           chmod 0755 /tmp/dcm-build-source/tests/smoke-test-cli.sh \
                      /tmp/dcm-build-source/tests/smoke-test-webui.sh
-          sudo mkdir -p /home/claude
-          sudo chown "$USER:$USER" /home/claude
           (
             cd /tmp/dcm-build-source
-            bash tools/build-module.sh
+            DCM_OUTPUT="$RUNNER_TEMP/DNSCrypt-Manager-release.zip" bash tools/build-module.sh
           )
           mkdir -p /tmp/dcm-release
-          cp /home/claude/DNSCrypt-Manager-release.zip /tmp/dcm-release/
+          cp "$RUNNER_TEMP/DNSCrypt-Manager-release.zip" /tmp/dcm-release/
           (
             cd /tmp/dcm-release
             sha256sum DNSCrypt-Manager-release.zip > DNSCrypt-Manager-release.zip.sha256
